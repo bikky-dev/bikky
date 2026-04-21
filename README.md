@@ -150,5 +150,3 @@ Facts mentioning multiple entities build an implicit graph. The daemon periodica
 ## License
 
 AGPL-3.0 — see [LICENSE](LICENSE).
-
-Built by extracting the memory stack from [agent00](https://github.com/apate-ai/agent00).
