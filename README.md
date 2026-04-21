@@ -8,39 +8,35 @@ mem00 gives your AI coding assistants (GitHub Copilot, Claude Code) long-term me
 
 ## Why mem00 exists
 
-Every engineering team builds institutional knowledge — the kind that doesn't live in documentation. Why that environment variable is set to 7 and not 10. Which migration sequence avoids downtime. The query that caused a P1 last quarter. How the staging database drifts from production. Which service silently drops headers on retry. Who actually owns the billing integration.
+Every engineering team builds institutional knowledge — the kind that doesn't live in documentation. Why that config value is what it is. Which deploy steps to run in which order. What broke last quarter and how it was fixed. Who owns what.
 
-This knowledge lives in people's heads, scattered across chat threads, buried in closed PRs, and lost when engineers switch teams or leave. It's the most valuable and least durable asset a technical organisation has.
+This knowledge lives in people's heads, scattered across chat threads, and buried in closed PRs. When someone switches projects or leaves, it's gone. It's the most valuable and least durable asset a technical organisation has.
 
 ### AI agents make it worse
 
-Every AI coding session starts from zero. An agent spends 20 minutes tracing a timeout through three microservices, discovers the root cause is a misconfigured connection pool, fixes it — and then the session closes. All of that hard-won knowledge evaporates. The next session hits the same wall. The next engineer hits the same wall. Every team member independently rediscovers the same facts, the same gotchas, the same solutions — over and over.
+Every AI coding session starts from zero. An agent spends 20 minutes figuring something out, solves the problem — and then the session closes. That knowledge evaporates. The next session rediscovers the same thing. The next engineer rediscovers it again.
 
-The work gets done, but the *learning* is thrown away. That's an enormous waste.
+The work gets done, but the *learning* is thrown away.
 
 ### Knowledge that compounds
 
-mem00 captures what agents and engineers learn during coding sessions and makes it available to every future session — for every team member — automatically. No manual documentation. No wikis to maintain. No "did anyone write that down?"
+mem00 captures what agents learn during coding sessions and makes it available to every future session — for every team member — automatically. No manual documentation. No wikis to maintain.
 
-When one engineer's agent discovers that your ORM requires a manual migration step for adding non-nullable columns in staging, every agent on the team knows that from their next session onward. When an agent figures out the exact CLI command to tail logs on a specific environment, that command is available to every agent in the org. The debugging session at 2am that uncovered a race condition in the job queue? That context is there the next time anyone touches that code.
+When one engineer's agent figures out a workaround for a tricky edge case, every agent on the team knows it from their next session onward. Each team member is amplified with the experience gathered by every other member. The 50th session on a codebase is dramatically more effective than the 1st — not because of better prompts, but because of accumulated institutional memory.
 
-Each team member is amplified with the experiences and knowledge gathered by every other member. The 50th session on a codebase is dramatically more effective than the 1st — not because of better prompts, but because of accumulated institutional memory.
-
-### How mem00 keeps knowledge accurate
+### Self-curating
 
 Raw accumulation creates noise. mem00 curates knowledge automatically:
 
-- **Deduplication** — content hashing + vector similarity prevents bloat. Store the same fact twice and it reinforces rather than duplicates.
-- **Confidence decay** — facts lose confidence over time with category-specific half-lives (infrastructure: 90 days, observations: 30 days). Stale facts surface for review, not as gospel.
-- **Contradiction detection** — new facts that conflict with existing ones trigger supersession, not silent overwrite.
-- **Session distillation** — recurring patterns across sessions are consolidated into higher-level insights, keeping the knowledge base lean.
-- **Entity graph** — relationships between services, people, and concepts are inferred automatically, enabling richer recall.
+- **Deduplication** — identical or near-identical facts are merged, not duplicated
+- **Confidence decay** — old facts gradually lose weight and surface for review instead of being treated as gospel
+- **Contradiction detection** — new facts that conflict with existing ones replace them, not silently coexist
+- **Distillation** — recurring patterns across sessions are consolidated into higher-level insights
+- **Entity graph** — relationships between concepts are inferred automatically for richer recall
 
-The only human input is occasional verification when a fact is flagged as potentially stale — and even that happens inline during normal work, not as a separate maintenance task.
+### Zero maintenance
 
-### Zero maintenance overhead
-
-mem00 is not a wiki you have to write. Facts are captured as a natural byproduct of engineering work — agents store what they learn as they learn it. The curation pipeline runs autonomously in the background. Install once, and every session gets smarter.
+mem00 is not a wiki you have to write. Facts are captured as a natural byproduct of engineering work. The curation pipeline runs autonomously. Install once, and every session gets smarter.
 
 ---
 
