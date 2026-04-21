@@ -3,6 +3,7 @@
  *
  * Usage:
  *   mem00 mcp        — start MCP server (stdio, for editor integration)
+ *   mem00 daemon     — start background daemon (extraction, consolidation, etc.)
  *   mem00 setup      — interactive setup wizard
  *   mem00 status     — check memory system status
  *   mem00 install    — write MCP config for Copilot / Claude Code
@@ -17,6 +18,17 @@ async function main(): Promise<void> {
     case "mcp":
       await startMcpServer();
       break;
+
+    case "daemon": {
+      const daemon = await import("./daemon/index.js");
+      console.log("🧠 mem00 daemon starting…");
+      await daemon.startDaemon();
+      process.on("SIGINT", () => {
+        daemon.stopDaemon();
+        process.exit(0);
+      });
+      break;
+    }
 
     case "setup":
       console.log("🧠 mem00 setup");
@@ -36,7 +48,7 @@ async function main(): Promise<void> {
 
     default:
       console.error(`Unknown command: ${command}`);
-      console.error("Usage: mem00 [mcp|setup|status|install]");
+      console.error("Usage: mem00 [mcp|daemon|setup|status|install]");
       process.exit(1);
   }
 }

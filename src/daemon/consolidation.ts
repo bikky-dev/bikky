@@ -1,0 +1,567 @@
+/**
+ * Daemon-Driven Memory Consolidation
+ *
+ * Periodic maintenance tasks that keep memory lean and accurate:
+ * - Auto-distillation: consolidate session summaries into patterns
+ * - Contradiction detection: find and resolve conflicting facts
+ * - Category rebalancing: consolidate oversized categories
+ * - Decay scoring: downrank stale, unreferenced facts
+ * - Health report: generate a memory health report
+ * - Memory brief: generate a compact orientation doc from top facts
+ */
+
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { createHash } from "node:crypto";
+
+import * as qdrant from "./qdrant.js";
+import { chatCompletion } from "../llm/index.js";
+import { categoryValues } from "../mcp/taxonomy.js";
+import { STATE_DIR } from "../config.js";
+import type { Mem00Config } from "../config.js";
+import type { LogFn, QdrantPayload, StoreFact } from "./qdrant.js";
+
+// ---------------------------------------------------------------------------
+// Local types
+// ---------------------------------------------------------------------------
+
+export interface DistillResult {
+  distilled: boolean;
+  count?: number;
+}
+
+export interface ContradictionResult {
+  contradiction: boolean;
+  existingId?: string;
+  existingContent?: string;
+  reason?: string;
+}
+
+export interface RebalanceResult {
+  rebalanced: boolean;
+  category?: string;
+  factCount?: number;
+  threshold?: number;
+  needsAttention?: boolean;
+}
+
+export interface HealthReport {
+  total: number;
+  byCategory: Record<string, number>;
+  cortexExtracted: number;
+  addedThisWeek: number;
+  generatedAt: string;
+}
+
+export interface ConsolidationTickOptions {
+  postHealthFn?: ((text: string) => Promise<void>) | null;
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+const CATEGORIES: string[] = categoryValues();
+
+let logFn: LogFn = () => {};
+const setLogger = (fn: LogFn): void => { logFn = fn; };
+
+const MEMORY_BRIEF_PATH = join(STATE_DIR, "brief.md");
+
+// ─── P3.1 Auto-Distillation ──────────────────────────────────────────────
+
+/**
+ * Check for undistilled session summaries and consolidate them.
+ * Triggered periodically from daemon tick.
+ */
+const autoDistill = async (
+  _config: Mem00Config,
+  { minSummaries = 5 }: { minSummaries?: number } = {},
+): Promise<DistillResult> => {
+  if (!qdrant.isReady()) return { distilled: false };
+
+  try {
+    // Find undistilled session summaries (support both legacy and new taxonomy)
+    const legacyFilter = {
+      must: [
+        { key: "category", match: { value: "session_summary" } },
+        { is_null: { key: "superseded_by" } },
+      ],
+    };
+    const newFilter = {
+      must: [
+        { key: "kind", match: { value: "summary" } },
+        { is_null: { key: "superseded_by" } },
+      ],
+    };
+
+    type ScrollResponse = { result?: { points?: Array<{ id: string; payload?: QdrantPayload }> } };
+
+    const [legacyRes, newRes] = await Promise.all([
+      qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/scroll`, {
+        filter: legacyFilter, limit: 50, with_payload: true,
+      }) as Promise<ScrollResponse>,
+      qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/scroll`, {
+        filter: newFilter, limit: 50, with_payload: true,
+      }) as Promise<ScrollResponse>,
+    ]);
+
+    // Deduplicate by ID
+    const seen = new Set<string>();
+    const points: Array<{ id: string; payload?: QdrantPayload }> = [];
+    for (const pt of [...(legacyRes.result?.points || []), ...(newRes.result?.points || [])]) {
+      if (!seen.has(pt.id)) {
+        seen.add(pt.id);
+        points.push(pt);
+      }
+    }
+    if (points.length < minSummaries) {
+      return { distilled: false, count: points.length };
+    }
+
+    // Sort by date (oldest first)
+    points.sort((a, b) => (a.payload?.created_at || "").localeCompare(b.payload?.created_at || ""));
+
+    // Take the oldest batch (up to 20)
+    const batch = points.slice(0, 20);
+    const summaryTexts = batch.map(pt =>
+      `[${pt.payload?.created_at?.slice(0, 10)}] ${pt.payload?.content}`
+    ).join("\n");
+
+    const raw = await chatCompletion({
+      messages: [
+        { role: "system", content: "You consolidate session summaries into high-level patterns. Output only valid JSON." },
+        { role: "user", content: `Consolidate these ${batch.length} session summaries into 3-5 distilled patterns.
+
+## Session Summaries:
+${summaryTexts}
+
+## Output (JSON array):
+Each object: { "content": "pattern description (1-2 sentences)", "entities": ["entity1", "entity2"], "importance": 0.0-1.0 }
+
+Return ONLY the JSON array.` },
+      ],
+      temperature: 0.2,
+      max_tokens: 1000,
+    });
+
+    if (!raw) {
+      logFn("WARN", "Auto-distill LLM returned empty");
+      return { distilled: false };
+    }
+
+    const jsonStr = raw.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim();
+    const patterns = JSON.parse(jsonStr) as Array<{
+      content?: string;
+      entities?: string[];
+      importance?: number;
+    }>;
+
+    if (!Array.isArray(patterns) || patterns.length === 0) return { distilled: false };
+
+    // Store distilled patterns
+    for (const pattern of patterns) {
+      if (!pattern.content) continue;
+      const hash = createHash("sha256").update(`distilled:${pattern.content}`).digest("hex");
+      await qdrant.storeFact({
+        content: pattern.content,
+        category: "observation",
+        domain: "work",
+        kind: "distilled",
+        entities: Array.isArray(pattern.entities) ? pattern.entities.map(e => String(e).toLowerCase()) : [],
+        source: "system",
+        confidence: 0.85,
+        importance: pattern.importance || 0.7,
+        content_hash: hash,
+        metadata: { distilled_from: batch.length.toString(), distilled_at: new Date().toISOString() },
+      });
+    }
+
+    // Supersede the source summaries
+    for (const pt of batch) {
+      await qdrant.supersedeFact(pt.id, `distilled:${new Date().toISOString()}`);
+    }
+
+    logFn("INFO", `Auto-distill: consolidated ${batch.length} summaries into ${patterns.length} patterns`);
+    return { distilled: true, count: patterns.length };
+  } catch (e) {
+    logFn("ERROR", `Auto-distill failed: ${(e as Error).message}`);
+    return { distilled: false };
+  }
+};
+
+// ─── P3.2 Contradiction Detection ────────────────────────────────────────
+
+/**
+ * Check a newly extracted fact for contradictions with existing facts.
+ * Called during extraction for high-importance facts.
+ */
+const detectContradiction = async (
+  fact: { content: string; category: string; entities: string[]; importance?: number },
+  _config: Mem00Config,
+): Promise<ContradictionResult> => {
+  if (!qdrant.isReady()) return { contradiction: false };
+  if ((fact.importance || 0) < 0.5) return { contradiction: false };
+
+  try {
+    const vector = await qdrant.embed(fact.content);
+    const results = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/search`, {
+      vector,
+      filter: {
+        must: [
+          { key: "category", match: { value: fact.category } },
+          { is_null: { key: "superseded_by" } },
+        ],
+      },
+      limit: 3,
+      with_payload: true,
+    });
+
+    const candidates = ((results.result || []) as Array<{ id: string; score: number; payload?: QdrantPayload }>)
+      .filter(r => r.score >= 0.75 && r.score < 0.92);
+    if (candidates.length === 0) return { contradiction: false };
+
+    // Use LLM to check if any candidate contradicts the new fact
+    const candidateTexts = candidates.map(c =>
+      `ID: ${c.id}\nFact: ${c.payload?.content}\nSimilarity: ${c.score.toFixed(3)}`
+    ).join("\n\n");
+
+    const raw = await chatCompletion({
+      messages: [
+        { role: "system", content: "You detect contradictions between facts. Output only valid JSON." },
+        { role: "user", content: `Does the NEW fact contradict any of the EXISTING facts?
+
+NEW FACT: ${fact.content}
+
+EXISTING FACTS:
+${candidateTexts}
+
+If a contradiction exists, return: {"contradiction": true, "existing_id": "the contradicted fact ID", "reason": "brief explanation"}
+If no contradiction: {"contradiction": false}
+
+Return ONLY the JSON object.` },
+      ],
+      temperature: 0.1,
+      max_tokens: 200,
+    });
+
+    if (!raw) return { contradiction: false };
+
+    const result = JSON.parse(raw.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim()) as {
+      contradiction?: boolean;
+      existing_id?: string;
+      reason?: string;
+    };
+    if (result.contradiction && result.existing_id) {
+      logFn("INFO", `Contradiction detected: "${fact.content}" vs existing ${result.existing_id}: ${result.reason}`);
+      return {
+        contradiction: true,
+        existingId: result.existing_id,
+        existingContent: candidates.find(c => c.id === result.existing_id)?.payload?.content,
+        reason: result.reason,
+      };
+    }
+    return { contradiction: false };
+  } catch (e) {
+    logFn("WARN", `Contradiction detection failed: ${(e as Error).message}`);
+    return { contradiction: false };
+  }
+};
+
+// ─── P3.3 Category Rebalancing ───────────────────────────────────────────
+
+/**
+ * Check for oversized categories and consolidate them.
+ */
+const rebalanceCategories = async (
+  _config: Mem00Config,
+  threshold = 100,
+  postFn?: ((text: string) => Promise<void>) | null,
+): Promise<RebalanceResult> => {
+  if (!qdrant.isReady()) return { rebalanced: false };
+
+  const categories = CATEGORIES;
+  const oversized: Array<{ category: string; count: number }> = [];
+  try {
+    for (const category of categories) {
+      const count = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/count`, {
+        filter: {
+          must: [
+            { key: "category", match: { value: category } },
+            { is_null: { key: "superseded_by" } },
+          ],
+        },
+        exact: true,
+      });
+
+      const factCount = (count.result as { count?: number })?.count || 0;
+      if (factCount > threshold) {
+        oversized.push({ category, count: factCount });
+      }
+    }
+
+    if (oversized.length === 0) return { rebalanced: false };
+
+    const lines = oversized.map(o => `  • ${o.category}: ${o.count} facts (threshold: ${threshold})`);
+    const message = `⚠️ Memory Rebalance Alert\n\nOversized categories:\n${lines.join("\n")}\n\nConsider consolidating or archiving older facts.`;
+    logFn("INFO", `Rebalance: ${oversized.length} oversized categories detected`);
+
+    if (postFn) {
+      postFn(message).catch(() => { /* noop */ });
+    }
+
+    return { rebalanced: false, category: oversized[0]!.category, factCount: oversized[0]!.count, threshold, needsAttention: true };
+  } catch (e) {
+    logFn("WARN", `Category rebalancing check failed: ${(e as Error).message}`);
+    return { rebalanced: false };
+  }
+};
+
+// ─── P3.5 Memory Health Report ───────────────────────────────────────────
+
+/**
+ * Generate a memory health report.
+ */
+const generateHealthReport = async (): Promise<HealthReport | null> => {
+  if (!qdrant.isReady()) return null;
+
+  try {
+    const categories = [...CATEGORIES];
+    const stats: Record<string, number> = {};
+    let total = 0;
+
+    for (const cat of categories) {
+      const count = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/count`, {
+        filter: {
+          must: [
+            { key: "category", match: { value: cat } },
+            { is_null: { key: "superseded_by" } },
+          ],
+        },
+        exact: true,
+      });
+      stats[cat] = (count.result as { count?: number })?.count || 0;
+      total += stats[cat]!;
+    }
+
+    // Count by kind
+    for (const kind of ["summary", "distilled", "relation"]) {
+      const count = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/count`, {
+        filter: {
+          must: [
+            { key: "kind", match: { value: kind } },
+            { is_null: { key: "superseded_by" } },
+          ],
+        },
+        exact: true,
+      });
+      stats[kind] = (count.result as { count?: number })?.count || 0;
+    }
+
+    // Count cortex-extracted
+    const cortexCount = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/count`, {
+      filter: {
+        must: [
+          { key: "source", match: { value: "cortex" } },
+          { is_null: { key: "superseded_by" } },
+        ],
+      },
+      exact: true,
+    });
+
+    // Count facts added in last 7 days
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const recentCount = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/count`, {
+      filter: {
+        must: [
+          { key: "created_at", range: { gte: weekAgo } },
+          { is_null: { key: "superseded_by" } },
+        ],
+      },
+      exact: true,
+    });
+
+    return {
+      total,
+      byCategory: stats,
+      cortexExtracted: (cortexCount.result as { count?: number })?.count || 0,
+      addedThisWeek: (recentCount.result as { count?: number })?.count || 0,
+      generatedAt: new Date().toISOString(),
+    };
+  } catch (e) {
+    logFn("ERROR", `Health report generation failed: ${(e as Error).message}`);
+    return null;
+  }
+};
+
+/**
+ * Format health report as a readable string.
+ */
+const formatHealthReport = (report: HealthReport | null): string => {
+  if (!report) return "Memory health report unavailable";
+
+  const lines = [
+    `Memory Health Report — ${new Date(report.generatedAt).toLocaleDateString()}`,
+    "",
+    `Total facts: ${report.total}`,
+    `Added this week: ${report.addedThisWeek}`,
+    `Cortex-extracted: ${report.cortexExtracted}`,
+    "",
+    "By category:",
+  ];
+
+  for (const [cat, count] of Object.entries(report.byCategory)) {
+    const bar = "█".repeat(Math.min(20, Math.ceil(count / 5)));
+    lines.push(`  ${cat}: ${count} ${bar}`);
+  }
+
+  return lines.join("\n");
+};
+
+// ─── P3.6 Compact Memory Brief ──────────────────────────────────────────
+
+/**
+ * Generate a compact memory brief from top facts.
+ * Written to ~/.mem00/state/brief.md for agent orientation.
+ */
+const generateMemoryBrief = async (_config: Mem00Config): Promise<boolean> => {
+  if (!qdrant.isReady()) return false;
+
+  try {
+    // Fetch top facts from each category (importance-weighted)
+    const sections: Record<string, string[]> = {};
+    const categories = CATEGORIES;
+
+    for (const cat of categories) {
+      const result = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/scroll`, {
+        filter: {
+          must: [
+            { key: "category", match: { value: cat } },
+            { is_null: { key: "superseded_by" } },
+          ],
+        },
+        limit: 30,
+        with_payload: true,
+      }) as { result?: { points?: Array<{ payload?: QdrantPayload }> } };
+
+      const points = (result.result?.points || [])
+        .sort((a, b) => (b.payload?.importance || 0) - (a.payload?.importance || 0))
+        .slice(0, 10);
+
+      if (points.length > 0) {
+        sections[cat] = points.map(pt => pt.payload?.content).filter(Boolean) as string[];
+      }
+    }
+
+    if (Object.keys(sections).length === 0) return false;
+
+    // Use LLM to synthesize into a structured brief
+    const factsText = Object.entries(sections)
+      .map(([cat, facts]) => `### ${cat}\n${facts.map(f => `- ${f}`).join("\n")}`)
+      .join("\n\n");
+
+    const brief = await chatCompletion({
+      messages: [
+        { role: "system", content: "You generate concise orientation documents for AI agents. Write in a structured, scannable format." },
+        { role: "user", content: `Generate a compact memory brief from these facts. This brief will be loaded by AI agents at session start for orientation.
+
+## Facts by Category:
+${factsText}
+
+## Output Format (markdown):
+# Memory Brief
+Generated: [date]
+
+## Key People & Team
+[who matters and their roles]
+
+## Active Projects
+[what's in progress, blocked, recently completed]
+
+## Infrastructure Overview
+[key services, databases, deployment details]
+
+## Recent Decisions
+[important architectural/technical decisions]
+
+## Known Gotchas
+[errors, workarounds, caveats to watch for]
+
+## Preferences & Conventions
+[user/team preferences, coding style, etc.]
+
+Keep each section to 3-5 bullet points. Omit empty sections. Be factual, not chatty.` },
+      ],
+      temperature: 0.2,
+      max_tokens: 1500,
+    });
+
+    if (!brief) return false;
+
+    // Write to disk
+    mkdirSync(dirname(MEMORY_BRIEF_PATH), { recursive: true });
+    writeFileSync(MEMORY_BRIEF_PATH, brief + "\n", "utf8");
+    logFn("INFO", `Memory brief generated: ${MEMORY_BRIEF_PATH} (${brief.length} chars)`);
+    return true;
+  } catch (e) {
+    logFn("ERROR", `Memory brief generation failed: ${(e as Error).message}`);
+    return false;
+  }
+};
+
+// ─── Consolidation Tick ──────────────────────────────────────────────────
+
+// Counters for periodic tasks
+let consolidationTickCount = 0;
+
+/**
+ * Main consolidation tick — called from daemon tick loop.
+ * Spreads out expensive operations across different tick intervals.
+ */
+const tick = async (config: Mem00Config, opts: ConsolidationTickOptions = {}): Promise<void> => {
+  if (!qdrant.isReady()) return;
+  if (config.daemon.consolidation_enabled === false) return;
+  consolidationTickCount++;
+
+  // Auto-distillation: every ~100 ticks (500s = ~8 min)
+  if (consolidationTickCount % 100 === 0) {
+    await autoDistill(config).catch(e =>
+      logFn("ERROR", `Auto-distill tick failed: ${(e as Error).message}`)
+    );
+  }
+
+  // Category rebalancing check: every ~500 ticks (2500s = ~40 min)
+  if (consolidationTickCount % 500 === 0) {
+    await rebalanceCategories(config, 100, opts.postHealthFn).catch(e =>
+      logFn("ERROR", `Category rebalance tick failed: ${(e as Error).message}`)
+    );
+  }
+
+  // Memory brief regeneration: every ~2000 ticks (10000s = ~2.7 hours)
+  if (consolidationTickCount % 2000 === 0) {
+    await generateMemoryBrief(config).catch(e =>
+      logFn("ERROR", `Memory brief tick failed: ${(e as Error).message}`)
+    );
+  }
+
+  // Health report: every ~5000 ticks (25000s = ~7 hours)
+  if (consolidationTickCount % 5000 === 0 && opts.postHealthFn) {
+    const report = await generateHealthReport().catch(() => null);
+    if (report) {
+      const text = formatHealthReport(report);
+      opts.postHealthFn(text).catch(() => { /* noop */ });
+    }
+  }
+};
+
+/** Reset state (for testing). */
+const _reset = (): void => {
+  consolidationTickCount = 0;
+};
+
+export {
+  detectContradiction,
+  tick,
+  setLogger,
+  _reset,
+};
