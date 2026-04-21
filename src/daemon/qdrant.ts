@@ -12,7 +12,7 @@ import { embed, initEmbedding, getEmbeddingConfig } from "../llm/index.js";
 import type { EmbeddingProviderConfig } from "../llm/index.js";
 
 // ---------------------------------------------------------------------------
-// Types (local — replaces agent00 ../../types.ts imports)
+// Types (local)
 // ---------------------------------------------------------------------------
 
 export type LogFn = (level: string, ...args: unknown[]) => void;
@@ -279,7 +279,7 @@ const storeFact = async (fact: StoreFact): Promise<string> => {
     domain: fact.domain || "work",
     kind: fact.kind || "fact",
     entities: fact.entities || [],
-    source: fact.source || "cortex",
+    source: fact.source || "daemon",
     confidence: fact.confidence ?? 0.7,
     importance: fact.importance ?? 0.5,
     content_hash: fact.content_hash,

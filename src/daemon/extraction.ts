@@ -1,6 +1,6 @@
 /**
  * Events-based memory extraction — reads Copilot CLI events.jsonl transcripts,
- * extracts facts via LLM, and stores them in Qdrant with source: "cortex".
+ * extracts facts via LLM, and stores them in Qdrant with source: "daemon".
  *
  * Uses a JSON file for extraction state (high-water byte offsets) instead of SQLite.
  * Active session detection scans ~/.copilot/session-state/ for lock files.
@@ -69,16 +69,16 @@ Each fact must include an importance score (0.0-1.0):
 
 {"facts": [
   {
-    "content": "The EC2 cortex instance has no git installed; deploys use pre-built Docker images pulled from ECR",
+    "content": "The EC2 instance has no git installed; deploys use pre-built Docker images pulled from ECR",
     "category": "infrastructure",
-    "entities": ["ec2", "cortex", "ecr", "docker"],
+    "entities": ["ec2", "ecr", "docker"],
     "confidence": 0.9,
     "importance": 0.8
   }
 ]}
 
 - Category must be one of: infrastructure, decisions, observation, preferences, projects, team
-- Entities should be lowercase identifiers (e.g. "qdrant", "cortex", "saber")
+- Entities should be lowercase identifiers (e.g. "qdrant", "redis", "platform")
 - Confidence 0.0-1.0: how certain (0.9 for explicit statements, 0.6 for inferences)
 - Importance 0.0-1.0: how useful to future sessions (see scale above)
 
@@ -404,7 +404,7 @@ const storeFacts = async (
         content: fact.content,
         category: fact.category,
         entities: fact.entities,
-        source: "cortex",
+        source: "daemon",
         kind: "fact",
         confidence: fact.confidence,
         importance: fact.importance,

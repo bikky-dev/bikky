@@ -254,17 +254,17 @@ Facts mentioning multiple entities build an implicit graph:
 ```mermaid
 graph LR
     subgraph "Entity Graph"
-        S(saber) -->|owns| C(cortex)
-        S -->|uses| Q(qdrant)
-        C -->|depends-on| Q
-        S -->|prefers| D(dark mode)
+        U(user) -->|owns| P(project-x)
+        U -->|uses| Q(qdrant)
+        P -->|depends-on| Q
+        U -->|prefers| D(dark mode)
     end
 ```
 
 The daemon periodically:
 1. Scrolls all facts → builds entity co-occurrence map
 2. For top pairs by shared-fact count → LLM infers relationship type
-3. Stores typed edges (e.g., `saber --[owns]--> cortex`)
+3. Stores typed edges (e.g., `user --[owns]--> project-x`)
 
 ### Consolidation pipeline
 
