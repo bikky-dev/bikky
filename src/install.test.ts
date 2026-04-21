@@ -77,28 +77,28 @@ describe("writeInstallConfig", () => {
   it("copilot config has correct structure", async () => {
     await writeInstallConfig();
     const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf-8"));
-    assert.ok(config.servers);
-    assert.ok(config.servers.mem00);
-    assert.strictEqual(config.servers.mem00.command, "npx");
-    assert.deepStrictEqual(config.servers.mem00.args, ["-y", "mem00", "mcp"]);
+    assert.ok(config.mcpServers);
+    assert.ok(config.mcpServers.mem00);
+    assert.strictEqual(config.mcpServers.mem00.command, "npx");
+    assert.deepStrictEqual(config.mcpServers.mem00.args, ["-y", "@sabz00/mem00", "mcp"]);
   });
 
   it("claude config has correct structure", async () => {
     await writeInstallConfig();
     const config = JSON.parse(fs.readFileSync(claudeConfigPath, "utf-8"));
-    assert.ok(config.servers);
-    assert.ok(config.servers.mem00);
-    assert.strictEqual(config.servers.mem00.command, "npx");
-    assert.deepStrictEqual(config.servers.mem00.args, ["-y", "mem00", "mcp"]);
+    assert.ok(config.mcpServers);
+    assert.ok(config.mcpServers.mem00);
+    assert.strictEqual(config.mcpServers.mem00.command, "npx");
+    assert.deepStrictEqual(config.mcpServers.mem00.args, ["-y", "@sabz00/mem00", "mcp"]);
   });
 
-  it("preserves existing servers in copilot config", async () => {
+  it("preserves existing mcpServers in copilot config", async () => {
     // Write a pre-existing config with another server
     fs.mkdirSync(path.dirname(copilotConfigPath), { recursive: true });
     fs.writeFileSync(
       copilotConfigPath,
       JSON.stringify({
-        servers: {
+        mcpServers: {
           "other-tool": { command: "other", args: ["--flag"] },
         },
       }),
@@ -108,17 +108,17 @@ describe("writeInstallConfig", () => {
 
     const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf-8"));
     // Both servers should exist
-    assert.ok(config.servers["other-tool"]);
-    assert.ok(config.servers.mem00);
-    assert.strictEqual(config.servers["other-tool"].command, "other");
+    assert.ok(config.mcpServers["other-tool"]);
+    assert.ok(config.mcpServers.mem00);
+    assert.strictEqual(config.mcpServers["other-tool"].command, "other");
   });
 
-  it("preserves existing servers in claude config", async () => {
+  it("preserves existing mcpServers in claude config", async () => {
     fs.mkdirSync(path.dirname(claudeConfigPath), { recursive: true });
     fs.writeFileSync(
       claudeConfigPath,
       JSON.stringify({
-        servers: {
+        mcpServers: {
           "existing-server": { command: "existing", args: [] },
         },
       }),
@@ -127,8 +127,8 @@ describe("writeInstallConfig", () => {
     await writeInstallConfig();
 
     const config = JSON.parse(fs.readFileSync(claudeConfigPath, "utf-8"));
-    assert.ok(config.servers["existing-server"]);
-    assert.ok(config.servers.mem00);
+    assert.ok(config.mcpServers["existing-server"]);
+    assert.ok(config.mcpServers.mem00);
   });
 
   it("overwrites existing mem00 entry on re-run", async () => {
@@ -138,8 +138,8 @@ describe("writeInstallConfig", () => {
     await writeInstallConfig();
 
     const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf-8"));
-    assert.strictEqual(config.servers.mem00.command, "npx");
-    assert.deepStrictEqual(config.servers.mem00.args, ["-y", "mem00", "mcp"]);
+    assert.strictEqual(config.mcpServers.mem00.command, "npx");
+    assert.deepStrictEqual(config.mcpServers.mem00.args, ["-y", "@sabz00/mem00", "mcp"]);
   });
 
   it("handles malformed existing config file", async () => {
@@ -150,6 +150,6 @@ describe("writeInstallConfig", () => {
     await writeInstallConfig();
 
     const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf-8"));
-    assert.ok(config.servers.mem00);
+    assert.ok(config.mcpServers.mem00);
   });
 });
