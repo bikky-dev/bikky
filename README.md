@@ -32,7 +32,7 @@ graph TD
 
 ```bash
 # Install globally
-npm install -g mem00
+npm install -g @sabz00/mem00
 
 # Add to your editor's MCP config
 mem00 install
