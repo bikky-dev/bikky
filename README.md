@@ -6,24 +6,12 @@ mem00 gives your AI coding assistants (GitHub Copilot, Claude Code) long-term me
 
 ## How it works
 
-```
-┌─────────────────┐     MCP (stdio)      ┌─────────────────┐
-│  Copilot /       │◄───────────────────►│   mem00 MCP     │
-│  Claude Code     │                      │   Server        │
-└─────────────────┘                      └────────┬────────┘
-                                                  │
-                                                  ▼
-┌─────────────────┐     events.jsonl     ┌─────────────────┐
-│  Session logs    │────────────────────►│   mem00 Daemon   │
-│  (~/.copilot/)   │                      │   (background)   │
-└─────────────────┘                      └────────┬────────┘
-                                                  │
-                                    embed + store │
-                                                  ▼
-                                         ┌─────────────────┐
-                                         │  Qdrant Cloud    │
-                                         │  (vector DB)     │
-                                         └─────────────────┘
+```mermaid
+graph TD
+    A["🤖 Copilot / Claude Code"] <-->|MCP stdio| B["mem00 MCP Server"]
+    C["📁 Session logs<br/>~/.copilot/"] -->|events.jsonl| D["mem00 Daemon<br/>(background)"]
+    B -->|store / recall| E[("🔮 Qdrant Cloud<br/>vector DB")]
+    D -->|embed + store| E
 ```
 
 **MCP Server** — 12 memory tools your AI assistant can call directly:
@@ -124,9 +112,18 @@ mem00 install   # Write MCP config for Copilot + Claude Code
 ## Memory architecture
 
 ### Deduplication
+
 Two-layer dedup prevents bloat:
-1. **Content hash** (SHA-256) — exact duplicate detection
-2. **Vector similarity** — >0.92 = near-duplicate (reinforced), >0.80 = related (flagged)
+
+```mermaid
+flowchart TD
+    A[New fact] --> B{SHA-256<br/>content hash}
+    B -->|exact match| C[Skip — duplicate]
+    B -->|no match| D{Vector<br/>similarity}
+    D -->|"> 0.92"| E["Reinforce existing<br/>(bump count)"]
+    D -->|"> 0.80"| F[Store + flag<br/>as related]
+    D -->|"< 0.80"| G[Store as new]
+```
 
 ### Ranking formula
 Facts are ranked using a combined score:
@@ -136,12 +133,37 @@ Facts are ranked using a combined score:
 ```
 
 ### Entity knowledge graph
-Facts mentioning multiple entities build an implicit graph. The daemon periodically:
+
+Facts mentioning multiple entities build an implicit graph:
+
+```mermaid
+graph LR
+    subgraph "Entity Graph"
+        S(saber) -->|owns| C(cortex)
+        S -->|uses| Q(qdrant)
+        C -->|depends-on| Q
+        S -->|prefers| D(dark mode)
+    end
+```
+
+The daemon periodically:
 1. Scrolls all facts → builds entity co-occurrence map
 2. For top pairs by shared-fact count → LLM infers relationship type
 3. Stores typed edges (e.g., `saber --[owns]--> cortex`)
 
 ### Consolidation pipeline
+
+```mermaid
+flowchart LR
+    A[Session<br/>summaries] --> B{5+ summaries?}
+    B -->|yes| C[Auto-distill]
+    C --> D[Distilled<br/>patterns]
+    E[All facts] --> F[Contradiction<br/>detection]
+    F --> G[Flagged for<br/>review]
+    E --> H[Staleness<br/>scan]
+    H --> I["Stale facts<br/>(30+ days)"]
+```
+
 - **Auto-distill** — merges 5+ session summaries into distilled patterns
 - **Contradiction detection** — flags conflicting facts for review
 - **Category rebalancing** — consolidates oversized categories
