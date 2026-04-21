@@ -12,11 +12,9 @@ Every engineering team builds institutional knowledge — the kind that doesn't 
 
 This knowledge lives in people's heads, scattered across chat threads, and buried in closed PRs. When someone switches projects or leaves, it's gone. It's the most valuable and least durable asset a technical organisation has.
 
-### AI agents make it worse
+### AI agents amplify the problem
 
-Every AI coding session starts from zero. An agent spends 20 minutes figuring something out, solves the problem — and then the session closes. That knowledge evaporates. The next session rediscovers the same thing. The next engineer rediscovers it again.
-
-The work gets done, but the *learning* is thrown away.
+AI coding agents are a force multiplier — teams ship more, explore more solutions, and touch more of the codebase than ever before. But that also means more decisions, more discoveries, and more institutional knowledge generated per day than any team can track manually. And every session starts from zero. The agent that spent 20 minutes figuring something out closes, and that knowledge is gone. The next session starts fresh. So does the next engineer's.
 
 ### Knowledge that compounds
 
