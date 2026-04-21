@@ -4,6 +4,46 @@
 
 mem00 gives your AI coding assistants (GitHub Copilot, Claude Code) long-term memory that persists across sessions. Facts, decisions, architecture knowledge, and entity relationships are stored in a vector database and recalled automatically.
 
+---
+
+## Why mem00 exists
+
+Every engineering team builds institutional knowledge — the kind that doesn't live in documentation. Which deploy sequence avoids the volume lock. Why that config value is set to 7 and not 10. The regex that caused a P1 last quarter. How the staging database schema drifts from production. Who actually knows the payment integration.
+
+This knowledge lives in people's heads, scattered across Slack threads, buried in closed PRs, and lost when engineers switch teams or leave. It's the most valuable and least durable asset a technical organisation has.
+
+### AI agents make it worse
+
+Every AI coding session starts from zero. An agent spends 20 minutes discovering that your Telegram bots use virtual list rendering that breaks click handlers, works out the deep-link workaround, solves the problem — and then the session closes. All of that hard-won knowledge evaporates. The next session hits the same wall. The next engineer hits the same wall. Every team member independently rediscovers the same facts, the same gotchas, the same solutions — over and over.
+
+The work gets done, but the *learning* is thrown away. That's an enormous waste.
+
+### Knowledge that compounds
+
+mem00 captures what agents and engineers learn during coding sessions and makes it available to every future session — for every team member — automatically. No manual documentation. No wikis to maintain. No "did anyone write that down?"
+
+When one engineer's agent discovers that CNPG Postgres requires a manual `ALTER TABLE` for new Prisma columns on staging, every agent on the team knows that from their next session onward. When an agent works out the exact `kubectl exec` pattern to query alerts on a specific cluster, that pattern is available to every agent in the org. The debugging session at 2am that uncovered a race condition in the reply loop? That context is there the next time anyone touches that code.
+
+Each team member is amplified with the experiences and knowledge gathered by every other member. The 50th session on a codebase is dramatically more effective than the 1st — not because of better prompts, but because of accumulated institutional memory.
+
+### How mem00 keeps knowledge accurate
+
+Raw accumulation creates noise. mem00 curates knowledge automatically:
+
+- **Deduplication** — content hashing + vector similarity prevents bloat. Store the same fact twice and it reinforces rather than duplicates.
+- **Confidence decay** — facts lose confidence over time with category-specific half-lives (infrastructure: 90 days, observations: 30 days). Stale facts surface for review, not as gospel.
+- **Contradiction detection** — new facts that conflict with existing ones trigger supersession, not silent overwrite.
+- **Session distillation** — recurring patterns across sessions are consolidated into higher-level insights, keeping the knowledge base lean.
+- **Entity graph** — relationships between services, people, and concepts are inferred automatically, enabling richer recall.
+
+The only human input is occasional verification when a fact is flagged as potentially stale — and even that happens inline during normal work, not as a separate maintenance task.
+
+### Zero maintenance overhead
+
+mem00 is not a wiki you have to write. Facts are captured as a natural byproduct of engineering work — agents store what they learn as they learn it. The curation pipeline runs autonomously in the background. Install once, and every session gets smarter.
+
+---
+
 ## How it works
 
 ```mermaid
