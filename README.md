@@ -8,13 +8,13 @@ mem00 gives your AI coding assistants (GitHub Copilot, Claude Code) long-term me
 
 ## Why mem00 exists
 
-Every engineering team builds institutional knowledge — the kind that doesn't live in documentation. Which deploy sequence avoids the volume lock. Why that config value is set to 7 and not 10. The regex that caused a P1 last quarter. How the staging database schema drifts from production. Who actually knows the payment integration.
+Every engineering team builds institutional knowledge — the kind that doesn't live in documentation. Why that environment variable is set to 7 and not 10. Which migration sequence avoids downtime. The query that caused a P1 last quarter. How the staging database drifts from production. Which service silently drops headers on retry. Who actually owns the billing integration.
 
-This knowledge lives in people's heads, scattered across Slack threads, buried in closed PRs, and lost when engineers switch teams or leave. It's the most valuable and least durable asset a technical organisation has.
+This knowledge lives in people's heads, scattered across chat threads, buried in closed PRs, and lost when engineers switch teams or leave. It's the most valuable and least durable asset a technical organisation has.
 
 ### AI agents make it worse
 
-Every AI coding session starts from zero. An agent spends 20 minutes discovering that your Telegram bots use virtual list rendering that breaks click handlers, works out the deep-link workaround, solves the problem — and then the session closes. All of that hard-won knowledge evaporates. The next session hits the same wall. The next engineer hits the same wall. Every team member independently rediscovers the same facts, the same gotchas, the same solutions — over and over.
+Every AI coding session starts from zero. An agent spends 20 minutes tracing a timeout through three microservices, discovers the root cause is a misconfigured connection pool, fixes it — and then the session closes. All of that hard-won knowledge evaporates. The next session hits the same wall. The next engineer hits the same wall. Every team member independently rediscovers the same facts, the same gotchas, the same solutions — over and over.
 
 The work gets done, but the *learning* is thrown away. That's an enormous waste.
 
@@ -22,7 +22,7 @@ The work gets done, but the *learning* is thrown away. That's an enormous waste.
 
 mem00 captures what agents and engineers learn during coding sessions and makes it available to every future session — for every team member — automatically. No manual documentation. No wikis to maintain. No "did anyone write that down?"
 
-When one engineer's agent discovers that CNPG Postgres requires a manual `ALTER TABLE` for new Prisma columns on staging, every agent on the team knows that from their next session onward. When an agent works out the exact `kubectl exec` pattern to query alerts on a specific cluster, that pattern is available to every agent in the org. The debugging session at 2am that uncovered a race condition in the reply loop? That context is there the next time anyone touches that code.
+When one engineer's agent discovers that your ORM requires a manual migration step for adding non-nullable columns in staging, every agent on the team knows that from their next session onward. When an agent figures out the exact CLI command to tail logs on a specific environment, that command is available to every agent in the org. The debugging session at 2am that uncovered a race condition in the job queue? That context is there the next time anyone touches that code.
 
 Each team member is amplified with the experiences and knowledge gathered by every other member. The 50th session on a codebase is dramatically more effective than the 1st — not because of better prompts, but because of accumulated institutional memory.
 
