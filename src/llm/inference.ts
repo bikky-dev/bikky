@@ -29,10 +29,9 @@ export function initLLM(opts: { config: InferenceProviderConfig; logger?: LogFn 
 
 function initBedrockClient(): void {
   const region = cfg?.bedrock_region ?? process.env.AWS_BEDROCK_REGION ?? process.env.AWS_REGION ?? "us-east-1";
-  const credentials = process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-    ? { accessKeyId: process.env.AWS_ACCESS_KEY_ID, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY }
-    : undefined;
-  bedrockClient = new BedrockRuntimeClient({ region, credentials });
+  // Let the AWS SDK resolve credentials via its default chain:
+  // env vars → shared credentials file → SSO → IAM role
+  bedrockClient = new BedrockRuntimeClient({ region });
 }
 
 // ── Core function ────────────────────────────────────────────────────────────
