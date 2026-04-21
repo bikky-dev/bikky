@@ -82,7 +82,7 @@ describe("sourceValues", () => {
   it("returns expected sources", () => {
     const vals = sourceValues();
     assert.ok(vals.includes("agent"));
-    assert.ok(vals.includes("cortex"));
+    assert.ok(vals.includes("daemon"));
     assert.ok(vals.includes("system"));
     assert.ok(vals.includes("user"));
     assert.ok(vals.includes("docs"));
@@ -312,7 +312,7 @@ describe("SOURCE_MIGRATION", () => {
     assert.strictEqual(SOURCE_MIGRATION.task, "agent");
     assert.strictEqual(SOURCE_MIGRATION.observation, "agent");
     assert.strictEqual(SOURCE_MIGRATION.manual, "user");
-    assert.strictEqual(SOURCE_MIGRATION.cortex, "cortex");
+    assert.strictEqual(SOURCE_MIGRATION.cortex, "daemon");
   });
 });
 
@@ -412,7 +412,7 @@ describe("normalizeKind", () => {
 describe("normalizeSource", () => {
   it("returns valid sources as-is", () => {
     assert.strictEqual(normalizeSource("agent"), "agent");
-    assert.strictEqual(normalizeSource("cortex"), "cortex");
+    assert.strictEqual(normalizeSource("cortex"), "daemon");
     assert.strictEqual(normalizeSource("system"), "system");
     assert.strictEqual(normalizeSource("user"), "user");
     assert.strictEqual(normalizeSource("docs"), "docs");

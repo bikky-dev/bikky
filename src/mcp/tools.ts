@@ -1,6 +1,5 @@
 /**
  * MCP tool definitions — all 12 memory tools.
- * Adapted from agent00 for standalone mem00 package.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -332,13 +331,13 @@ export function registerTools(mcp: McpServer): void {
       content: z.string().describe("The fact to store (atomic, single piece of knowledge)"),
       category: z.enum(categoryValues())
         .describe("Topic: infrastructure, decisions, observation, preferences, projects, team"),
-      entities: z.array(z.string()).describe("Related entities (lowercase, e.g. ['saber', 'platform'])"),
+      entities: z.array(z.string()).describe("Related entities (lowercase, e.g. ['qdrant', 'platform'])"),
       domain: z.enum(domainValues()).default(DEFAULT_DOMAIN)
         .describe("Life scope — work or personal"),
       kind: z.enum(kindValues()).default(DEFAULT_KIND)
         .describe("Knowledge form — fact, summary, distilled, relation"),
       source: z.enum(sourceValues()).default(DEFAULT_SOURCE)
-        .describe("Creator — agent, cortex, system, user"),
+        .describe("Creator — agent, daemon, system, user"),
       confidence: z.number().min(0).max(1).default(0.9).describe("How certain (0.0-1.0)"),
       importance: z.number().min(0).max(1).optional().describe("How important (0.0-1.0). Omit to default to 0.5."),
       supersedes: z.string().optional().describe("ID of a fact this one replaces"),
@@ -599,7 +598,7 @@ export function registerTools(mcp: McpServer): void {
     "memory_entity",
     "Get everything known about an entity — all facts mentioning it plus its relationships.",
     {
-      name: z.string().describe("Entity name (e.g. 'saber', 'platform')"),
+      name: z.string().describe("Entity name (e.g. 'qdrant', 'platform')"),
       limit: z.number().optional().default(20).describe("Max facts to return"),
     },
     async ({ name, limit }): Promise<McpToolResult> => {
@@ -817,7 +816,7 @@ export function registerTools(mcp: McpServer): void {
       if (action === "list") {
         const result = await qdrantScroll({
           must: [
-            { key: "source", match: { value: "cortex" } },
+            { key: "source", match: { value: "daemon" } },
             { is_null: { key: "superseded_by" } },
           ],
         }, (limit ?? 10) * 2);

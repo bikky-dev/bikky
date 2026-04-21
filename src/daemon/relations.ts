@@ -9,7 +9,7 @@
  *   2. Filter out pairs that already have a `kind: "relation"` fact
  *   3. For the top N pairs by shared-fact count, fetch the actual shared facts
  *   4. Send to a cheap LLM for a 2-4 word relationship label
- *   5. Store via storeFact with kind: "relation", source: "cortex"
+ *   5. Store via storeFact with kind: "relation", source: "daemon"
  */
 
 import { createHash } from "node:crypto";
@@ -132,7 +132,7 @@ const buildCoOccurrenceMap = async (): Promise<CoOccurrence[]> => {
 };
 
 /**
- * Get the set of entity pairs that already have a cortex-inferred relation.
+ * Get the set of entity pairs that already have a daemon-inferred relation.
  * Returns a Set of pairKeys.
  */
 const getExistingRelations = async (): Promise<Set<string>> => {
@@ -144,7 +144,7 @@ const getExistingRelations = async (): Promise<Set<string>> => {
       filter: {
         must: [
           { key: "kind", match: { value: "relation" } },
-          { key: "source", match: { value: "cortex" } },
+          { key: "source", match: { value: "daemon" } },
           { is_null: { key: "superseded_by" } },
         ],
       },
@@ -179,7 +179,7 @@ const getExistingRelations = async (): Promise<Set<string>> => {
     if (!offset) break;
   }
 
-  logFn("DEBUG", `Relations: ${existing.size} existing cortex-inferred relations`);
+  logFn("DEBUG", `Relations: ${existing.size} existing daemon-inferred relations`);
   return existing;
 };
 
@@ -263,7 +263,7 @@ const storeRelation = async (
   sharedFactIds: string[],
 ): Promise<string> => {
   const hash = createHash("sha256")
-    .update(`cortex-relation:${pairKey(entityA, entityB)}:${relationType}`)
+    .update(`daemon-relation:${pairKey(entityA, entityB)}:${relationType}`)
     .digest("hex");
 
   const id = await qdrant.storeFact({
@@ -272,7 +272,7 @@ const storeRelation = async (
     domain: "work",
     kind: "relation",
     entities: [entityA, entityB],
-    source: "cortex",
+    source: "daemon",
     confidence: 0.7,
     importance: 0.6,
     content_hash: hash,
@@ -331,7 +331,7 @@ const tick = async (config: Mem00Config): Promise<void> => {
 
         // Dedup check before storing
         const hash = createHash("sha256")
-          .update(`cortex-relation:${pairKey(candidate.entityA, candidate.entityB)}:${result.type}`)
+          .update(`daemon-relation:${pairKey(candidate.entityA, candidate.entityB)}:${result.type}`)
           .digest("hex");
         const dedup = await qdrant.dedupCheck(result.content, hash);
         if (dedup.action === "skip") {
