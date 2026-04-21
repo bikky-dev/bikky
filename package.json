@@ -1,0 +1,56 @@
+{
+  "name": "mem00",
+  "version": "0.1.0",
+  "description": "Shared memory for AI coding sessions — MCP server + background daemon",
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/saber-zrelli-private/mem00.git"
+  },
+  "bin": {
+    "mem00": "./bin/mem00.js"
+  },
+  "exports": {
+    ".": "./dist/mcp/index.js"
+  },
+  "files": [
+    "dist/",
+    "bin/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/mcp/index.js",
+    "daemon": "node dist/daemon/index.js",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "check": "tsc --noEmit && eslint src/",
+    "test": "node --test dist/**/*.test.js",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1006.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0",
+    "eslint": "^9.0.0",
+    "typescript-eslint": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "mcp",
+    "memory",
+    "ai",
+    "copilot",
+    "claude-code",
+    "shared-memory",
+    "vector-search",
+    "qdrant"
+  ]
+}

@@ -1,0 +1,58 @@
+/**
+ * Write MCP config entries for Copilot and/or Claude Code.
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+
+interface McpConfig {
+  servers?: Record<string, { command: string; args?: string[] }>;
+  [key: string]: unknown;
+}
+
+export async function writeInstallConfig(): Promise<void> {
+  // Copilot MCP config
+  const copilotConfigPath = path.join(os.homedir(), ".copilot", "mcp-config.json");
+
+  const entry = {
+    command: "npx",
+    args: ["-y", "mem00", "mcp"],
+  };
+
+  let config: McpConfig = {};
+  if (fs.existsSync(copilotConfigPath)) {
+    try {
+      config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf-8")) as McpConfig;
+    } catch {
+      config = {};
+    }
+  }
+
+  if (!config.servers) config.servers = {};
+  config.servers["mem00"] = entry;
+
+  fs.mkdirSync(path.dirname(copilotConfigPath), { recursive: true });
+  fs.writeFileSync(copilotConfigPath, JSON.stringify(config, null, 2) + "\n");
+  console.log(`✅ Written to ${copilotConfigPath}`);
+
+  // Claude Code MCP config
+  const claudeConfigPath = path.join(os.homedir(), ".claude", "mcp.json");
+  let claudeConfig: McpConfig = {};
+  if (fs.existsSync(claudeConfigPath)) {
+    try {
+      claudeConfig = JSON.parse(fs.readFileSync(claudeConfigPath, "utf-8")) as McpConfig;
+    } catch {
+      claudeConfig = {};
+    }
+  }
+
+  if (!claudeConfig.servers) claudeConfig.servers = {};
+  claudeConfig.servers["mem00"] = entry;
+
+  fs.mkdirSync(path.dirname(claudeConfigPath), { recursive: true });
+  fs.writeFileSync(claudeConfigPath, JSON.stringify(claudeConfig, null, 2) + "\n");
+  console.log(`✅ Written to ${claudeConfigPath}`);
+
+  console.log("\n🧠 mem00 is now registered. Restart your editor to activate.");
+}
