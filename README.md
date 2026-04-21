@@ -14,7 +14,7 @@ This knowledge lives in people's heads, scattered across chat threads, and burie
 
 ### AI agents amplify the problem
 
-AI coding agents are a force multiplier — teams ship more, explore more solutions, and touch more of the codebase than ever before. But that also means more decisions, more discoveries, and more institutional knowledge generated per day than any team can track manually. And every session starts from zero. The agent that spent 20 minutes figuring something out closes, and that knowledge is gone. The next session starts fresh. So does the next engineer's.
+AI coding agents are a force multiplier — teams ship more, explore more solutions, and touch more of the codebase than ever before. But that also means more decisions, more discoveries, and more institutional knowledge generated per day than any team can track manually. Some teams maintain hand-written knowledge bases to give agents context, but these drift quickly and become another thing to keep up to date. The knowledge that matters most — the things learned *during* sessions — still vanishes when the session closes.
 
 ### Knowledge that compounds
 
