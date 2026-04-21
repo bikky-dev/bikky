@@ -80,25 +80,61 @@ export QDRANT_API_KEY="your-api-key-here"
 
 Config lives at `~/.mem00/config.json`. Resolution order: **defaults → config file → env vars**.
 
+### Qdrant
+
 | Setting | Env var | Default | Description |
 |---------|---------|---------|-------------|
 | `qdrant_url` | `QDRANT_URL` | — | Qdrant Cloud REST URL |
 | `qdrant_api_key` | `QDRANT_API_KEY` | — | Qdrant Cloud API key |
 | `collection` | `MEM00_COLLECTION` | `mem00` | Qdrant collection name |
-| `embedding.provider` | `EMBEDDING_PROVIDER` | `ollama` | `ollama`, `openai`, or `bedrock` |
-| `embedding.model` | `EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Embedding model |
-| `embedding.dimensions` | `EMBEDDING_DIMENSIONS` | `1024` | Vector dimensions |
-| `embedding.base_url` | `EMBEDDING_BASE_URL` | `http://localhost:11434` | Embedding API endpoint |
-| `llm.provider` | `LLM_PROVIDER` | `ollama` | LLM for extraction/consolidation |
-| `llm.model` | `LLM_MODEL` | `qwen2.5:7b` | LLM model |
-| `llm.base_url` | `LLM_BASE_URL` | `http://localhost:11434` | LLM API endpoint |
 
-### Provider-specific env vars
+### Embedding
 
-| Provider | Env var |
-|----------|---------|
-| OpenAI | `OPENAI_API_KEY` |
-| Bedrock | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_BEDROCK_REGION` |
+| Setting | Env var | Default | Options / Description |
+|---------|---------|---------|----------------------|
+| `embedding.provider` | `EMBEDDING_PROVIDER` | `ollama` | `ollama` · `openai` · `bedrock` |
+| `embedding.model` | `EMBEDDING_MODEL` | `qwen3-embedding:0.6b` | Any model supported by the provider. Ollama: `nomic-embed-text`, `qwen3-embedding:0.6b`; OpenAI: `text-embedding-3-small`, `text-embedding-3-large`; Bedrock: `amazon.titan-embed-text-v2:0` |
+| `embedding.dimensions` | `EMBEDDING_DIMENSIONS` | `1024` | Must match the model's output. Common: `768`, `1024`, `1536`, `3072` |
+| `embedding.base_url` | `EMBEDDING_BASE_URL` | `http://localhost:11434` | API endpoint. Only used by `ollama` and `openai` providers |
+| `embedding.api_key` | `OPENAI_API_KEY` | — | API key for `openai` provider |
+
+### LLM (extraction & consolidation)
+
+| Setting | Env var | Default | Options / Description |
+|---------|---------|---------|----------------------|
+| `llm.provider` | `LLM_PROVIDER` | `ollama` | `ollama` · `openai` · `bedrock` |
+| `llm.model` | `LLM_MODEL` | `qwen2.5:7b` | Any model supported by the provider. Ollama: any local model; OpenAI: `gpt-4.1-mini`, `gpt-4.1`; Bedrock: `anthropic.claude-3-5-haiku-20241022-v1:0` |
+| `llm.base_url` | `LLM_BASE_URL` | `http://localhost:11434` | API endpoint. Only used by `ollama` and `openai` providers |
+| `llm.api_key` | `OPENAI_API_KEY` | — | API key for `openai` provider |
+| `llm.bedrock_region` | `AWS_BEDROCK_REGION` | `us-east-1` | AWS region for Bedrock. Falls back to `AWS_REGION` |
+
+### Daemon
+
+| Setting | Default | Options / Description |
+|---------|---------|----------------------|
+| `daemon.tick_interval_sec` | `5` | Seconds between daemon loop ticks |
+| `daemon.extract_every_sec` | `300` | Seconds between extraction runs |
+| `daemon.extract_min_events` | `5` | Min session events before triggering extraction |
+| `daemon.consolidation_enabled` | `true` | `true` · `false` — auto-distill session summaries |
+| `daemon.relation_inference_enabled` | `true` | `true` · `false` — infer entity relationships via LLM |
+| `daemon.staleness_threshold_days` | `30` | Days before a fact is flagged as stale |
+
+### Watchers
+
+| Setting | Default | Options / Description |
+|---------|---------|----------------------|
+| `watchers.copilot.enabled` | `true` | `true` · `false` — watch Copilot session logs |
+| `watchers.copilot.path` | `~/.copilot/session-state` | Path to Copilot session logs |
+| `watchers.claude.enabled` | `false` | `true` · `false` — watch Claude Code projects |
+| `watchers.claude.path` | `~/.claude/projects` | Path to Claude Code project logs |
+
+### Provider authentication
+
+| Provider | Required credentials |
+|----------|---------------------|
+| `ollama` | None (local) |
+| `openai` | `OPENAI_API_KEY` env var or `embedding.api_key` / `llm.api_key` in config |
+| `bedrock` | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` (or IAM role), `AWS_BEDROCK_REGION` |
 
 ## CLI Commands
 
