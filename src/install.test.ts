@@ -38,7 +38,7 @@ function restore(): void {
     fs.writeFileSync(copilotConfigPath, copilotBackup);
   } else if (fs.existsSync(copilotConfigPath)) {
     // If the file didn't exist before but does now, we need to remove
-    // only the mem00 entry, not delete the whole file (other tools may have written it)
+    // only the bikky entry, not delete the whole file (other tools may have written it)
     // Actually, for safety, just leave it. The backup was null meaning it didn't exist.
     // But writeInstallConfig created it. We should remove it to be clean.
     fs.unlinkSync(copilotConfigPath);
@@ -78,18 +78,18 @@ describe("writeInstallConfig", () => {
     await writeInstallConfig();
     const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf-8"));
     assert.ok(config.mcpServers);
-    assert.ok(config.mcpServers.mem00);
-    assert.strictEqual(config.mcpServers.mem00.command, "npx");
-    assert.deepStrictEqual(config.mcpServers.mem00.args, ["-y", "@sabz00/mem00", "mcp"]);
+    assert.ok(config.mcpServers.bikky);
+    assert.strictEqual(config.mcpServers.bikky.command, "npx");
+    assert.deepStrictEqual(config.mcpServers.bikky.args, ["-y", "bikky", "mcp"]);
   });
 
   it("claude config has correct structure", async () => {
     await writeInstallConfig();
     const config = JSON.parse(fs.readFileSync(claudeConfigPath, "utf-8"));
     assert.ok(config.mcpServers);
-    assert.ok(config.mcpServers.mem00);
-    assert.strictEqual(config.mcpServers.mem00.command, "npx");
-    assert.deepStrictEqual(config.mcpServers.mem00.args, ["-y", "@sabz00/mem00", "mcp"]);
+    assert.ok(config.mcpServers.bikky);
+    assert.strictEqual(config.mcpServers.bikky.command, "npx");
+    assert.deepStrictEqual(config.mcpServers.bikky.args, ["-y", "bikky", "mcp"]);
   });
 
   it("preserves existing mcpServers in copilot config", async () => {
@@ -109,7 +109,7 @@ describe("writeInstallConfig", () => {
     const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf-8"));
     // Both servers should exist
     assert.ok(config.mcpServers["other-tool"]);
-    assert.ok(config.mcpServers.mem00);
+    assert.ok(config.mcpServers.bikky);
     assert.strictEqual(config.mcpServers["other-tool"].command, "other");
   });
 
@@ -128,18 +128,18 @@ describe("writeInstallConfig", () => {
 
     const config = JSON.parse(fs.readFileSync(claudeConfigPath, "utf-8"));
     assert.ok(config.mcpServers["existing-server"]);
-    assert.ok(config.mcpServers.mem00);
+    assert.ok(config.mcpServers.bikky);
   });
 
-  it("overwrites existing mem00 entry on re-run", async () => {
+  it("overwrites existing bikky entry on re-run", async () => {
     // First run
     await writeInstallConfig();
     // Second run
     await writeInstallConfig();
 
     const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf-8"));
-    assert.strictEqual(config.mcpServers.mem00.command, "npx");
-    assert.deepStrictEqual(config.mcpServers.mem00.args, ["-y", "@sabz00/mem00", "mcp"]);
+    assert.strictEqual(config.mcpServers.bikky.command, "npx");
+    assert.deepStrictEqual(config.mcpServers.bikky.args, ["-y", "bikky", "mcp"]);
   });
 
   it("handles malformed existing config file", async () => {
@@ -150,6 +150,6 @@ describe("writeInstallConfig", () => {
     await writeInstallConfig();
 
     const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf-8"));
-    assert.ok(config.mcpServers.mem00);
+    assert.ok(config.mcpServers.bikky);
   });
 });

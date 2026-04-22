@@ -1,8 +1,8 @@
 /**
- * Qdrant client for the mem00 daemon — direct HTTP access to Qdrant Cloud.
+ * Qdrant client for the bikky daemon — direct HTTP access to Qdrant Cloud.
  * Embedding is handled by ../llm/embedding.ts (config-driven provider abstraction).
  *
- * Credentials: config file (~/.mem00/config.json) → env vars.
+ * Credentials: config file (~/.bikky/config.json) → env vars.
  */
 
 import { randomUUID } from "node:crypto";
@@ -108,7 +108,7 @@ export interface DedupThresholds {
 
 let qdrantUrl: string | null = null;
 let qdrantApiKey: string | null = null;
-let collection: string = "mem00";
+let collection: string = "bikky";
 let logFn: LogFn = () => {};
 
 const setLogger = (fn: LogFn): void => { logFn = fn; };
@@ -125,7 +125,7 @@ const init = (): boolean => {
 
   qdrantUrl = cfg.qdrant_url;
   qdrantApiKey = cfg.qdrant_api_key;
-  collection = cfg.collection || "mem00";
+  collection = cfg.collection || "bikky";
 
   if (qdrantUrl) qdrantUrl = qdrantUrl.replace(/\/+$/, "");
 

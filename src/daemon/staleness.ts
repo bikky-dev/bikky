@@ -7,7 +7,7 @@
  */
 
 import * as qdrantMod from "./qdrant.js";
-import type { Mem00Config } from "../config.js";
+import type { BikkyConfig } from "../config.js";
 import type { LogFn, QdrantScrollFilters, QdrantScrollResult } from "./qdrant.js";
 
 let logFn: LogFn = console.log as unknown as LogFn;
@@ -31,7 +31,7 @@ const defaultDeps: StaleDeps = {
  * Finds facts in configured categories whose last_reinforced_at is older than threshold.
  * Logs stale facts instead of writing to inbox.
  */
-export const scanStaleFacts = async (config: Mem00Config, deps: StaleDeps = defaultDeps): Promise<void> => {
+export const scanStaleFacts = async (config: BikkyConfig, deps: StaleDeps = defaultDeps): Promise<void> => {
   const threshold = config.daemon.staleness_threshold_days || 30;
   const categories = ["infrastructure", "projects", "decisions"];
   const limit = 3;

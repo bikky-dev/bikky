@@ -1,8 +1,8 @@
 /**
- * Configuration loader for mem00.
+ * Configuration loader for bikky.
  *
- * Resolution order: defaults → ~/.mem00/config.json → env vars.
- * Config directory: ~/.mem00/
+ * Resolution order: defaults → ~/.bikky/config.json → env vars.
+ * Config directory: ~/.bikky/
  */
 
 import fs from "node:fs";
@@ -13,10 +13,10 @@ import os from "node:os";
 // Paths
 // ---------------------------------------------------------------------------
 
-export const MEM00_DIR = path.join(os.homedir(), ".mem00");
-export const CONFIG_PATH = path.join(MEM00_DIR, "config.json");
-export const LOG_DIR = path.join(MEM00_DIR, "logs");
-export const STATE_DIR = path.join(MEM00_DIR, "state");
+export const BIKKY_DIR = path.join(os.homedir(), ".bikky");
+export const CONFIG_PATH = path.join(BIKKY_DIR, "config.json");
+export const LOG_DIR = path.join(BIKKY_DIR, "logs");
+export const STATE_DIR = path.join(BIKKY_DIR, "state");
 
 // ---------------------------------------------------------------------------
 // Config types
@@ -52,7 +52,7 @@ export interface WatcherConfig {
   claude: { enabled: boolean; path: string };
 }
 
-export interface Mem00Config {
+export interface BikkyConfig {
   qdrant_url: string | null;
   qdrant_api_key: string | null;
   collection: string;
@@ -66,10 +66,10 @@ export interface Mem00Config {
 // Defaults
 // ---------------------------------------------------------------------------
 
-const DEFAULTS: Mem00Config = {
+const DEFAULTS: BikkyConfig = {
   qdrant_url: null,
   qdrant_api_key: null,
-  collection: "mem00",
+  collection: "bikky",
   embedding: {
     provider: "ollama",
     model: "qwen3-embedding:0.6b",
@@ -120,13 +120,13 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Record<
 // Load config
 // ---------------------------------------------------------------------------
 
-let _config: Mem00Config | null = null;
+let _config: BikkyConfig | null = null;
 
-export function loadConfig(): Mem00Config {
+export function loadConfig(): BikkyConfig {
   if (_config) return _config;
 
   // Ensure dirs exist
-  fs.mkdirSync(MEM00_DIR, { recursive: true });
+  fs.mkdirSync(BIKKY_DIR, { recursive: true });
   fs.mkdirSync(LOG_DIR, { recursive: true });
   fs.mkdirSync(STATE_DIR, { recursive: true });
 
@@ -137,16 +137,16 @@ export function loadConfig(): Mem00Config {
   if (fs.existsSync(CONFIG_PATH)) {
     try {
       const fileConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as Record<string, unknown>;
-      config = deepMerge(config as unknown as Record<string, unknown>, fileConfig) as unknown as Mem00Config;
+      config = deepMerge(config as unknown as Record<string, unknown>, fileConfig) as unknown as BikkyConfig;
     } catch (e) {
-      console.error(`mem00: failed to parse ${CONFIG_PATH}: ${e instanceof Error ? e.message : String(e)}`);
+      console.error(`bikky: failed to parse ${CONFIG_PATH}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   // Env var overrides (highest priority)
   if (process.env.QDRANT_URL) config.qdrant_url = process.env.QDRANT_URL;
   if (process.env.QDRANT_API_KEY) config.qdrant_api_key = process.env.QDRANT_API_KEY;
-  if (process.env.MEM00_COLLECTION) config.collection = process.env.MEM00_COLLECTION;
+  if (process.env.BIKKY_COLLECTION) config.collection = process.env.BIKKY_COLLECTION;
 
   // Embedding env overrides
   if (process.env.EMBEDDING_PROVIDER) config.embedding.provider = process.env.EMBEDDING_PROVIDER as EmbeddingConfig["provider"];
@@ -173,8 +173,8 @@ export function loadConfig(): Mem00Config {
 }
 
 /** Save config to disk (used by setup command). */
-export function saveConfig(config: Mem00Config): void {
-  fs.mkdirSync(MEM00_DIR, { recursive: true });
+export function saveConfig(config: BikkyConfig): void {
+  fs.mkdirSync(BIKKY_DIR, { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
   _config = config;
 }

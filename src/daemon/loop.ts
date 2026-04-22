@@ -24,7 +24,7 @@ let intervalHandle: ReturnType<typeof setInterval> | null = null;
 
 export async function startDaemon(): Promise<void> {
   const cfg = loadConfig();
-  log("INFO", `Starting mem00 daemon (PID ${process.pid})`);
+  log("INFO", `Starting bikky daemon (PID ${process.pid})`);
 
   // Wire up loggers for all daemon sub-modules
   qdrantClient.setLogger(log);

@@ -1,12 +1,12 @@
-# mem00
+# bikky
 
 **Shared persistent memory for AI coding sessions.**
 
-mem00 gives your AI coding assistants (GitHub Copilot, Claude Code) long-term memory that persists across sessions. Facts, decisions, architecture knowledge, and entity relationships are stored in a vector database and recalled automatically.
+bikky gives your AI coding assistants (GitHub Copilot, Claude Code) long-term memory that persists across sessions. Facts, decisions, architecture knowledge, and entity relationships are stored in a vector database and recalled automatically.
 
 ---
 
-## Why mem00 exists
+## Why bikky exists
 
 Every engineering team builds institutional knowledge — the kind that doesn't live in documentation. Why that config value is what it is. Which deploy steps to run in which order. What broke last quarter and how it was fixed. Who owns what.
 
@@ -18,13 +18,13 @@ AI coding agents are a force multiplier — teams ship more, explore more soluti
 
 ### Knowledge that compounds
 
-mem00 captures what agents learn during coding sessions and makes it available to every future session — for every team member — automatically. No manual documentation. No wikis to maintain.
+bikky captures what agents learn during coding sessions and makes it available to every future session — for every team member — automatically. No manual documentation. No wikis to maintain.
 
 When one engineer's agent figures out a workaround for a tricky edge case, every agent on the team knows it from their next session onward. Each team member is amplified with the experience gathered by every other member. The 50th session on a codebase is dramatically more effective than the 1st — not because of better prompts, but because of accumulated institutional memory.
 
 ### Self-curating
 
-Raw accumulation creates noise. mem00 curates knowledge automatically:
+Raw accumulation creates noise. bikky curates knowledge automatically:
 
 - **Deduplication** — identical or near-identical facts are merged, not duplicated
 - **Confidence decay** — old facts gradually lose weight and surface for review instead of being treated as gospel
@@ -34,7 +34,7 @@ Raw accumulation creates noise. mem00 curates knowledge automatically:
 
 ### Zero maintenance
 
-mem00 is not a wiki you have to write. Facts are captured as a natural byproduct of engineering work. The curation pipeline runs autonomously. Install once, and every session gets smarter.
+bikky is not a wiki you have to write. Facts are captured as a natural byproduct of engineering work. The curation pipeline runs autonomously. Install once, and every session gets smarter.
 
 ---
 
@@ -42,8 +42,8 @@ mem00 is not a wiki you have to write. Facts are captured as a natural byproduct
 
 ```mermaid
 graph TD
-    A["🤖 Copilot / Claude Code"] <-->|MCP stdio| B["mem00 MCP Server"]
-    C["📁 Session logs<br/>~/.copilot/"] -->|events.jsonl| D["mem00 Daemon<br/>(background)"]
+    A["🤖 Copilot / Claude Code"] <-->|MCP stdio| B["bikky MCP Server"]
+    C["📁 Session logs<br/>~/.copilot/"] -->|events.jsonl| D["bikky Daemon<br/>(background)"]
     B -->|store / recall| E[("🔮 Qdrant Cloud<br/>vector DB")]
     D -->|embed + store| E
 ```
@@ -66,10 +66,10 @@ graph TD
 
 ```bash
 # Install globally
-npm install -g @sabz00/mem00
+npm install -g bikky
 
 # Add to your editor's MCP config
-mem00 install
+bikky install
 
 # That's it — restart your editor and the memory tools appear
 ```
@@ -96,7 +96,7 @@ After installing, configure your Qdrant credentials. You can either:
 
 **Option B** — Edit config directly:
 ```bash
-cat > ~/.mem00/config.json << 'EOF'
+cat > ~/.bikky/config.json << 'EOF'
 {
   "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333",
   "qdrant_api_key": "your-api-key-here"
@@ -112,7 +112,7 @@ export QDRANT_API_KEY="your-api-key-here"
 
 ## Configuration
 
-Config lives at `~/.mem00/config.json`. Resolution order: **defaults → config file → env vars** (highest wins).
+Config lives at `~/.bikky/config.json`. Resolution order: **defaults → config file → env vars** (highest wins).
 
 ### Qdrant (required)
 
@@ -120,7 +120,7 @@ Config lives at `~/.mem00/config.json`. Resolution order: **defaults → config 
 |---------|---------|---------|-------------|
 | `qdrant_url` | `QDRANT_URL` | *none — must be set* | Qdrant REST URL, e.g. `https://abc123.cloud.qdrant.io:6333` |
 | `qdrant_api_key` | `QDRANT_API_KEY` | *none — must be set* | Qdrant API key from cluster dashboard |
-| `collection` | `MEM00_COLLECTION` | `mem00` | Collection name. Change only if running multiple instances |
+| `collection` | `BIKKY_COLLECTION` | `bikky` | Collection name. Change only if running multiple instances |
 
 ### Embedding & LLM providers
 
@@ -252,10 +252,10 @@ Both `embedding.provider` and `llm.provider` accept exactly one of three values:
 ## CLI Commands
 
 ```bash
-mem00 mcp       # Start MCP server (stdio) — used by editors
-mem00 setup     # Interactive setup wizard
-mem00 status    # Check memory system status
-mem00 install   # Write MCP config for Copilot + Claude Code
+bikky mcp       # Start MCP server (stdio) — used by editors
+bikky setup     # Interactive setup wizard
+bikky status    # Check memory system status
+bikky install   # Write MCP config for Copilot + Claude Code
 ```
 
 ## Memory architecture

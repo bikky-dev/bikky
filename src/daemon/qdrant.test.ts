@@ -25,7 +25,7 @@ import type { StoreFact } from "./qdrant.js";
 // ---------------------------------------------------------------------------
 
 let savedConfig: string | null = null;
-const configPath = path.join(os.homedir(), ".mem00", "config.json");
+const configPath = path.join(os.homedir(), ".bikky", "config.json");
 
 // Env vars that override config — must be cleared for null-credential tests
 const QDRANT_ENV_KEYS = ["QDRANT_URL", "QDRANT_API_KEY"];

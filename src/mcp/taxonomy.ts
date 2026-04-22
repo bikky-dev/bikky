@@ -55,7 +55,7 @@ export const CATEGORIES: Record<string, CategoryDef> = {
     extractionHint:
       "Look for: task progress, blockers, completions, branch names, deployment status, milestones, goals, project structure, hobbies, personal projects",
     examples: [
-      { content: "The memory extraction daemon pipeline is being built", entities: ["mem00", "daemon"], confidence: 0.95, importance: 0.6 },
+      { content: "The memory extraction daemon pipeline is being built", entities: ["bikky", "daemon"], confidence: 0.95, importance: 0.6 },
       { content: "User is growing tomatoes and herbs in the backyard garden", entities: ["user", "garden"], confidence: 0.85, importance: 0.4 },
     ],
   },

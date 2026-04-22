@@ -18,7 +18,7 @@ import * as qdrant from "./qdrant.js";
 import { chatCompletion } from "../llm/index.js";
 import { categoryValues } from "../mcp/taxonomy.js";
 import { STATE_DIR } from "../config.js";
-import type { Mem00Config } from "../config.js";
+import type { BikkyConfig } from "../config.js";
 import type { LogFn, QdrantPayload, StoreFact } from "./qdrant.js";
 
 // ---------------------------------------------------------------------------
@@ -75,7 +75,7 @@ const MEMORY_BRIEF_PATH = join(STATE_DIR, "brief.md");
  * Triggered periodically from daemon tick.
  */
 const autoDistill = async (
-  _config: Mem00Config,
+  _config: BikkyConfig,
   { minSummaries = 5 }: { minSummaries?: number } = {},
 ): Promise<DistillResult> => {
   if (!qdrant.isReady()) return { distilled: false };
@@ -198,7 +198,7 @@ Return ONLY the JSON array.` },
  */
 const detectContradiction = async (
   fact: { content: string; category: string; entities: string[]; importance?: number },
-  _config: Mem00Config,
+  _config: BikkyConfig,
 ): Promise<ContradictionResult> => {
   if (!qdrant.isReady()) return { contradiction: false };
   if ((fact.importance || 0) < 0.5) return { contradiction: false };
@@ -274,7 +274,7 @@ Return ONLY the JSON object.` },
  * Check for oversized categories and consolidate them.
  */
 const rebalanceCategories = async (
-  _config: Mem00Config,
+  _config: BikkyConfig,
   threshold = 100,
   postFn?: ((text: string) => Promise<void>) | null,
 ): Promise<RebalanceResult> => {
@@ -422,9 +422,9 @@ const formatHealthReport = (report: HealthReport | null): string => {
 
 /**
  * Generate a compact memory brief from top facts.
- * Written to ~/.mem00/state/brief.md for agent orientation.
+ * Written to ~/.bikky/state/brief.md for agent orientation.
  */
-const generateMemoryBrief = async (_config: Mem00Config): Promise<boolean> => {
+const generateMemoryBrief = async (_config: BikkyConfig): Promise<boolean> => {
   if (!qdrant.isReady()) return false;
 
   try {
@@ -518,7 +518,7 @@ let consolidationTickCount = 0;
  * Main consolidation tick — called from daemon tick loop.
  * Spreads out expensive operations across different tick intervals.
  */
-const tick = async (config: Mem00Config, opts: ConsolidationTickOptions = {}): Promise<void> => {
+const tick = async (config: BikkyConfig, opts: ConsolidationTickOptions = {}): Promise<void> => {
   if (!qdrant.isReady()) return;
   if (config.daemon.consolidation_enabled === false) return;
   consolidationTickCount++;
