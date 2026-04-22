@@ -40,13 +40,7 @@ bikky is not a wiki you have to write. Facts are captured as a natural byproduct
 
 ## How it works
 
-```mermaid
-graph TD
-    A["🤖 Copilot / Claude Code"] <-->|MCP stdio| B["bikky MCP Server"]
-    C["📁 Session logs<br/>~/.copilot/"] -->|events.jsonl| D["bikky Daemon<br/>(background)"]
-    B -->|store / recall| E[("🔮 Qdrant Cloud<br/>vector DB")]
-    D -->|embed + store| E
-```
+![Architecture](https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/architecture.svg)
 
 **MCP Server** — 12 memory tools your AI assistant can call directly:
 - `memory_store` / `memory_recall` — store and search facts
@@ -264,15 +258,7 @@ bikky install   # Write MCP config for Copilot + Claude Code
 
 Two-layer dedup prevents bloat:
 
-```mermaid
-flowchart TD
-    A[New fact] --> B{SHA-256<br/>content hash}
-    B -->|exact match| C[Skip — duplicate]
-    B -->|no match| D{Vector<br/>similarity}
-    D -->|"> 0.92"| E["Reinforce existing<br/>(bump count)"]
-    D -->|"> 0.80"| F[Store + flag<br/>as related]
-    D -->|"< 0.80"| G[Store as new]
-```
+![Deduplication](https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/dedup.svg)
 
 ### Ranking formula
 Facts are ranked using a combined score:
@@ -285,15 +271,7 @@ Facts are ranked using a combined score:
 
 Facts mentioning multiple entities build an implicit graph:
 
-```mermaid
-graph LR
-    subgraph "Entity Graph"
-        U(user) -->|owns| P(project-x)
-        U -->|uses| Q(qdrant)
-        P -->|depends-on| Q
-        U -->|prefers| D(dark mode)
-    end
-```
+![Entity Graph](https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/entity-graph.svg)
 
 The daemon periodically:
 1. Scrolls all facts → builds entity co-occurrence map
@@ -302,16 +280,7 @@ The daemon periodically:
 
 ### Consolidation pipeline
 
-```mermaid
-flowchart LR
-    A[Session<br/>summaries] --> B{5+ summaries?}
-    B -->|yes| C[Auto-distill]
-    C --> D[Distilled<br/>patterns]
-    E[All facts] --> F[Contradiction<br/>detection]
-    F --> G[Flagged for<br/>review]
-    E --> H[Staleness<br/>scan]
-    H --> I["Stale facts<br/>(30+ days)"]
-```
+![Consolidation Pipeline](https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/consolidation.svg)
 
 - **Auto-distill** — merges 5+ session summaries into distilled patterns
 - **Contradiction detection** — flags conflicting facts for review

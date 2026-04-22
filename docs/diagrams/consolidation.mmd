@@ -1,0 +1,8 @@
+flowchart LR
+    A[Session<br/>summaries] --> B{5+ summaries?}
+    B -->|yes| C[Auto-distill]
+    C --> D[Distilled<br/>patterns]
+    E[All facts] --> F[Contradiction<br/>detection]
+    F --> G[Flagged for<br/>review]
+    E --> H[Staleness<br/>scan]
+    H --> I["Stale facts<br/>(30+ days)"]

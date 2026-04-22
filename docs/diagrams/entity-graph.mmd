@@ -1,0 +1,7 @@
+graph LR
+    subgraph "Entity Graph"
+        U(user) -->|owns| P(project-x)
+        U -->|uses| Q(qdrant)
+        P -->|depends-on| Q
+        U -->|prefers| D(dark mode)
+    end

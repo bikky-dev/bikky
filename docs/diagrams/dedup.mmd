@@ -1,0 +1,7 @@
+flowchart TD
+    A[New fact] --> B{SHA-256<br/>content hash}
+    B -->|exact match| C[Skip — duplicate]
+    B -->|no match| D{Vector<br/>similarity}
+    D -->|"> 0.92"| E["Reinforce existing<br/>(bump count)"]
+    D -->|"> 0.80"| F[Store + flag<br/>as related]
+    D -->|"< 0.80"| G[Store as new]
