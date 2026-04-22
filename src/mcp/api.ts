@@ -1,6 +1,6 @@
 /**
  * External API helpers — Qdrant REST client, LLM chat, logging.
- * Credentials come from config (~/.mem00/config.json) or env vars.
+ * Credentials come from config (~/.bikky/config.json) or env vars.
  */
 
 import fs from "node:fs";
@@ -11,14 +11,14 @@ export type { EmbeddingProviderConfig } from "../llm/index.js";
 export { embed, getEmbeddingDimensions, getEmbeddingConfig, initEmbedding };
 
 import { createLogger } from "../logger.js";
-import { MEM00_DIR, LOG_DIR, loadConfig } from "../config.js";
+import { BIKKY_DIR, LOG_DIR, loadConfig } from "../config.js";
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-export const MEMORY_DIR = MEM00_DIR;
-let collectionName = "mem00";
+export const MEMORY_DIR = BIKKY_DIR;
+let collectionName = "bikky";
 
 export function getCollection(): string { return collectionName; }
 export function setCollection(name: string): void { collectionName = name; }

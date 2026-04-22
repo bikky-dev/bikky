@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { glob } from "node:fs/promises";
 
 import { loadConfig, STATE_DIR } from "../config.js";
-import type { Mem00Config } from "../config.js";
+import type { BikkyConfig } from "../config.js";
 import * as qdrant from "./qdrant.js";
 import { chatCompletion } from "../llm/index.js";
 import { detectContradiction } from "./consolidation.js";
@@ -362,7 +362,7 @@ const contentHash = (text: string): string =>
 const storeFacts = async (
   facts: ExtractedFact[],
   sessionId: string,
-  config?: Mem00Config,
+  config?: BikkyConfig,
 ): Promise<number> => {
   if (!qdrant.isReady()) {
     logFn("WARN", "Extraction: Qdrant not ready, skipping store");
@@ -438,7 +438,7 @@ const MAX_TRANSCRIPT_CHARS = 60_000;
  * For each active Copilot session with events.jsonl, reads new events
  * since the last high-water mark, extracts facts via LLM, and stores in Qdrant.
  */
-export const tick = async (config: Mem00Config): Promise<void> => {
+export const tick = async (config: BikkyConfig): Promise<void> => {
   if (config.daemon.extract_every_sec === 0) {
     logFn("DEBUG", "Extraction: disabled by config (extract_every_sec=0)");
     return;
@@ -478,7 +478,7 @@ export const tick = async (config: Mem00Config): Promise<void> => {
 const extractForUuid = async (
   mapping: LockMapping,
   minEvents: number,
-  config?: Mem00Config,
+  config?: BikkyConfig,
 ): Promise<number> => {
   const { uuid, eventsPath } = mapping;
 

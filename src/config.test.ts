@@ -1,7 +1,7 @@
 /**
  * Tests for the config system.
  *
- * Strategy: we backup/restore ~/.mem00/config.json around file-based tests
+ * Strategy: we backup/restore ~/.bikky/config.json around file-based tests
  * and use env var overrides + resetConfig() for env-var tests.
  */
 
@@ -15,7 +15,7 @@ import {
   resetConfig,
   saveConfig,
   CONFIG_PATH,
-  MEM00_DIR,
+  BIKKY_DIR,
   LOG_DIR,
   STATE_DIR,
   CONFIG_DEFAULTS,
@@ -47,7 +47,7 @@ function restoreConfig(): void {
 const ENV_KEYS = [
   "QDRANT_URL",
   "QDRANT_API_KEY",
-  "MEM00_COLLECTION",
+  "BIKKY_COLLECTION",
   "EMBEDDING_PROVIDER",
   "EMBEDDING_MODEL",
   "EMBEDDING_BASE_URL",
@@ -113,20 +113,20 @@ describe("config", () => {
   // ── Path exports ──────────────────────────────────────────────────────────
 
   describe("path exports", () => {
-    it("MEM00_DIR is under home directory", () => {
-      assert.ok(MEM00_DIR.includes(".mem00"));
+    it("BIKKY_DIR is under home directory", () => {
+      assert.ok(BIKKY_DIR.includes(".bikky"));
     });
 
-    it("CONFIG_PATH is config.json inside MEM00_DIR", () => {
-      assert.strictEqual(CONFIG_PATH, path.join(MEM00_DIR, "config.json"));
+    it("CONFIG_PATH is config.json inside BIKKY_DIR", () => {
+      assert.strictEqual(CONFIG_PATH, path.join(BIKKY_DIR, "config.json"));
     });
 
-    it("LOG_DIR is logs inside MEM00_DIR", () => {
-      assert.strictEqual(LOG_DIR, path.join(MEM00_DIR, "logs"));
+    it("LOG_DIR is logs inside BIKKY_DIR", () => {
+      assert.strictEqual(LOG_DIR, path.join(BIKKY_DIR, "logs"));
     });
 
-    it("STATE_DIR is state inside MEM00_DIR", () => {
-      assert.strictEqual(STATE_DIR, path.join(MEM00_DIR, "state"));
+    it("STATE_DIR is state inside BIKKY_DIR", () => {
+      assert.strictEqual(STATE_DIR, path.join(BIKKY_DIR, "state"));
     });
   });
 
@@ -154,10 +154,10 @@ describe("config", () => {
       assert.strictEqual(cfg.qdrant_api_key, null);
     });
 
-    it("collection defaults to 'mem00'", () => {
+    it("collection defaults to 'bikky'", () => {
       if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
       const cfg = loadConfig();
-      assert.strictEqual(cfg.collection, "mem00");
+      assert.strictEqual(cfg.collection, "bikky");
     });
 
     it("embedding.provider defaults to 'ollama'", () => {
@@ -219,7 +219,7 @@ describe("config", () => {
   describe("CONFIG_DEFAULTS", () => {
     it("is exported and matches loadConfig defaults", () => {
       assert.ok(CONFIG_DEFAULTS);
-      assert.strictEqual(CONFIG_DEFAULTS.collection, "mem00");
+      assert.strictEqual(CONFIG_DEFAULTS.collection, "bikky");
       assert.strictEqual(CONFIG_DEFAULTS.qdrant_url, null);
       assert.strictEqual(CONFIG_DEFAULTS.embedding.provider, "ollama");
     });
@@ -233,10 +233,10 @@ describe("config", () => {
 
       // First load — defaults
       const first = loadConfig();
-      assert.strictEqual(first.collection, "mem00");
+      assert.strictEqual(first.collection, "bikky");
 
       // Set an env var, reset, reload
-      process.env.MEM00_COLLECTION = "custom-collection";
+      process.env.BIKKY_COLLECTION = "custom-collection";
       resetConfig();
 
       const second = loadConfig();
@@ -261,9 +261,9 @@ describe("config", () => {
       assert.strictEqual(cfg.qdrant_api_key, "test-api-key-123");
     });
 
-    it("MEM00_COLLECTION overrides collection", () => {
+    it("BIKKY_COLLECTION overrides collection", () => {
       if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
-      process.env.MEM00_COLLECTION = "my-collection";
+      process.env.BIKKY_COLLECTION = "my-collection";
       const cfg = loadConfig();
       assert.strictEqual(cfg.collection, "my-collection");
     });
@@ -384,7 +384,7 @@ describe("config", () => {
   describe("file config deep merge", () => {
     it("file config overrides specific defaults while preserving others", () => {
       // Write a partial config file
-      fs.mkdirSync(MEM00_DIR, { recursive: true });
+      fs.mkdirSync(BIKKY_DIR, { recursive: true });
       fs.writeFileSync(
         CONFIG_PATH,
         JSON.stringify({
@@ -405,7 +405,7 @@ describe("config", () => {
     });
 
     it("nested objects merge correctly (embedding overrides)", () => {
-      fs.mkdirSync(MEM00_DIR, { recursive: true });
+      fs.mkdirSync(BIKKY_DIR, { recursive: true });
       fs.writeFileSync(
         CONFIG_PATH,
         JSON.stringify({
@@ -426,24 +426,24 @@ describe("config", () => {
     });
 
     it("env vars override file config", () => {
-      fs.mkdirSync(MEM00_DIR, { recursive: true });
+      fs.mkdirSync(BIKKY_DIR, { recursive: true });
       fs.writeFileSync(
         CONFIG_PATH,
         JSON.stringify({ collection: "from-file" }),
       );
-      process.env.MEM00_COLLECTION = "from-env";
+      process.env.BIKKY_COLLECTION = "from-env";
 
       const cfg = loadConfig();
       assert.strictEqual(cfg.collection, "from-env");
     });
 
     it("handles malformed config file gracefully", () => {
-      fs.mkdirSync(MEM00_DIR, { recursive: true });
+      fs.mkdirSync(BIKKY_DIR, { recursive: true });
       fs.writeFileSync(CONFIG_PATH, "{ invalid json !!!");
 
       // Should not throw — falls back to defaults
       const cfg = loadConfig();
-      assert.strictEqual(cfg.collection, "mem00");
+      assert.strictEqual(cfg.collection, "bikky");
     });
   });
 
@@ -498,11 +498,11 @@ describe("config", () => {
   // ── Directory creation ────────────────────────────────────────────────────
 
   describe("directory creation", () => {
-    it("loadConfig creates MEM00_DIR, LOG_DIR, STATE_DIR", () => {
+    it("loadConfig creates BIKKY_DIR, LOG_DIR, STATE_DIR", () => {
       if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
       const cfg = loadConfig();
       assert.ok(cfg); // loaded successfully
-      assert.ok(fs.existsSync(MEM00_DIR));
+      assert.ok(fs.existsSync(BIKKY_DIR));
       assert.ok(fs.existsSync(LOG_DIR));
       assert.ok(fs.existsSync(STATE_DIR));
     });

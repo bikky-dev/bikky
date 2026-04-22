@@ -22,13 +22,13 @@ let testDir: string;
 let savedConfig: string | null = null;
 
 function createTestDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "mem00-test-sessions-"));
+  return fs.mkdtempSync(path.join(os.tmpdir(), "bikky-test-sessions-"));
 }
 
 describe("discoverSessions", () => {
   before(() => {
     // Save existing config state
-    const configPath = path.join(os.homedir(), ".mem00", "config.json");
+    const configPath = path.join(os.homedir(), ".bikky", "config.json");
     if (fs.existsSync(configPath)) {
       savedConfig = fs.readFileSync(configPath, "utf-8");
     }
@@ -40,7 +40,7 @@ describe("discoverSessions", () => {
     fs.rmSync(testDir, { recursive: true, force: true });
 
     // Restore original config
-    const configPath = path.join(os.homedir(), ".mem00", "config.json");
+    const configPath = path.join(os.homedir(), ".bikky", "config.json");
     if (savedConfig !== null) {
       fs.writeFileSync(configPath, savedConfig);
     } else if (fs.existsSync(configPath)) {

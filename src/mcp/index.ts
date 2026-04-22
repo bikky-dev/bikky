@@ -1,9 +1,9 @@
 /**
- * mem00 MCP Server — episodic memory via Qdrant Cloud.
+ * bikky MCP Server — episodic memory via Qdrant Cloud.
  *
  * Provides persistent memory across AI coding sessions. All facts, relations,
  * and entity context live as Qdrant points with vector embeddings + structured
- * payloads. Config stored in ~/.mem00/config.json.
+ * payloads. Config stored in ~/.bikky/config.json.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -22,7 +22,7 @@ import { registerTools } from "./tools.js";
 import { loadConfig } from "../config.js";
 
 export async function startMcpServer(): Promise<void> {
-  log("INFO", `Starting mem00 MCP server (PID ${process.pid})`);
+  log("INFO", `Starting bikky MCP server (PID ${process.pid})`);
 
   const cfg = loadConfig();
 
@@ -60,7 +60,7 @@ export async function startMcpServer(): Promise<void> {
   }
 
   const mcp = new McpServer({
-    name: "mem00",
+    name: "bikky",
     version: "0.1.0",
   }, {
     instructions: "Shared memory tools for AI coding sessions. Store and recall facts, entities, and relationships across sessions.",

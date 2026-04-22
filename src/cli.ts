@@ -1,12 +1,12 @@
 /**
- * mem00 CLI — setup, start MCP server, manage daemon.
+ * bikky CLI — setup, start MCP server, manage daemon.
  *
  * Usage:
- *   mem00 mcp        — start MCP server (stdio, for editor integration)
- *   mem00 daemon     — start background daemon (extraction, consolidation, etc.)
- *   mem00 setup      — interactive setup wizard
- *   mem00 status     — check memory system status
- *   mem00 install    — write MCP config for Copilot / Claude Code
+ *   bikky mcp        — start MCP server (stdio, for editor integration)
+ *   bikky daemon     — start background daemon (extraction, consolidation, etc.)
+ *   bikky setup      — interactive setup wizard
+ *   bikky status     — check memory system status
+ *   bikky install    — write MCP config for Copilot / Claude Code
  */
 
 import { startMcpServer } from "./mcp/index.js";
@@ -21,7 +21,7 @@ async function main(): Promise<void> {
 
     case "daemon": {
       const daemon = await import("./daemon/index.js");
-      console.log("🧠 mem00 daemon starting…");
+      console.log("🧠 bikky daemon starting…");
       await daemon.startDaemon();
       process.on("SIGINT", () => {
         daemon.stopDaemon();
@@ -31,13 +31,13 @@ async function main(): Promise<void> {
     }
 
     case "setup":
-      console.log("🧠 mem00 setup");
-      console.log("Run `mem00 install` to add to your editor's MCP config.");
+      console.log("🧠 bikky setup");
+      console.log("Run `bikky install` to add to your editor's MCP config.");
       console.log("Then call configure_credentials from your editor to set up Qdrant.");
       break;
 
     case "status":
-      console.log("🧠 mem00 status — use get_setup_status via MCP for full details.");
+      console.log("🧠 bikky status — use get_setup_status via MCP for full details.");
       break;
 
     case "install": {
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
 
     default:
       console.error(`Unknown command: ${command}`);
-      console.error("Usage: mem00 [mcp|daemon|setup|status|install]");
+      console.error("Usage: bikky [mcp|daemon|setup|status|install]");
       process.exit(1);
   }
 }

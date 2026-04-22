@@ -82,7 +82,7 @@ function requireReady(): McpToolResult | null {
           ready: false,
           missing,
           setup_instructions:
-            "Memory is not configured. Run `mem00 setup` or call configure_credentials:\n" +
+            "Memory is not configured. Run `bikky setup` or call configure_credentials:\n" +
             "1. Go to cloud.qdrant.io → sign up (free tier: 1GB, no credit card)\n" +
             "2. Create a cluster → copy the REST URL and API key\n" +
             "3. Call configure_credentials with Qdrant values",
@@ -215,7 +215,7 @@ export function registerTools(mcp: McpServer): void {
 
       if (!status["ready"] && missing.length > 0) {
         status["setup_instructions"] =
-          "Run `mem00 setup` or guide the user:\n" +
+          "Run `bikky setup` or guide the user:\n" +
           "1. Go to cloud.qdrant.io → sign up (free tier: 1GB, no credit card)\n" +
           "2. Create a cluster → copy the REST URL and API key\n" +
           "3. Call configure_credentials with Qdrant values";
@@ -229,7 +229,7 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "configure_credentials",
-    "Store Qdrant + embedding credentials in ~/.mem00/config.json. Tests connectivity and creates the collection if needed.",
+    "Store Qdrant + embedding credentials in ~/.bikky/config.json. Tests connectivity and creates the collection if needed.",
     {
       qdrant_url: z.string().optional().describe("Qdrant Cloud REST URL (e.g. https://xxx.cloud.qdrant.io:6333)"),
       qdrant_api_key: z.string().optional().describe("Qdrant Cloud API key"),

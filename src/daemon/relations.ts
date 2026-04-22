@@ -15,7 +15,7 @@
 import { createHash } from "node:crypto";
 import * as qdrant from "./qdrant.js";
 import { chatCompletion } from "../llm/index.js";
-import type { Mem00Config } from "../config.js";
+import type { BikkyConfig } from "../config.js";
 import type { LogFn, QdrantPayload } from "./qdrant.js";
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -293,7 +293,7 @@ const storeRelation = async (
 
 // ─── Main Tick ───────────────────────────────────────────────────────────────
 
-const tick = async (config: Mem00Config): Promise<void> => {
+const tick = async (config: BikkyConfig): Promise<void> => {
   if (!qdrant.isReady()) return;
   if (config.daemon.relation_inference_enabled === false) return;
 

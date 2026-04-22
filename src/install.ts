@@ -26,7 +26,7 @@ export async function writeInstallConfig(): Promise<void> {
   const entry: McpServerEntry = {
     type: "stdio",
     command: "npx",
-    args: ["-y", "@sabz00/mem00", "mcp"],
+    args: ["-y", "bikky", "mcp"],
   };
 
   // Copilot MCP config
@@ -42,7 +42,7 @@ export async function writeInstallConfig(): Promise<void> {
   }
 
   if (!config.mcpServers) config.mcpServers = {};
-  config.mcpServers["mem00"] = entry;
+  config.mcpServers["bikky"] = entry;
 
   fs.mkdirSync(path.dirname(copilotConfigPath), { recursive: true });
   fs.writeFileSync(copilotConfigPath, JSON.stringify(config, null, 2) + "\n");
@@ -60,11 +60,11 @@ export async function writeInstallConfig(): Promise<void> {
   }
 
   if (!claudeConfig.mcpServers) claudeConfig.mcpServers = {};
-  claudeConfig.mcpServers["mem00"] = entry;
+  claudeConfig.mcpServers["bikky"] = entry;
 
   fs.mkdirSync(path.dirname(claudeConfigPath), { recursive: true });
   fs.writeFileSync(claudeConfigPath, JSON.stringify(claudeConfig, null, 2) + "\n");
   console.log(`✅ Written to ${claudeConfigPath}`);
 
-  console.log("\n🧠 mem00 is now registered. Restart your editor to activate.");
+  console.log("\n🧠 bikky is now registered. Restart your editor to activate.");
 }
