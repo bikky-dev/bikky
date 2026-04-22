@@ -17,6 +17,7 @@ export const BIKKY_DIR = path.join(os.homedir(), ".bikky");
 export const CONFIG_PATH = path.join(BIKKY_DIR, "config.json");
 export const LOG_DIR = path.join(BIKKY_DIR, "logs");
 export const STATE_DIR = path.join(BIKKY_DIR, "state");
+export const PID_PATH = path.join(STATE_DIR, "daemon.pid");
 
 // ---------------------------------------------------------------------------
 // Config types
