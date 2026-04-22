@@ -1,6 +1,6 @@
 {
   "name": "bikky",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Shared memory for AI coding sessions — MCP server + background daemon",
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -20,6 +20,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "postinstall": "node dist/postinstall.js || true",
     "start": "node dist/mcp/index.js",
     "daemon": "node dist/daemon/index.js",
     "dev": "tsc --watch",
