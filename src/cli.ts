@@ -98,7 +98,7 @@ async function main(): Promise<void> {
       const { execSync } = await import("node:child_process");
       console.log("🧠 Launching bikky ui…");
       try {
-        execSync("npx --yes @bikky/ui", { stdio: "inherit" });
+        execSync("npx --yes @bikky-dev/ui", { stdio: "inherit" });
       } catch {
         // User hit Ctrl+C or process exited
       }
