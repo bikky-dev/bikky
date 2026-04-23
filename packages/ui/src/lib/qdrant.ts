@@ -163,10 +163,22 @@ export function buildFilter(opts: {
 
 // --- Factory ---
 
+export function isQdrantConfigured(): boolean {
+  const cfg = loadConfig();
+  return Boolean(cfg.qdrant_url && cfg.qdrant_api_key);
+}
+
 export function createQdrantClient(): QdrantClient {
   const cfg = loadConfig();
   if (!cfg.qdrant_url || !cfg.qdrant_api_key) {
-    throw new Error("Qdrant not configured. Run `bikky setup` first.");
+    throw new QdrantNotConfiguredError();
   }
   return new QdrantClient(cfg.qdrant_url, cfg.qdrant_api_key, cfg.collection);
+}
+
+export class QdrantNotConfiguredError extends Error {
+  constructor() {
+    super("Qdrant not configured. Run `bikky setup` first.");
+    this.name = "QdrantNotConfiguredError";
+  }
 }

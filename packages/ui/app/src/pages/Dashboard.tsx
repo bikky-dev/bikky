@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { apiFetch } from "../lib/api";
+import { apiFetch, ApiError } from "../lib/api";
 import { CATEGORY_COLORS } from "../lib/format";
 import Badge from "../components/Badge";
 
@@ -53,7 +53,11 @@ export default function Dashboard() {
   useEffect(() => {
     apiFetch<MemoryStats>("/api/memory/stats")
       .then((data) => setStats({ loading: false, data }))
-      .catch((e) => setStats({ loading: false, error: e instanceof Error ? e.message : "unknown" }));
+      .catch((e) => {
+        const code = e instanceof ApiError ? e.code : undefined;
+        const msg = e instanceof Error ? e.message : "unknown";
+        setStats({ loading: false, error: code === "NOT_CONFIGURED" ? "NOT_CONFIGURED" : msg });
+      });
   }, []);
 
   if (stats.loading) {
@@ -66,10 +70,27 @@ export default function Dashboard() {
   }
 
   if ("error" in stats) {
+    const isNotConfigured = stats.error.includes("NOT_CONFIGURED") || stats.error.includes("not configured");
     return (
       <div>
         <h2 className="text-2xl font-bold mb-6">Memory Dashboard</h2>
-        <p className="text-red-400">Failed to load memory stats: {stats.error}</p>
+        {isNotConfigured ? (
+          <div className="rounded-lg border border-amber-800/50 bg-amber-950/30 p-6">
+            <h3 className="text-lg font-semibold text-amber-200 mb-2">🔧 Setup Required</h3>
+            <p className="text-sm text-amber-300/80 mb-4">
+              Qdrant is not configured. bikky needs a vector database to store memories.
+            </p>
+            <div className="rounded-md bg-zinc-900 p-4 text-sm text-zinc-300 font-mono">
+              <p className="text-zinc-500 mb-1"># Run in your terminal:</p>
+              <p>bikky setup</p>
+            </div>
+            <p className="text-xs text-zinc-500 mt-3">
+              This will walk you through connecting to Qdrant Cloud (free tier) and configuring your embedding provider.
+            </p>
+          </div>
+        ) : (
+          <p className="text-red-400">Failed to load memory stats: {stats.error}</p>
+        )}
       </div>
     );
   }
