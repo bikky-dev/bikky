@@ -12,6 +12,9 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { serve, type ServerType } from "@hono/node-server";
 import { memoryRoutes } from "./routes/memory.js";
 
+import { isQdrantConfigured, QdrantNotConfiguredError } from "./lib/qdrant.js";
+import { loadConfig } from "./lib/config.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createApp(): Hono {
@@ -22,12 +25,23 @@ export function createApp(): Hono {
 
   // Global error handler for API routes
   app.onError((err, c) => {
+    if (err instanceof QdrantNotConfiguredError) {
+      return c.json({ error: err.message, code: "NOT_CONFIGURED" }, 503);
+    }
     console.error(err);
     return c.json({ error: err.message }, 500);
   });
 
   // Health check
-  app.get("/health", (c) => c.json({ ok: true, service: "bikky-ui" }));
+  app.get("/health", (c) => {
+    const cfg = loadConfig();
+    return c.json({
+      ok: true,
+      service: "bikky-ui",
+      qdrant_configured: isQdrantConfigured(),
+      collection: cfg.collection,
+    });
+  });
 
   // Memory API
   app.route("/api/memory", memoryRoutes);

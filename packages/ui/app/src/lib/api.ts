@@ -1,7 +1,9 @@
 export class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  public code?: string;
+  constructor(public status: number, message: string, code?: string) {
     super(message);
     this.name = "ApiError";
+    this.code = code;
   }
 }
 
@@ -14,8 +16,16 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   const res = await fetch(path, { ...init, headers });
 
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new ApiError(res.status, body || res.statusText);
+    let body = "";
+    let code: string | undefined;
+    try {
+      const json = await res.json() as { error?: string; code?: string };
+      body = json.error ?? JSON.stringify(json);
+      code = json.code;
+    } catch {
+      body = await res.text().catch(() => res.statusText);
+    }
+    throw new ApiError(res.status, body, code);
   }
 
   return res.json() as Promise<T>;
