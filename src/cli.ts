@@ -6,7 +6,7 @@
  *   bikky stop       — stop background daemon
  *   bikky mcp        — start MCP server (stdio, for editor integration)
  *   bikky daemon     — start daemon in foreground (for debugging)
- *   bikky setup      — interactive setup wizard
+ *   bikky setup      — install MCP configs + start daemon (alias for start)
  *   bikky status     — check memory system status
  *   bikky install    — write MCP config for Copilot / Claude Code
  *   bikky ui         — open memory explorer web UI
@@ -74,9 +74,7 @@ async function main(): Promise<void> {
     }
 
     case "setup":
-      console.log("🧠 bikky setup");
-      console.log("Run `bikky start` to install MCP configs and start the daemon.");
-      console.log("Then call configure_credentials from your editor to set up Qdrant.");
+      await startAll();
       break;
 
     case "status": {
