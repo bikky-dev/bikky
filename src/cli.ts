@@ -9,6 +9,7 @@
  *   bikky setup      — interactive setup wizard
  *   bikky status     — check memory system status
  *   bikky install    — write MCP config for Copilot / Claude Code
+ *   bikky ui         — open memory explorer web UI
  *   bikky --version  — print version
  */
 
@@ -93,9 +94,20 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "ui": {
+      const { execSync } = await import("node:child_process");
+      console.log("🧠 Launching bikky ui…");
+      try {
+        execSync("npx --yes @bikky/ui", { stdio: "inherit" });
+      } catch {
+        // User hit Ctrl+C or process exited
+      }
+      break;
+    }
+
     default:
       console.error(`Unknown command: ${command}`);
-      console.error("Usage: bikky [start|stop|mcp|daemon|setup|status|install|--version]");
+      console.error("Usage: bikky [start|stop|mcp|daemon|setup|status|install|ui|--version]");
       process.exit(1);
   }
 }
