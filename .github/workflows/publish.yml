@@ -10,7 +10,7 @@ on:
         type: choice
         options:
           - bikky
-          - "@bikky-dev/ui"
+          - "bikky-ui"
           - both
         default: both
       dry_run:
@@ -50,7 +50,7 @@ jobs:
   build-test-ui:
     if: >-
       github.event_name == 'release' ||
-      (github.event_name == 'workflow_dispatch' && (inputs.package == '@bikky-dev/ui' || inputs.package == 'both'))
+      (github.event_name == 'workflow_dispatch' && (inputs.package == 'bikky-ui' || inputs.package == 'both'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,7 +60,7 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Install & build @bikky-dev/ui
+      - name: Install & build bikky-ui
         working-directory: packages/ui
         run: |
           npm ci
@@ -114,7 +114,7 @@ jobs:
           name: dist-ui
           path: packages/ui/dist/
 
-      - name: Publish @bikky-dev/ui
+      - name: Publish bikky-ui
         working-directory: packages/ui
         run: npm publish --access public --ignore-scripts
         env:

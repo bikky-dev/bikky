@@ -1,5 +1,5 @@
 {
-  "name": "@bikky-dev/ui",
+  "name": "bikky-ui",
   "version": "0.1.0",
   "description": "Local web UI for browsing and managing bikky memory",
   "type": "module",
