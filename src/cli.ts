@@ -8,7 +8,6 @@
  *   bikky daemon     — start daemon in foreground (for debugging)
  *   bikky setup      — install MCP configs + start daemon (alias for start)
  *   bikky status     — check memory system status
- *   bikky install    — write MCP config for Copilot / Claude Code
  *   bikky ui         — open memory explorer web UI
  *   bikky --version  — print version
  */
@@ -86,12 +85,6 @@ async function main(): Promise<void> {
       break;
     }
 
-    case "install": {
-      const { writeInstallConfig } = await import("./install.js");
-      await writeInstallConfig();
-      break;
-    }
-
     case "ui": {
       const { execSync } = await import("node:child_process");
       console.log("🧠 Launching bikky ui…");
@@ -105,7 +98,7 @@ async function main(): Promise<void> {
 
     default:
       console.error(`Unknown command: ${command}`);
-      console.error("Usage: bikky [start|stop|mcp|daemon|setup|status|install|ui|--version]");
+      console.error("Usage: bikky [start|stop|mcp|daemon|setup|status|ui|--version]");
       process.exit(1);
   }
 }
