@@ -14,7 +14,7 @@ bikky gives your team's AI agents (GitHub Copilot, Claude Code) long-term memory
 
 ### The problem
 
-AI coding agents generate more institutional knowledge per day than any team can track — deploy workarounds, schema quirks, service dependencies, architectural decisions. When the session closes, it's gone. Hand-maintained wikis drift. Onboarding docs go stale. The most valuable knowledge is the least durable.
+Every engineering team runs on institutional knowledge — why that config value exists, which deploy steps matter, what broke last quarter. It lives in people's heads, chat threads, and closed PRs. When someone switches projects, it's gone. AI coding agents amplify this: teams generate more decisions and discoveries per day than anyone can track, and hand-written knowledge bases drift the moment they're published. The things learned *during* sessions — the most valuable knowledge — still vanish when the session closes.
 
 ### How bikky solves it
 
