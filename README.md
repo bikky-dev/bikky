@@ -5,7 +5,7 @@
 bikky gives your team's AI agents (GitHub Copilot, Claude Code) long-term memory that persists across sessions and is shared across team members. What one engineer's agent learns today, every agent on the team knows tomorrow.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/team-memory.jpg" alt="Team memory — facts flow from individual sessions into a shared, self-curating knowledge store" width="720" />
+  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/team-memory.svg" alt="Team memory — facts flow from individual sessions into a shared, self-curating knowledge store" width="720" />
 </p>
 
 <p align="center"><i>Knowledge flows from every team member's sessions into a shared store that curates itself over time — deduplicating, distilling, and decaying stale facts — so every future session starts smarter.</i></p>
