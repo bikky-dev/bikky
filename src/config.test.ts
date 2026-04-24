@@ -195,7 +195,7 @@ describe("config", () => {
       const cfg = loadConfig();
       assert.strictEqual(cfg.daemon.tick_interval_sec, 5);
       assert.strictEqual(cfg.daemon.extract_every_sec, 300);
-      assert.strictEqual(cfg.daemon.extract_min_events, 5);
+      assert.strictEqual(cfg.daemon.extract_min_events, 10);
       assert.strictEqual(cfg.daemon.consolidation_enabled, true);
       assert.strictEqual(cfg.daemon.relation_inference_enabled, true);
       assert.strictEqual(cfg.daemon.staleness_threshold_days, 30);
