@@ -1,5 +1,0 @@
-graph TD
-    A["🤖 Copilot / Claude Code"] <-->|MCP stdio| B["bikky MCP Server"]
-    C["📁 Session logs<br/>~/.copilot/"] -->|events.jsonl| D["bikky Daemon<br/>(background)"]
-    B -->|store / recall| E[("🔮 Qdrant Cloud<br/>vector DB")]
-    D -->|embed + store| E
