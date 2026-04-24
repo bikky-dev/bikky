@@ -5,8 +5,6 @@ on:
     branches: [main]
     paths:
       - "docs/diagrams/*.mmd"
-      - "docs/**"
-      - "README.md"
 
 permissions:
   contents: write
@@ -19,12 +17,17 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - run: npm ci
 
+      - name: Install Chromium for Mermaid CLI
+        run: npx puppeteer browsers install chrome
+
       - name: Render .mmd → .svg
         run: node scripts/build-diagrams.mjs
+        env:
+          PUPPETEER_ARGS: "--no-sandbox"
 
       - name: Commit updated SVGs
         run: |

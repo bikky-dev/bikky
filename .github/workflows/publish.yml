@@ -32,7 +32,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - run: npm ci
@@ -57,7 +57,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - name: Install & build bikky-ui
@@ -83,13 +83,22 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - uses: actions/download-artifact@v4
         with:
           name: dist-core
           path: dist/
+
+      - name: Check version not already published
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "bikky@${PKG_VERSION}" version 2>/dev/null; then
+            echo "::error::bikky@${PKG_VERSION} already exists on npm — bump the version first"
+            exit 1
+          fi
+          echo "Publishing bikky@${PKG_VERSION}"
 
       - run: npm publish --access public --ignore-scripts
         env:
@@ -106,13 +115,23 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - uses: actions/download-artifact@v4
         with:
           name: dist-ui
           path: packages/ui/dist/
+
+      - name: Check version not already published
+        working-directory: packages/ui
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if npm view "bikky-ui@${PKG_VERSION}" version 2>/dev/null; then
+            echo "::error::bikky-ui@${PKG_VERSION} already exists on npm — bump the version first"
+            exit 1
+          fi
+          echo "Publishing bikky-ui@${PKG_VERSION}"
 
       - name: Publish bikky-ui
         working-directory: packages/ui
