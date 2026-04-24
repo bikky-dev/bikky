@@ -88,6 +88,21 @@ Raw fact accumulation creates noise. bikky keeps the knowledge store clean autom
 
 ---
 
+## Web UI
+
+[`bikky-ui`](packages/ui) is a local dashboard for browsing and managing your team's memory — facts, entities, and the relationship graph.
+
+```bash
+npx bikky-ui          # one-shot — no install needed
+# or install globally
+npm install -g bikky-ui
+bikky-ui              # opens http://localhost:1422
+```
+
+Pages: **Dashboard** (overview & stats) · **Memory** (browse/search facts) · **Entity** (deep-dive a single entity) · **Graph** (interactive entity relationship map)
+
+The UI reads from your existing `~/.bikky/config.json` — no extra configuration required.
+
 ## CLI
 
 ```bash
