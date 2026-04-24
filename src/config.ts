@@ -57,6 +57,7 @@ export interface BikkyConfig {
   qdrant_url: string | null;
   qdrant_api_key: string | null;
   collection: string;
+  aws_profile: string | null;
   embedding: EmbeddingConfig;
   llm: LLMConfig;
   daemon: DaemonConfig;
@@ -71,6 +72,7 @@ const DEFAULTS: BikkyConfig = {
   qdrant_url: null,
   qdrant_api_key: null,
   collection: "bikky",
+  aws_profile: null,
   embedding: {
     provider: "ollama",
     model: "qwen3-embedding:0.6b",
@@ -163,6 +165,13 @@ export function loadConfig(): BikkyConfig {
   if (process.env.OPENAI_API_KEY && !config.llm.api_key) config.llm.api_key = process.env.OPENAI_API_KEY;
   if (process.env.AWS_BEDROCK_REGION) config.llm.bedrock_region = process.env.AWS_BEDROCK_REGION;
   if (process.env.AWS_REGION && !process.env.AWS_BEDROCK_REGION) config.llm.bedrock_region = process.env.AWS_REGION;
+  if (process.env.AWS_PROFILE) config.aws_profile = process.env.AWS_PROFILE;
+
+  // Propagate aws_profile into env so both Bedrock clients (LLM + embedding)
+  // pick it up via the SDK's default credential chain.
+  if (config.aws_profile && !process.env.AWS_PROFILE) {
+    process.env.AWS_PROFILE = config.aws_profile;
+  }
 
   // Strip trailing slashes from URLs
   if (config.qdrant_url) config.qdrant_url = config.qdrant_url.replace(/\/+$/, "");
