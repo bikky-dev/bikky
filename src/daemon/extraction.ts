@@ -306,8 +306,14 @@ const extractFacts = async (transcript: string): Promise<ExtractedFact[]> => {
   }
 
   try {
+    // Strip markdown code fences (```json ... ```) that some models wrap around JSON
+    let cleaned = result.trim();
+    if (cleaned.startsWith("```")) {
+      cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+    }
+
     // Parse — handle {facts: [...]}, raw array, or single-fact object
-    let parsed: unknown = JSON.parse(result);
+    let parsed: unknown = JSON.parse(cleaned);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const obj = parsed as Record<string, unknown>;
       const unwrapped = obj.facts || obj.results || obj.items;
