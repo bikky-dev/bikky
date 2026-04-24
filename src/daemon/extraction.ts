@@ -36,53 +36,78 @@ const EXTRACTABLE_TYPES = new Set([
   "session.compaction_complete",
 ]);
 
-const EXTRACTION_PROMPT = `You are a knowledge extraction agent. Extract atomic facts from this conversation transcript that would be USEFUL TO A FUTURE ENGINEERING SESSION working on a different task.
+const DEFAULT_EXTRACTION_PROMPT = `You are a knowledge extraction agent for software engineers. Extract ENGINEERING REFERENCES — durable facts that help an engineer navigate codebases, understand infrastructure, run operations, and make decisions.
 
-## Utility test (apply to every fact before including it)
-Ask: "Would a different engineer, working on a different task next week, benefit from knowing this?"
-- YES → include it (architecture, decisions with rationale, infrastructure quirks, team ownership, durable project status)
-- NO → skip it (debugging observations, test case details, intermediate errors, transient state)
+## Quality Gate (apply to EVERY candidate fact)
+A fact must pass AT LEAST ONE of these tests or it is noise — skip it:
+1. GREPPABLE — contains a file path, service name, config key, CLI flag, or symbol an engineer could search for
+2. RUNNABLE — contains a command, URL, port, or procedure that could be executed
+3. NAVIGABLE — tells you where to look for something specific (which repo, which module, which config)
+4. DECISIVE — records a choice with enough rationale that a future engineer won't re-debate it
 
-## What to extract
-- Architectural decisions with rationale ("chose X over Y because Z")
-- Infrastructure details (endpoints, configs, service quirks, where credentials live)
-- Project milestones and outcomes (PR merged, feature shipped, migration completed)
-- Team ownership and roles (who owns what service)
-- Tool configurations and conventions (deployment patterns, naming conventions)
-- Durable observations (a service has a known limitation, a pattern that recurs)
+## 7 Reference Types (extract ONLY these)
 
-## What to SKIP (critical — these are the most common mistakes)
-- Debugging details: "test 67 fails because BSB has no hyphen" — transient, session-specific
-- Intermediate errors: "got a 404 when calling X" — unless it reveals a permanent quirk
-- Test case specifics: "CSV for test 82 was updated" — code change detail, not knowledge
-- Step-by-step narration: "the user asked to fix X, then we looked at Y" — that's a log, not a fact
-- Obvious or redundant: "the bot sends messages" — too generic to be useful
-- Point-in-time debugging state: "there are 8 failures in tests 33, 34, 35..." — will be stale immediately
-- Vague summaries without actionable detail: "WhatsApp bot adopted the enricher" — which enricher? which PR? If you can't add the detail, skip it
+### 1. Codebase Map — "where does X live?"
+File paths, entry points, module ownership, call chains.
+GOOD: "Alert extraction logic is in src/enrichers/bank-account-enricher.ts, called by the DM pipeline handler (src/pipeline/dm-handler.ts), not the group handler"
+BAD: "The code was updated to fix extraction" (no path, no specifics)
+
+### 2. Architecture Decision — "why was X chosen?"
+Choice + alternatives considered + rationale + constraints.
+GOOD: "Chose Portkey over direct Bedrock calls for LLM routing — gives per-model fallback chains and spend tracking without vendor lock-in. Decided in PR #847"
+BAD: "We use Portkey for LLM" (no rationale, no context)
+
+### 3. Infrastructure Topology — "what connects to what?"
+Endpoints, ports, resource IDs, service connections, cluster names, regions.
+GOOD: "ClickHouse in lloyds cluster accessed via port-forward: kubectl port-forward svc/clickhouse 9000:9000 --context arn:aws:eks:eu-west-2:871829501674:cluster/lloyds"
+BAD: "ClickHouse is running" (no actionable detail)
+
+### 4. Access & Credentials — "how do I authenticate?"
+Where secrets live, IAM roles, auth patterns, permission gotchas.
+GOOD: "saber IAM user blocked by EnforceMFA for ECR/S3 — use --profile mfa. EC2 instance role agent00-cortex-ec2 has ECR pull+push scoped to arn:aws:ecr:ap-southeast-2:871829501674:repository/agent00-cortex"
+BAD: "AWS credentials are configured" (useless)
+
+### 5. Deployment & Shipping — "how do I release X?"
+Build, release, CI/CD pipelines, verification steps.
+GOOD: "EC2 cortex deploys via SSM: download repo tarball from GitHub API (needs saber-zrelli-private token) → build on EC2 (native amd64) → push to ECR → docker compose pull && up -d. SSM executionTimeout must be ≥600s"
+BAD: "The deployment was successful" (not reusable)
+
+### 6. Operational Procedure — "how do I do X on a live system?"
+kubectl recipes, patching commands, rollout procedures, scaling ops, cleanup, troubleshooting.
+GOOD: "To roll TG bot images across lloyds fleet: kubectl get deploy -l app=tg-bot --context lloyds-ctx, then patch each with image update. Wait 30s between batches to avoid message loss"
+BAD: "Bot images were updated" (no procedure)
+
+### 7. Business Logic Rule — "what are the domain rules?"
+Data flow semantics, edge cases that affect code, domain-specific constraints.
+GOOD: "SA bank accounts (Capitec branch 470010, TymeBank 678910, FNB 250655) are frequently misclassified as AU BSBs because branch codes are 6 digits. Recovery script stage 1b re-extracts with ZA country tagging"
+BAD: "Bank accounts are extracted" (no specifics)
+
+## What to ALWAYS SKIP
+- Session narration: "the user asked to fix X, then we looked at Y" — that's a log, not a reference
+- Meta-observations about tools: "bikky handles extraction" / "the agent used kubectl" — obvious from context
+- Debugging state: "test 67 fails" / "got a 404" — transient unless it reveals a PERMANENT quirk
+- Vague summaries: "WhatsApp bot was updated" — which bot? which update? which PR?
+- Opinions without rationale: "Nova Lite is good" — good for what? compared to what?
+- Anything you can't add specifics to: if you can't name a file, service, command, or decision — skip it
 
 ## Output format
-Each fact must include an importance score (0.0-1.0):
-- 0.8-1.0: Architectural decisions, infrastructure endpoints, security configurations
-- 0.5-0.7: Project milestones, team ownership, tool conventions
-- 0.2-0.4: Transient observations that might help short-term (if you must include them)
-- Below 0.2: Don't include — it's noise
-
 {"facts": [
   {
-    "content": "The EC2 instance has no git installed; deploys use pre-built Docker images pulled from ECR",
+    "content": "EC2 cortex has no git installed — deploys download repo tarball via GitHub API (curl -sL -H 'Authorization: token $TOKEN' https://api.github.com/repos/OWNER/REPO/tarball/main) then build locally on EC2",
     "category": "infrastructure",
-    "entities": ["ec2", "ecr", "docker"],
+    "entities": ["ec2", "ecr", "github-api"],
     "confidence": 0.9,
     "importance": 0.8
   }
 ]}
 
-- Category must be one of: infrastructure, decisions, observation, preferences, projects, team
-- Entities should be lowercase identifiers (e.g. "qdrant", "redis", "platform")
-- Confidence 0.0-1.0: how certain (0.9 for explicit statements, 0.6 for inferences)
-- Importance 0.0-1.0: how useful to future sessions (see scale above)
+- Category: infrastructure | decisions | observation | preferences | projects | team
+- Entities: lowercase identifiers (service names, tools, repos — things you'd grep for)
+- Confidence 0.0-1.0: 0.9 for explicit statements, 0.6 for inferences
+- Importance 0.0-1.0: 0.7+ for architecture/infra/access/ops, 0.5-0.7 for decisions/business rules
 
-If there is nothing worth extracting, return: {"facts": []}`;
+Prefer fewer, higher-quality facts over many weak ones. 3 good references beat 10 vague observations.
+If nothing passes the quality gate, return: {"facts": []}`;
 
 // ── JSON-file state persistence ──────────────────────────────────────────────
 
@@ -251,6 +276,28 @@ const readNewEvents = async (
 };
 
 /**
+ * Strip tool-call narration and boilerplate from assistant messages.
+ * Keeps substantive content — decisions, explanations, findings.
+ */
+const cleanAssistantContent = (content: string): string => {
+  const lines = content.split("\n");
+  const kept: string[] = [];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    // Skip tool invocation lines
+    if (trimmed.startsWith("<function_calls>") || trimmed.startsWith("<invoke") || trimmed.startsWith("<parameter") || trimmed.startsWith("</")) continue;
+    // Skip verbose shell output markers
+    if (trimmed.startsWith("```") && trimmed.length < 20) continue;
+    // Skip empty lines in sequences (collapse whitespace)
+    if (!trimmed && kept.length > 0 && !kept[kept.length - 1]!.trim()) continue;
+    kept.push(line);
+  }
+
+  return kept.join("\n").trim();
+};
+
+/**
  * Build a compressed transcript from parsed events for LLM extraction.
  */
 const buildTranscript = (events: ParsedEvent[]): string => {
@@ -263,10 +310,18 @@ const buildTranscript = (events: ParsedEvent[]): string => {
         ? "ASSISTANT"
         : "SUMMARY";
 
-    // Truncate very long content (e.g. reasoning text)
-    const text = ev.content.length > 2000
-      ? ev.content.slice(0, 2000) + "…[truncated]"
-      : ev.content;
+    let text = ev.content;
+
+    // Clean assistant messages to reduce noise
+    if (role === "ASSISTANT") {
+      text = cleanAssistantContent(text);
+      if (!text) continue; // Skip if nothing substantive remains
+    }
+
+    // Truncate very long content
+    if (text.length > 3000) {
+      text = text.slice(0, 3000) + "…[truncated]";
+    }
 
     lines.push(`[${role}] ${text}`);
   }
@@ -287,12 +342,14 @@ interface ExtractedFact {
 /**
  * Call the LLM to extract facts from a conversation transcript.
  */
-const extractFacts = async (transcript: string): Promise<ExtractedFact[]> => {
+const extractFacts = async (transcript: string, config?: BikkyConfig): Promise<ExtractedFact[]> => {
   if (!transcript.trim()) return [];
+
+  const prompt = config?.daemon.extraction_prompt || DEFAULT_EXTRACTION_PROMPT;
 
   const result = await chatCompletion({
     messages: [
-      { role: "system", content: EXTRACTION_PROMPT },
+      { role: "system", content: prompt },
       { role: "user", content: transcript },
     ],
     temperature: 0.1,
@@ -344,7 +401,7 @@ const extractFacts = async (transcript: string): Promise<ExtractedFact[]> => {
         importance: typeof f.importance === "number" ? f.importance : 0.5,
       }))
       .filter(f => {
-        if (f.importance < 0.3) {
+        if (f.importance < 0.5) {
           logFn("DEBUG", `Extraction: dropping low-importance fact (${f.importance}): "${f.content.slice(0, 80)}…"`);
           return false;
         }
@@ -523,7 +580,7 @@ const extractForUuid = async (
   for (let i = 0; i < chunks.length; i++) {
     const transcript = buildTranscript(chunks[i]!);
     logFn("DEBUG", `Extraction: UUID ${uuid.slice(0, 8)} — chunk ${i + 1}/${chunks.length}, ${chunks[i]!.length} events, ${transcript.length} chars`);
-    const facts = await extractFacts(transcript);
+    const facts = await extractFacts(transcript, config);
 
     if (facts.length > 0) {
       const stored = await storeFacts(facts, stateKey, config);

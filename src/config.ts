@@ -43,6 +43,7 @@ export interface DaemonConfig {
   tick_interval_sec: number;
   extract_every_sec: number;
   extract_min_events: number;
+  extraction_prompt: string | null;
   consolidation_enabled: boolean;
   relation_inference_enabled: boolean;
   staleness_threshold_days: number;
@@ -90,7 +91,8 @@ const DEFAULTS: BikkyConfig = {
   daemon: {
     tick_interval_sec: 5,
     extract_every_sec: 300,
-    extract_min_events: 5,
+    extract_min_events: 10,
+    extraction_prompt: null,
     consolidation_enabled: true,
     relation_inference_enabled: true,
     staleness_threshold_days: 30,
