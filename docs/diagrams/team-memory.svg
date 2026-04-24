@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" fill="none">
+  <style>
+    .bg { fill: #f8f9fc; }
+    .card { fill: #ffffff; stroke: #e2e4ea; stroke-width: 1; }
+    .store-bg { fill: #6c3fe4; }
+    .store-glow { fill: #6c3fe4; opacity: 0.07; }
+    .title { fill: #1a1a2e; font: 700 13px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; }
+    .subtitle { fill: #6b7085; font: 400 10px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; }
+    .label { fill: #1a1a2e; font: 600 11px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; }
+    .fact-text { fill: #4a4d5e; font: 400 8.5px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; }
+    .store-text { fill: #ffffff; font: 700 14px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; }
+    .store-sub { fill: rgba(255,255,255,0.75); font: 400 9px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; }
+    .badge { font: 600 7.5px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; fill: white; }
+    .badge-bg-dedup { fill: #3b82f6; }
+    .badge-bg-distill { fill: #8b5cf6; }
+    .badge-bg-decay { fill: #f59e0b; }
+    .badge-bg-entity { fill: #10b981; }
+    .arrow { stroke: #6c3fe4; stroke-width: 1.5; fill: none; opacity: 0.45; }
+    .arrow-head { fill: #6c3fe4; opacity: 0.45; }
+    .return-arrow { stroke: #10b981; stroke-width: 1.5; fill: none; opacity: 0.45; stroke-dasharray: 5 3; }
+    .return-head { fill: #10b981; opacity: 0.45; }
+    .person-bg { fill: #ede9fe; }
+    .person-icon { fill: #6c3fe4; }
+    .fact-card { fill: #f5f3ff; stroke: #e2e4ea; stroke-width: 0.5; }
+    .bottom-text { fill: #6b7085; font: italic 400 10px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; }
+    .session-label { fill: #9ca0b0; font: 500 7px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; letter-spacing: 0.6px; }
+    .future-highlight { fill: #ecfdf5; stroke: #a7f3d0; stroke-width: 1; }
+    .future-label { fill: #065f46; font: 600 11px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; }
+    .future-sub { fill: #6b7085; font: 400 9px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; }
+    .future-fact { fill: #d1fae5; stroke: #a7f3d0; stroke-width: 0.5; }
+    .future-text { fill: #065f46; font: 400 8.5px/1 'Inter', 'SF Pro Display', system-ui, sans-serif; }
+
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #0d1117; }
+      .card { fill: #161b22; stroke: #30363d; }
+      .store-glow { fill: #6c3fe4; opacity: 0.12; }
+      .title { fill: #e6edf3; }
+      .subtitle { fill: #8b949e; }
+      .label { fill: #e6edf3; }
+      .fact-text { fill: #b1bac4; }
+      .arrow { stroke: #a78bfa; opacity: 0.55; }
+      .arrow-head { fill: #a78bfa; opacity: 0.55; }
+      .return-arrow { stroke: #34d399; opacity: 0.5; }
+      .return-head { fill: #34d399; opacity: 0.5; }
+      .person-bg { fill: #1c1633; }
+      .person-icon { fill: #a78bfa; }
+      .fact-card { fill: #1c1633; stroke: #30363d; }
+      .bottom-text { fill: #8b949e; }
+      .session-label { fill: #6e7681; }
+      .future-highlight { fill: #0d2818; stroke: #1a4731; }
+      .future-label { fill: #6ee7b7; }
+      .future-sub { fill: #8b949e; }
+      .future-fact { fill: #132f21; stroke: #1a4731; }
+      .future-text { fill: #6ee7b7; }
+    }
+  </style>
+
+  <rect class="bg" width="960" height="400" rx="8" />
+
+  <!-- ===== THREE ENGINEERS (top) ===== -->
+
+  <!-- Alice -->
+  <g transform="translate(160, 24)">
+    <rect class="card" x="-80" y="0" width="160" height="140" rx="8" />
+    <circle class="person-bg" cx="0" cy="28" r="17" />
+    <circle class="person-icon" cx="0" cy="24" r="6.5" />
+    <path class="person-icon" d="M-11,39 a11,9 0 0,1 22,0" />
+    <text class="label" text-anchor="middle" y="60">Alice</text>
+    <text class="session-label" text-anchor="middle" y="74">SESSION FACTS</text>
+    <rect class="fact-card" x="-68" y="82" width="136" height="19" rx="3" />
+    <text class="fact-text" x="-60" y="95">Deploy order: staging → prod</text>
+    <rect class="fact-card" x="-68" y="106" width="136" height="19" rx="3" />
+    <text class="fact-text" x="-60" y="119">Redis cache TTL is 300s</text>
+  </g>
+
+  <!-- Ben -->
+  <g transform="translate(390, 24)">
+    <rect class="card" x="-80" y="0" width="160" height="140" rx="8" />
+    <circle class="person-bg" cx="0" cy="28" r="17" />
+    <circle class="person-icon" cx="0" cy="24" r="6.5" />
+    <path class="person-icon" d="M-11,39 a11,9 0 0,1 22,0" />
+    <text class="label" text-anchor="middle" y="60">Ben</text>
+    <text class="session-label" text-anchor="middle" y="74">SESSION FACTS</text>
+    <rect class="fact-card" x="-68" y="82" width="136" height="19" rx="3" />
+    <text class="fact-text" x="-60" y="95">Chose Drizzle over Prisma</text>
+    <rect class="fact-card" x="-68" y="106" width="136" height="19" rx="3" />
+    <text class="fact-text" x="-60" y="119">Auth uses Ed25519 JWTs</text>
+  </g>
+
+  <!-- Carla -->
+  <g transform="translate(620, 24)">
+    <rect class="card" x="-80" y="0" width="160" height="140" rx="8" />
+    <circle class="person-bg" cx="0" cy="28" r="17" />
+    <circle class="person-icon" cx="0" cy="24" r="6.5" />
+    <path class="person-icon" d="M-11,39 a11,9 0 0,1 22,0" />
+    <text class="label" text-anchor="middle" y="60">Carla</text>
+    <text class="session-label" text-anchor="middle" y="74">SESSION FACTS</text>
+    <rect class="fact-card" x="-68" y="82" width="136" height="19" rx="3" />
+    <text class="fact-text" x="-60" y="95">PG index on (tenant, ts)</text>
+    <rect class="fact-card" x="-68" y="106" width="136" height="19" rx="3" />
+    <text class="fact-text" x="-60" y="119">Billing owns Stripe hooks</text>
+  </g>
+
+  <!-- ===== ARROWS DOWN ===== -->
+  <path class="arrow" d="M160,167 C160,195 300,210 350,240" />
+  <polygon class="arrow-head" points="346,236 354,236 350,246" />
+
+  <line class="arrow" x1="390" y1="167" x2="390" y2="240" />
+  <polygon class="arrow-head" points="386,236 394,236 390,246" />
+
+  <path class="arrow" d="M620,167 C620,195 480,210 430,240" />
+  <polygon class="arrow-head" points="426,236 434,236 430,246" />
+
+  <!-- ===== CENTRAL STORE ===== -->
+  <ellipse class="store-glow" cx="390" cy="285" rx="190" ry="50" />
+  <rect class="store-bg" x="270" y="248" width="240" height="74" rx="12" />
+
+  <text class="store-text" text-anchor="middle" x="390" y="274">Shared Knowledge Store</text>
+  <text class="store-sub" text-anchor="middle" x="390" y="290">Qdrant · semantic search · entity graph</text>
+
+  <!-- Curation badges -->
+  <rect class="badge-bg-dedup" x="287" y="302" width="50" height="14" rx="7" />
+  <text class="badge" text-anchor="middle" x="312" y="312">dedup</text>
+
+  <rect class="badge-bg-distill" x="345" y="302" width="50" height="14" rx="7" />
+  <text class="badge" text-anchor="middle" x="370" y="312">distill</text>
+
+  <rect class="badge-bg-decay" x="403" y="302" width="50" height="14" rx="7" />
+  <text class="badge" text-anchor="middle" x="428" y="312">decay</text>
+
+  <rect class="badge-bg-entity" x="461" y="302" width="50" height="14" rx="7" />
+  <text class="badge" text-anchor="middle" x="486" y="312">entity</text>
+
+  <!-- ===== FUTURE SESSION (right side) ===== -->
+  <g transform="translate(830, 120)">
+    <rect class="future-highlight" x="-80" y="0" width="160" height="115" rx="8" />
+    <text class="future-label" text-anchor="middle" y="22">Every Future Session</text>
+    <text class="future-sub" text-anchor="middle" y="38">starts with full context</text>
+    <rect class="future-fact" x="-68" y="48" width="136" height="19" rx="3" />
+    <text class="future-text" x="-60" y="61">✓ Deploy order recalled</text>
+    <rect class="future-fact" x="-68" y="72" width="136" height="19" rx="3" />
+    <text class="future-text" x="-60" y="85">✓ All team decisions loaded</text>
+    <rect class="future-fact" x="-68" y="96" width="136" height="19" rx="3" />
+    <text class="future-text" x="-60" y="109">✓ Entity graph available</text>
+  </g>
+
+  <!-- Return arrow: store → future session -->
+  <path class="return-arrow" d="M510,278 C600,270 680,240 750,210" />
+  <polygon class="return-head" points="746,214 756,208 748,204" />
+
+  <!-- ===== BOTTOM TAGLINE ===== -->
+  <text class="bottom-text" text-anchor="middle" x="390" y="380">Session 1 learns it · Session 50 already knows it</text>
+</svg>
