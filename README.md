@@ -99,7 +99,20 @@ npm install -g bikky-ui
 bikky-ui              # opens http://localhost:1422
 ```
 
-Pages: **Dashboard** (overview & stats) · **Memory** (browse/search facts) · **Entity** (deep-dive a single entity) · **Graph** (interactive entity relationship map)
+<p align="center">
+  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/screenshots/dashboard.png" alt="Dashboard — overview stats, category breakdown, recent facts" width="720" />
+</p>
+<p align="center"><i>Dashboard — memory stats, category breakdown, and recent facts at a glance</i></p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/screenshots/memory.png" alt="Memory browser — search, filter, and browse all stored facts" width="720" />
+</p>
+<p align="center"><i>Memory browser — search, filter by category/kind/source, and browse all stored facts</i></p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/screenshots/graph.png" alt="Entity graph — interactive visualization of entity relationships" width="720" />
+</p>
+<p align="center"><i>Entity graph — interactive visualization of how concepts, people, and services relate</i></p>
 
 The UI reads from your existing `~/.bikky/config.json` — no extra configuration required.
 
