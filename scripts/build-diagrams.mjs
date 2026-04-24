@@ -44,8 +44,12 @@ for (const file of mmds) {
 
   console.log(`  → rendering ${name}.svg …`);
   try {
+    const puppeteerArgs = process.env.PUPPETEER_ARGS || "";
+    const extra = puppeteerArgs.includes("--no-sandbox")
+      ? ` -p '{"args":["--no-sandbox","--disable-setuid-sandbox"]}'`
+      : "";
     execSync(
-      `npx mmdc -i "${input}" -o "${output}" -t neutral -b transparent --quiet`,
+      `npx mmdc -i "${input}" -o "${output}" -t neutral -b transparent --quiet${extra}`,
       { cwd: ROOT, stdio: "pipe" },
     );
     shrinkSvg(output);
