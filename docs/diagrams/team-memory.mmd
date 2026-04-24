@@ -1,0 +1,36 @@
+graph TB
+    subgraph team ["👥 Engineering Team"]
+        direction LR
+        E1["🧑‍💻 Alice<br/><i>session #47</i>"]
+        E2["🧑‍💻 Bob<br/><i>session #12</i>"]
+        E3["🧑‍💻 Carol<br/><i>session #31</i>"]
+    end
+
+    E1 -->|"discovers deploy workaround"| MCP
+    E2 -->|"learns DB schema quirk"| MCP
+    E3 -->|"maps service dependency"| MCP
+
+    MCP["🔌 bikky MCP Server"]
+
+    MCP -->|embed + store| Q[("🔮 Qdrant Cloud<br/><i>vector store</i>")]
+
+    subgraph curation ["🔄 Self-Curation"]
+        direction LR
+        DD["dedup"]
+        DI["distill"]
+        SD["staleness<br/>decay"]
+        CR["contradiction<br/>resolve"]
+    end
+
+    Q <--> curation
+
+    Q -->|semantic recall| MCP
+
+    MCP -->|"Alice gets Bob's DB insight"| E1
+    MCP -->|"Bob gets Carol's service map"| E2
+    MCP -->|"Carol gets Alice's deploy fix"| E3
+
+    style team fill:#1a1a2e,stroke:#e94560,color:#eee
+    style curation fill:#1a1a2e,stroke:#0f3460,color:#eee
+    style Q fill:#16213e,stroke:#e94560,color:#eee
+    style MCP fill:#0f3460,stroke:#e94560,color:#eee
