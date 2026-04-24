@@ -54,23 +54,7 @@ export const log = createLogger("memory-mcp", path.join(LOG_DIR, "mcp.log"), {
 // ---------------------------------------------------------------------------
 
 export async function chatComplete(systemPrompt: string, userPrompt: string): Promise<string> {
-  if (!llmInitialized) {
-    const cfg = loadConfig();
-    initLLM({
-      config: {
-        provider: cfg.llm.provider,
-        ollama_url: cfg.llm.base_url,
-        ollama_model: cfg.llm.model,
-        openai_api_key: cfg.llm.api_key ?? null,
-        openai_model: cfg.llm.model,
-        bedrock_region: cfg.llm.bedrock_region,
-        bedrock_model: cfg.llm.model,
-      },
-      logger: log as (...args: unknown[]) => void,
-    });
-    llmInitialized = true;
-  }
-
+  ensureLLMInitialized();
   const result = await chatCompletion({
     messages: [
       { role: "system", content: systemPrompt },
@@ -82,6 +66,32 @@ export async function chatComplete(systemPrompt: string, userPrompt: string): Pr
 
   if (!result) throw new Error("LLM chat completion failed");
   return result;
+}
+
+/** Run a pre-rendered prompt through the LLM. Lazily initialises the client. */
+export async function chatCompleteRendered(opts: import("../llm/types.js").ChatCompletionOpts): Promise<string> {
+  ensureLLMInitialized();
+  const result = await chatCompletion(opts);
+  if (!result) throw new Error("LLM chat completion failed");
+  return result;
+}
+
+function ensureLLMInitialized(): void {
+  if (llmInitialized) return;
+  const cfg = loadConfig();
+  initLLM({
+    config: {
+      provider: cfg.llm.provider,
+      ollama_url: cfg.llm.base_url,
+      ollama_model: cfg.llm.model,
+      openai_api_key: cfg.llm.api_key ?? null,
+      openai_model: cfg.llm.model,
+      bedrock_region: cfg.llm.bedrock_region,
+      bedrock_model: cfg.llm.model,
+    },
+    logger: log as (...args: unknown[]) => void,
+  });
+  llmInitialized = true;
 }
 
 // ---------------------------------------------------------------------------

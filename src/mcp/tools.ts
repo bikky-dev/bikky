@@ -39,6 +39,7 @@ import {
   embed,
   getEmbeddingConfig,
   chatComplete,
+  chatCompleteRendered,
   qdrantReq,
   ensureCollection,
   qdrantUpsert,
@@ -48,6 +49,11 @@ import {
   qdrantGetPoints,
 } from "./api.js";
 import { saveConfig, loadConfig } from "../config.js";
+import {
+  distillPrompt,
+  DISTILL_PROMPT_DESCRIPTOR,
+  safeParseJson,
+} from "../prompts/index.js";
 
 // ---------------------------------------------------------------------------
 // Runtime state
@@ -98,9 +104,15 @@ function buildMemoryNudge(): string | null {
   const elapsed = Date.now() - lastStoreTime;
   if (elapsed < NUDGE_INTERVAL_MS) return null;
   const mins = Math.round(elapsed / 60000);
+  // Suggest the most likely category to record based on what an engineering
+  // session typically produces. The agent picks the best fit.
   return `🧠 Memory nudge: No memory_store calls in ${mins} minutes. ` +
-    "If you've learned project facts, made key decisions, discovered service quirks, " +
-    "or resolved errors — store them now so future sessions benefit.";
+    "Reflect on what's worth persisting:\n" +
+    "  • infrastructure — new services, ports, configs touched?\n" +
+    "  • decisions — architectural choices made (with rationale)?\n" +
+    "  • observation — debugging findings, gotchas, workarounds?\n" +
+    "  • projects — work-in-progress, blockers, completions?\n" +
+    "If yes, call memory_store now so future sessions inherit the knowledge.";
 }
 
 /**
@@ -924,12 +936,20 @@ export function registerTools(mcp: McpServer): void {
       tasks_completed: z.array(z.string()).optional().default([]).describe("Task slugs completed"),
       decisions_made: z.array(z.string()).optional().default([]).describe("Key decisions"),
       entities_touched: z.array(z.string()).optional().default([]).describe("Entities involved (lowercase)"),
+      category: z.enum(categoryValues() as [string, ...string[]]).optional().describe(
+        "Topic category — defaults to 'observation'. Override when the session was clearly about another category (e.g. 'projects' for a build-out, 'decisions' for an architecture session)."
+      ),
+      domain: z.enum(domainValues() as [string, ...string[]]).optional().describe(
+        "Life scope — work or personal. Defaults to 'work'."
+      ),
     },
-    async ({ session_id, summary, tasks_completed, decisions_made, entities_touched }): Promise<McpToolResult> => {
+    async ({ session_id, summary, tasks_completed, decisions_made, entities_touched, category, domain }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const now = nowISO();
       const normalizedEntities = entities_touched.map((e) => e.toLowerCase());
+      const cat = category ?? "observation";
+      const dom = domain ?? DEFAULT_DOMAIN;
 
       // Check for existing summary for this session
       try {
@@ -948,13 +968,14 @@ export function registerTools(mcp: McpServer): void {
           await qdrantUpsert(point.id, vector, {
             ...point.payload,
             content: summary,
+            category: cat,
             kind: "summary",
-            domain: "work",
+            domain: dom,
             source: "system",
             tasks_completed,
             decisions_made,
             entities: normalizedEntities,
-            content_hash: contentHash("observation", summary),
+            content_hash: contentHash(cat, summary),
             updated_at: now,
           });
           return {
@@ -972,13 +993,13 @@ export function registerTools(mcp: McpServer): void {
       const factId = newId();
       await qdrantUpsert(factId, vector, {
         content: summary,
-        category: "observation",
-        domain: "work",
+        category: cat,
+        domain: dom,
         kind: "summary",
         entities: normalizedEntities,
         source: "system",
         confidence: 1.0,
-        content_hash: contentHash("observation", summary),
+        content_hash: contentHash(cat, summary),
         reinforcement_count: 1,
         last_reinforced_at: now,
         superseded_by: null,
@@ -1002,18 +1023,20 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "memory_distill",
-    "Consolidate recent session summaries into distilled patterns. Call when 5+ session summaries exist. " +
-    "Uses LLM to extract recurring patterns and key learnings, then supersedes the source summaries.",
+    "Consolidate recent session summaries into 3-5 distilled patterns (each stored as its own fact). " +
+    "Call when 3+ session summaries exist within the look-back window. Source summaries are superseded.",
     {
       days: z.number().optional().default(14).describe("Look-back period in days (default 14)"),
       max_summaries: z.number().optional().default(20).describe("Max summaries to consolidate"),
+      min_summaries: z.number().optional().default(3).describe("Minimum summaries required to run distillation"),
     },
-    async ({ days, max_summaries }): Promise<McpToolResult> => {
+    async ({ days, max_summaries, min_summaries }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const now = nowISO();
       const daysVal = days ?? 14;
       const maxVal = max_summaries ?? 20;
+      const minVal = min_summaries ?? 3;
       const since = new Date(Date.now() - daysVal * 86400000).toISOString();
 
       const summaryResults = await qdrantScroll(
@@ -1027,67 +1050,99 @@ export function registerTools(mcp: McpServer): void {
 
       const summaries = summaryResults.result?.points ?? [];
 
-      if (summaries.length < 3) {
+      if (summaries.length < minVal) {
         return {
           content: [{ type: "text", text: JSON.stringify({
             action: "skipped",
-            reason: `Only ${summaries.length} session summaries in the last ${daysVal} days. Need at least 3.`,
+            reason: `Only ${summaries.length} session summaries in the last ${daysVal} days. Need at least ${minVal}.`,
           }) }],
         };
       }
 
-      const summaryTexts = summaries.map((s, i) => {
-        const p = s.payload;
-        const parts = [`Session ${i + 1} (${p.created_at}):\n${p.content}`];
-        if (p.tasks_completed?.length) parts.push(`Tasks: ${p.tasks_completed.join(", ")}`);
-        if (p.decisions_made?.length) parts.push(`Decisions: ${p.decisions_made.join("; ")}`);
-        return parts.join("\n");
-      }).join("\n\n---\n\n");
+      // Newest-first so recent patterns dominate
+      summaries.sort((a, b) =>
+        ((b.payload.created_at as string) ?? "").localeCompare((a.payload.created_at as string) ?? ""),
+      );
 
-      const systemPrompt =
-        "You are a memory consolidation system. Given session summaries from an engineering agent, " +
-        "extract recurring patterns, consolidated learnings, and key facts. Output:\n" +
-        "1. Recurring patterns (things that keep coming up)\n" +
-        "2. Key infrastructure/project facts learned\n" +
-        "3. Decisions made and their rationale\n" +
-        "4. Open issues or recurring problems\n" +
-        "Be concise — one line per point. Omit ephemeral details.";
+      const rendered = distillPrompt({
+        summaries: summaries.map((s, i) => ({
+          id: i + 1,
+          date: ((s.payload.created_at as string) ?? "").slice(0, 10) || "unknown",
+          content: (s.payload.content as string) ?? "",
+          tasks_completed: s.payload.tasks_completed as string[] | undefined,
+          decisions_made: s.payload.decisions_made as string[] | undefined,
+        })),
+      });
 
-      let distilledContent: string;
+      let raw: string;
       try {
-        distilledContent = await chatComplete(systemPrompt, summaryTexts);
+        raw = await chatCompleteRendered(rendered);
       } catch (e) {
         return { content: [{ type: "text", text: `Distillation failed: ${e instanceof Error ? e.message : String(e)}` }] };
       }
 
-      const allEntities = [...new Set(summaries.flatMap((s) => s.payload.entities ?? []))];
-      const vector = await embed(distilledContent);
-      const factId = newId();
+      const parsed = safeParseJson<{
+        patterns?: Array<{
+          content?: string;
+          category?: string;
+          domain?: string;
+          entities?: string[];
+          importance?: number;
+          evidence_summary_ids?: number[];
+        }>;
+      }>(raw);
+
+      const patterns = (parsed && Array.isArray(parsed.patterns) ? parsed.patterns : []).filter(
+        (p) => typeof p.content === "string" && p.content.trim().length > 0,
+      );
+
+      if (patterns.length === 0) {
+        return { content: [{ type: "text", text: JSON.stringify({
+          action: "skipped",
+          reason: "LLM returned no usable patterns",
+          raw_preview: raw.slice(0, 200),
+        }) }] };
+      }
+
+      const promptStamp = `${DISTILL_PROMPT_DESCRIPTOR.id}@${DISTILL_PROMPT_DESCRIPTOR.version}`;
       const sourceIds = summaries.map((s) => s.id);
-      await qdrantUpsert(factId, vector, {
-        content: distilledContent,
-        category: "observation",
-        domain: "work",
-        kind: "distilled",
-        entities: allEntities,
-        source: "system",
-        confidence: 0.9,
-        content_hash: contentHash("observation", distilledContent),
-        reinforcement_count: 1,
-        last_reinforced_at: now,
-        superseded_by: null,
-        superseded_at: null,
-        created_at: now,
-        updated_at: now,
-        distilled_from: sourceIds,
-        distilled_period_start: since,
-        distilled_period_end: now,
-        summary_count: summaries.length,
-      });
+      const stored: Array<{ id: string; content: string; category: string }> = [];
+
+      for (const p of patterns) {
+        const cat = p.category ?? "observation";
+        const dom = p.domain ?? DEFAULT_DOMAIN;
+        const ents = Array.isArray(p.entities) ? p.entities.map((e) => String(e).toLowerCase()) : [];
+        const vector = await embed(p.content!);
+        const factId = newId();
+        await qdrantUpsert(factId, vector, {
+          content: p.content!,
+          category: cat,
+          domain: dom,
+          kind: "distilled",
+          entities: ents,
+          source: "system",
+          confidence: 0.85,
+          importance: typeof p.importance === "number" ? p.importance : 0.7,
+          content_hash: contentHash(cat, p.content!),
+          reinforcement_count: 1,
+          last_reinforced_at: now,
+          superseded_by: null,
+          superseded_at: null,
+          created_at: now,
+          updated_at: now,
+          distilled_from: sourceIds,
+          distilled_period_start: since,
+          distilled_period_end: now,
+          summary_count: summaries.length,
+          distilled_by_prompt: promptStamp,
+          evidence_summary_ids: Array.isArray(p.evidence_summary_ids) ? p.evidence_summary_ids : [],
+        });
+        stored.push({ id: factId, content: p.content!, category: cat });
+      }
 
       try {
         await qdrantSetPayload(sourceIds, {
-          superseded_by: factId,
+          superseded_by: stored.map((s) => s.id).join(","),
           superseded_at: now,
         });
       } catch (e) {
@@ -1097,11 +1152,10 @@ export function registerTools(mcp: McpServer): void {
       return {
         content: [{ type: "text", text: JSON.stringify({
           action: "distilled",
-          fact_id: factId,
+          patterns_stored: stored.length,
           summaries_consolidated: summaries.length,
           period: { start: since, end: now },
-          entities: allEntities,
-          preview: distilledContent.substring(0, 300) + (distilledContent.length > 300 ? "..." : ""),
+          patterns: stored.map((s) => ({ id: s.id, category: s.category, preview: s.content.slice(0, 160) })),
         }, null, 2) }],
       };
     },
@@ -1155,8 +1209,12 @@ export function registerTools(mcp: McpServer): void {
       }
 
       sections.push(
-        "🔍 **Reflect:** What have you learned, decided, or discovered since the last heartbeat? " +
-        "If anything is worth persisting for future sessions, call memory_store now.",
+        "🔍 Reflect: think about the LAST 10 minutes of work and answer in your head:\n" +
+        "  1. Did you touch a service, port, config, or file path you hadn't seen before?\n" +
+        "  2. Did you make a choice (library, pattern, approach) you'd want a future session to know about?\n" +
+        "  3. Did you hit an error and find a workaround?\n" +
+        "  4. Did the user state a preference or constraint?\n" +
+        "If any answer is yes, call memory_store now — one atomic fact per item, with category/domain/entities.",
       );
 
       return { content: [{ type: "text", text: sections.join("\n\n") }] };

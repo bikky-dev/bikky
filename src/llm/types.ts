@@ -31,6 +31,10 @@ export interface ChatCompletionOpts {
   temperature?: number;
   max_tokens?: number;
   response_format?: ResponseFormat;
+  /** Stable "id@version" — used for telemetry and downstream metadata. Optional. */
+  promptName?: string;
+  /** Caller-supplied request id for correlating telemetry across systems. Optional. */
+  requestId?: string;
 }
 
 export type ResponseFormat =

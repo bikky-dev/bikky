@@ -16,7 +16,17 @@ import { createHash } from "node:crypto";
 
 import * as qdrant from "./qdrant.js";
 import { chatCompletion } from "../llm/index.js";
-import { categoryValues } from "../mcp/taxonomy.js";
+import { categoryValues, normalizeCategory, normalizeDomain } from "../mcp/taxonomy.js";
+import {
+  distillPrompt,
+  DISTILL_PROMPT_DESCRIPTOR,
+  contradictionPrompt,
+  CONTRADICTION_PROMPT_DESCRIPTOR,
+  briefPrompt,
+  BRIEF_PROMPT_DESCRIPTOR,
+  ALLOWED_BRIEF_HEADINGS,
+  safeParseJson,
+} from "../prompts/index.js";
 import { STATE_DIR } from "../config.js";
 import type { BikkyConfig } from "../config.js";
 import type { LogFn, QdrantPayload, StoreFact } from "./qdrant.js";
@@ -119,45 +129,54 @@ const autoDistill = async (
       return { distilled: false, count: points.length };
     }
 
-    // Sort by date (oldest first)
-    points.sort((a, b) => (a.payload?.created_at || "").localeCompare(b.payload?.created_at || ""));
+    // Sort by date — newest first (recent patterns are more actionable)
+    points.sort((a, b) => (b.payload?.created_at || "").localeCompare(a.payload?.created_at || ""));
 
-    // Take the oldest batch (up to 20)
+    // Take the latest batch (up to 20)
     const batch = points.slice(0, 20);
-    const summaryTexts = batch.map(pt =>
-      `[${pt.payload?.created_at?.slice(0, 10)}] ${pt.payload?.content}`
-    ).join("\n");
 
-    const raw = await chatCompletion({
-      messages: [
-        { role: "system", content: "You consolidate session summaries into high-level patterns. Output only valid JSON." },
-        { role: "user", content: `Consolidate these ${batch.length} session summaries into 3-5 distilled patterns.
-
-## Session Summaries:
-${summaryTexts}
-
-## Output (JSON array):
-Each object: { "content": "pattern description (1-2 sentences)", "entities": ["entity1", "entity2"], "importance": 0.0-1.0 }
-
-Return ONLY the JSON array.` },
-      ],
-      temperature: 0.2,
-      max_tokens: 1000,
+    const rendered = distillPrompt({
+      summaries: batch.map((pt, i) => ({
+        id: i + 1,
+        date: (pt.payload?.created_at as string | undefined)?.slice(0, 10) ?? "unknown",
+        content: (pt.payload?.content as string | undefined) ?? "",
+      })),
     });
+
+    const raw = await chatCompletion(rendered);
 
     if (!raw) {
       logFn("WARN", "Auto-distill LLM returned empty");
       return { distilled: false };
     }
 
-    const jsonStr = raw.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim();
-    const patterns = JSON.parse(jsonStr) as Array<{
+    const parsed = safeParseJson<{
+      patterns?: Array<{
+        content?: string;
+        category?: string;
+        domain?: string;
+        entities?: string[];
+        importance?: number;
+        evidence_summary_ids?: number[];
+      }>;
+    } | Array<{ content?: string; entities?: string[]; importance?: number }>>(raw);
+
+    let patterns: Array<{
       content?: string;
+      category?: string;
+      domain?: string;
       entities?: string[];
       importance?: number;
-    }>;
+    }> = [];
+    if (Array.isArray(parsed)) {
+      patterns = parsed;
+    } else if (parsed && Array.isArray(parsed.patterns)) {
+      patterns = parsed.patterns;
+    }
 
-    if (!Array.isArray(patterns) || patterns.length === 0) return { distilled: false };
+    if (patterns.length === 0) return { distilled: false };
+
+    const promptStamp = `${DISTILL_PROMPT_DESCRIPTOR.id}@${DISTILL_PROMPT_DESCRIPTOR.version}`;
 
     // Store distilled patterns
     for (const pattern of patterns) {
@@ -165,15 +184,19 @@ Return ONLY the JSON array.` },
       const hash = createHash("sha256").update(`distilled:${pattern.content}`).digest("hex");
       await qdrant.storeFact({
         content: pattern.content,
-        category: "observation",
-        domain: "work",
+        category: normalizeCategory(pattern.category ?? "observation"),
+        domain: normalizeDomain(pattern.domain ?? "work"),
         kind: "distilled",
         entities: Array.isArray(pattern.entities) ? pattern.entities.map(e => String(e).toLowerCase()) : [],
         source: "system",
         confidence: 0.85,
         importance: pattern.importance || 0.7,
         content_hash: hash,
-        metadata: { distilled_from: batch.length.toString(), distilled_at: new Date().toISOString() },
+        metadata: {
+          distilled_from: batch.length.toString(),
+          distilled_at: new Date().toISOString(),
+          distilled_by_prompt: promptStamp,
+        },
       });
     }
 
@@ -201,19 +224,16 @@ const detectContradiction = async (
   _config: BikkyConfig,
 ): Promise<ContradictionResult> => {
   if (!qdrant.isReady()) return { contradiction: false };
-  if ((fact.importance || 0) < 0.5) return { contradiction: false };
+  if ((fact.importance || 0) < 0.3) return { contradiction: false };
 
   try {
     const vector = await qdrant.embed(fact.content);
+    // Search across ALL categories — contradictions can cross category lines
+    // (e.g. an "infrastructure" port fact vs an "observation" workaround fact).
     const results = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/search`, {
       vector,
-      filter: {
-        must: [
-          { key: "category", match: { value: fact.category } },
-          { is_null: { key: "superseded_by" } },
-        ],
-      },
-      limit: 3,
+      filter: { must: [{ is_null: { key: "superseded_by" } }] },
+      limit: 5,
       with_payload: true,
     });
 
@@ -221,46 +241,55 @@ const detectContradiction = async (
       .filter(r => r.score >= 0.75 && r.score < 0.92);
     if (candidates.length === 0) return { contradiction: false };
 
-    // Use LLM to check if any candidate contradicts the new fact
-    const candidateTexts = candidates.map(c =>
-      `ID: ${c.id}\nFact: ${c.payload?.content}\nSimilarity: ${c.score.toFixed(3)}`
-    ).join("\n\n");
-
-    const raw = await chatCompletion({
-      messages: [
-        { role: "system", content: "You detect contradictions between facts. Output only valid JSON." },
-        { role: "user", content: `Does the NEW fact contradict any of the EXISTING facts?
-
-NEW FACT: ${fact.content}
-
-EXISTING FACTS:
-${candidateTexts}
-
-If a contradiction exists, return: {"contradiction": true, "existing_id": "the contradicted fact ID", "reason": "brief explanation"}
-If no contradiction: {"contradiction": false}
-
-Return ONLY the JSON object.` },
-      ],
-      temperature: 0.1,
-      max_tokens: 200,
+    const rendered = contradictionPrompt({
+      newFact: { content: fact.content, category: fact.category },
+      candidates: candidates.map((c) => ({
+        id: c.id,
+        content: (c.payload?.content as string | undefined) ?? "",
+        category: (c.payload?.category as string | undefined) ?? "unknown",
+        score: c.score,
+      })),
     });
 
+    const raw = await chatCompletion(rendered);
     if (!raw) return { contradiction: false };
 
-    const result = JSON.parse(raw.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim()) as {
-      contradiction?: boolean;
+    const result = safeParseJson<{
+      outcome?: "compatible" | "superseded" | "contradicted";
       existing_id?: string;
       reason?: string;
-    };
-    if (result.contradiction && result.existing_id) {
-      logFn("INFO", `Contradiction detected: "${fact.content}" vs existing ${result.existing_id}: ${result.reason}`);
+      // Back-compat: older deployments may still emit {"contradiction": true}
+      contradiction?: boolean;
+    }>(raw);
+
+    if (!result) return { contradiction: false };
+
+    const outcome = result.outcome
+      ?? (result.contradiction === true ? "contradicted" : "compatible");
+
+    if (outcome === "compatible") return { contradiction: false };
+
+    if (outcome === "superseded" && result.existing_id) {
+      // Auto-resolve: caller (extraction) marks the old fact superseded via
+      // qdrant dedup machinery; here we just signal it's not a contradiction.
+      logFn(
+        "INFO",
+        `Supersede detected: "${fact.content.slice(0, 60)}…" → existing ${result.existing_id} (${result.reason ?? ""})`,
+      );
+      return { contradiction: false };
+    }
+
+    if (outcome === "contradicted" && result.existing_id) {
+      const existing = candidates.find((c) => c.id === result.existing_id);
+      logFn("INFO", `Contradiction detected: "${fact.content}" vs existing ${result.existing_id}: ${result.reason ?? ""}`);
       return {
         contradiction: true,
         existingId: result.existing_id,
-        existingContent: candidates.find(c => c.id === result.existing_id)?.payload?.content,
+        existingContent: existing?.payload?.content as string | undefined,
         reason: result.reason,
       };
     }
+
     return { contradiction: false };
   } catch (e) {
     logFn("WARN", `Contradiction detection failed: ${(e as Error).message}`);
@@ -424,15 +453,26 @@ const formatHealthReport = (report: HealthReport | null): string => {
  * Generate a compact memory brief from top facts.
  * Written to ~/.bikky/state/brief.md for agent orientation.
  */
+const CATEGORY_TO_HEADING: Record<string, (typeof ALLOWED_BRIEF_HEADINGS)[number]> = {
+  team: "Key People & Team",
+  projects: "Active Projects",
+  infrastructure: "Infrastructure Overview",
+  decisions: "Recent Decisions",
+  observation: "Known Gotchas",
+  preferences: "Preferences & Conventions",
+};
+
 const generateMemoryBrief = async (_config: BikkyConfig): Promise<boolean> => {
   if (!qdrant.isReady()) return false;
 
   try {
     // Fetch top facts from each category (importance-weighted)
-    const sections: Record<string, string[]> = {};
+    const sections: Partial<Record<(typeof ALLOWED_BRIEF_HEADINGS)[number], string[]>> = {};
     const categories = CATEGORIES;
 
     for (const cat of categories) {
+      const heading = CATEGORY_TO_HEADING[cat];
+      if (!heading) continue;
       const result = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/scroll`, {
         filter: {
           must: [
@@ -449,58 +489,26 @@ const generateMemoryBrief = async (_config: BikkyConfig): Promise<boolean> => {
         .slice(0, 10);
 
       if (points.length > 0) {
-        sections[cat] = points.map(pt => pt.payload?.content).filter(Boolean) as string[];
+        sections[heading] = points.map(pt => pt.payload?.content).filter(Boolean) as string[];
       }
     }
 
     if (Object.keys(sections).length === 0) return false;
 
-    // Use LLM to synthesize into a structured brief
-    const factsText = Object.entries(sections)
-      .map(([cat, facts]) => `### ${cat}\n${facts.map(f => `- ${f}`).join("\n")}`)
-      .join("\n\n");
-
-    const brief = await chatCompletion({
-      messages: [
-        { role: "system", content: "You generate concise orientation documents for AI agents. Write in a structured, scannable format." },
-        { role: "user", content: `Generate a compact memory brief from these facts. This brief will be loaded by AI agents at session start for orientation.
-
-## Facts by Category:
-${factsText}
-
-## Output Format (markdown):
-# Memory Brief
-Generated: [date]
-
-## Key People & Team
-[who matters and their roles]
-
-## Active Projects
-[what's in progress, blocked, recently completed]
-
-## Infrastructure Overview
-[key services, databases, deployment details]
-
-## Recent Decisions
-[important architectural/technical decisions]
-
-## Known Gotchas
-[errors, workarounds, caveats to watch for]
-
-## Preferences & Conventions
-[user/team preferences, coding style, etc.]
-
-Keep each section to 3-5 bullet points. Omit empty sections. Be factual, not chatty.` },
-      ],
-      temperature: 0.2,
-      max_tokens: 1500,
-    });
+    const generatedAt = new Date().toISOString().slice(0, 10);
+    const rendered = briefPrompt({ generatedAt, sections });
+    const brief = await chatCompletion(rendered);
 
     if (!brief) return false;
 
+    // Stamp the prompt version as a comment so we know which prompt produced
+    // a given on-disk brief (debugging aid; ignored by markdown renderers).
+    const promptStamp = `${BRIEF_PROMPT_DESCRIPTOR.id}@${BRIEF_PROMPT_DESCRIPTOR.version}`;
+    const output = `<!-- generated by ${promptStamp} -->\n${brief}\n`;
+
     // Write to disk
     mkdirSync(dirname(MEMORY_BRIEF_PATH), { recursive: true });
-    writeFileSync(MEMORY_BRIEF_PATH, brief + "\n", "utf8");
+    writeFileSync(MEMORY_BRIEF_PATH, output, "utf8");
     logFn("INFO", `Memory brief generated: ${MEMORY_BRIEF_PATH} (${brief.length} chars)`);
     return true;
   } catch (e) {

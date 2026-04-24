@@ -13,6 +13,7 @@ import {
 } from "@aws-sdk/client-bedrock-runtime";
 
 import type { InferenceProviderConfig, ChatCompletionOpts, LogFn } from "./types.js";
+import { estimateTokens, writeTelemetry } from "./telemetry.js";
 
 // ── Module state ─────────────────────────────────────────────────────────────
 
@@ -38,17 +39,52 @@ function initBedrockClient(): void {
 
 export async function chatCompletion(opts: ChatCompletionOpts): Promise<string | null> {
   const provider = cfg?.provider ?? "ollama";
+  const promptName = opts.promptName ?? "unknown";
+  const tokensIn = estimateTokens(opts.messages.map((m) => m.content).join("\n"));
 
-  if (provider === "openai") return openaiCompletion(opts);
+  const run = async (
+    impl: (o: ChatCompletionOpts) => Promise<string | null>,
+    actualProvider: "ollama" | "openai" | "bedrock",
+    model: string,
+  ): Promise<string | null> => {
+    const t0 = Date.now();
+    let result: string | null = null;
+    let err: string | undefined;
+    try {
+      result = await impl(opts);
+    } catch (e: unknown) {
+      err = (e as Error).message;
+    }
+    void writeTelemetry(
+      {
+        ts: new Date().toISOString(),
+        prompt: promptName,
+        model,
+        provider: actualProvider,
+        ok: result !== null,
+        latency_ms: Date.now() - t0,
+        tokens_in_est: tokensIn,
+        tokens_out_est: result ? estimateTokens(result) : 0,
+        error: err,
+        request_id: opts.requestId,
+      },
+      log,
+    );
+    return result;
+  };
 
-  if (provider === "ollama") {
-    const result = await ollamaCompletion(opts);
-    if (result !== null) return result;
-    log("INFO", "LLM: Ollama failed, falling back to Bedrock");
-    return bedrockCompletion(opts);
+  if (provider === "openai") {
+    return run(openaiCompletion, "openai", cfg?.openai_model ?? "gpt-4.1-mini");
   }
 
-  return bedrockCompletion(opts);
+  if (provider === "ollama") {
+    const result = await run(ollamaCompletion, "ollama", cfg?.ollama_model ?? "qwen2.5:7b");
+    if (result !== null) return result;
+    log("INFO", "LLM: Ollama failed, falling back to Bedrock");
+    return run(bedrockCompletion, "bedrock", cfg?.bedrock_model ?? "us.anthropic.claude-sonnet-4-20250514");
+  }
+
+  return run(bedrockCompletion, "bedrock", cfg?.bedrock_model ?? "us.anthropic.claude-sonnet-4-20250514");
 }
 
 // ── Provider implementations ─────────────────────────────────────────────────
@@ -131,6 +167,15 @@ async function bedrockCompletion(opts: ChatCompletionOpts): Promise<string | nul
   const systemBlocks: SystemContentBlock[] = [];
   const messages: BedrockMessage[] = [];
 
+  // Bedrock Converse silently ignores response_format. When the caller asked for
+  // JSON, prepend a hard JSON-only directive to the system blocks so the model
+  // produces parseable output.
+  if (opts.response_format && opts.response_format.type === "json_object") {
+    systemBlocks.push({
+      text: "Output VALID JSON ONLY. No markdown code fences. No prose before or after the JSON. The first character of your reply MUST be { or [.",
+    });
+  }
+
   for (const m of opts.messages) {
     if (m.role === "system") {
       systemBlocks.push({ text: m.content });
@@ -142,23 +187,18 @@ async function bedrockCompletion(opts: ChatCompletionOpts): Promise<string | nul
     }
   }
 
-  try {
-    const command = new ConverseCommand({
-      modelId,
-      messages,
-      ...(systemBlocks.length > 0 ? { system: systemBlocks } : {}),
-      inferenceConfig: {
-        maxTokens: opts.max_tokens ?? 500,
-        temperature: opts.temperature ?? 0.2,
-      },
-    });
+  const command = new ConverseCommand({
+    modelId,
+    messages,
+    ...(systemBlocks.length > 0 ? { system: systemBlocks } : {}),
+    inferenceConfig: {
+      maxTokens: opts.max_tokens ?? 500,
+      temperature: opts.temperature ?? 0.2,
+    },
+  });
 
-    const resp = await bedrockClient!.send(command);
-    const content = resp.output?.message?.content;
-    const textBlock = content?.find(c => "text" in c);
-    return (textBlock as { text: string })?.text?.trim() ?? null;
-  } catch (e: unknown) {
-    log("WARN", `LLM Bedrock error: ${(e as Error).message}`);
-    return null;
-  }
+  const resp = await bedrockClient!.send(command);
+  const content = resp.output?.message?.content;
+  const textBlock = content?.find(c => "text" in c);
+  return (textBlock as { text: string })?.text?.trim() ?? null;
 }

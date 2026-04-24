@@ -231,6 +231,39 @@ export function normalizeSource(s: string | undefined): string {
   return DEFAULT_SOURCE;
 }
 
+// ─── Prompt rendering helpers ───────────────────────────────────────────────
+
+/**
+ * Render the documentation block for a single category — used inside LLM prompts
+ * so the model sees the same description, hint, and examples that `taxonomy.ts`
+ * declares as canonical. Keeps prompts and code in sync.
+ */
+export function categoryPromptSection(category: string): string {
+  const def = CATEGORIES[category];
+  if (!def) return `### ${category}\n(unknown category)`;
+  const examples = def.examples
+    .map(
+      (ex) =>
+        `  • "${ex.content}" — entities: [${ex.entities
+          .map((e) => `"${e}"`)
+          .join(", ")}], importance: ${ex.importance}`,
+    )
+    .join("\n");
+  return [
+    `### ${category}`,
+    def.description,
+    `Look for: ${def.extractionHint}`,
+    examples ? `Examples:\n${examples}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Render every category section back-to-back. */
+export function allCategoryPromptSections(): string {
+  return Object.keys(CATEGORIES).map(categoryPromptSection).join("\n\n");
+}
+
 // ─── Value arrays for z.enum consumption ────────────────────────────────────
 
 export const categoryValues = (): [string, ...string[]] =>
