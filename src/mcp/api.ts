@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { QdrantFilter, QdrantGetResult, QdrantScrollResult, QdrantSearchResult } from "./types.js";
 import { embed, getEmbeddingDimensions, getEmbeddingConfig, initEmbedding, chatCompletion, initLLM } from "../llm/index.js";
-export type { EmbeddingProviderConfig } from "../llm/index.js";
+export type { ResolvedEmbeddingConfig } from "../llm/index.js";
 export { embed, getEmbeddingDimensions, getEmbeddingConfig, initEmbedding };
 
 import { createLogger } from "../logger.js";
@@ -91,12 +91,11 @@ export async function chatComplete(systemPrompt: string, userPrompt: string): Pr
     initLLM({
       config: {
         provider: cfg.llm.provider,
-        ollama_url: cfg.llm.base_url,
-        ollama_model: cfg.llm.model,
-        openai_api_key: cfg.llm.api_key ?? null,
-        openai_model: cfg.llm.model,
-        bedrock_region: cfg.llm.bedrock_region,
-        bedrock_model: cfg.llm.model,
+        model: cfg.llm.model,
+        baseUrl: cfg.llm.base_url,
+        apiKey: cfg.llm.api_key ?? null,
+        fallback: cfg.llm.fallback_provider ?? null,
+        extra: cfg.llm.extra ?? {},
       },
       logger: log as (...args: unknown[]) => void,
     });

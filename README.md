@@ -52,6 +52,8 @@ export QDRANT_URL="https://…:6333" QDRANT_API_KEY="…"
 Restart your editor — 12 memory tools appear automatically.
 
 > 📖 Full configuration reference (providers, models, daemon settings): **[docs/configuration.md](docs/configuration.md)**
+>
+> 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md](CONTRIBUTING.md)** — it's a single-file change.
 
 ---
 

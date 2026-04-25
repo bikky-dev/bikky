@@ -37,14 +37,13 @@ export async function startDaemon(): Promise<void> {
   initLLM({
     config: {
       provider: cfg.llm.provider,
-      ollama_url: cfg.llm.base_url,
-      ollama_model: cfg.llm.model,
-      openai_api_key: cfg.llm.api_key,
-      openai_model: cfg.llm.model,
-      bedrock_region: cfg.llm.bedrock_region,
-      bedrock_model: cfg.llm.model,
+      model: cfg.llm.model,
+      baseUrl: cfg.llm.base_url,
+      apiKey: cfg.llm.api_key,
+      fallback: cfg.llm.fallback_provider ?? null,
+      extra: cfg.llm.extra ?? {},
     },
-    logger: log as unknown as import("../llm/types.js").LogFn,
+    logger: log as unknown as import("../llm/index.js").LogFn,
   });
 
   // Initialize Qdrant client

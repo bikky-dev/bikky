@@ -184,10 +184,10 @@ describe("config", () => {
       assert.strictEqual(cfg.llm.provider, "ollama");
     });
 
-    it("llm.bedrock_region defaults to 'us-east-1'", () => {
+    it("llm.fallback_provider defaults to null", () => {
       if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
       const cfg = loadConfig();
-      assert.strictEqual(cfg.llm.bedrock_region, "us-east-1");
+      assert.strictEqual(cfg.llm.fallback_provider ?? null, null);
     });
 
     it("daemon has expected defaults", () => {
@@ -324,18 +324,18 @@ describe("config", () => {
       assert.strictEqual(cfg.llm.base_url, "https://api.openai.com");
     });
 
-    it("AWS_BEDROCK_REGION overrides llm.bedrock_region", () => {
+    it("AWS_BEDROCK_REGION populates llm.extra.region", () => {
       if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
       process.env.AWS_BEDROCK_REGION = "eu-west-1";
       const cfg = loadConfig();
-      assert.strictEqual(cfg.llm.bedrock_region, "eu-west-1");
+      assert.strictEqual(cfg.llm.extra?.region, "eu-west-1");
     });
 
-    it("AWS_REGION falls back for bedrock_region when AWS_BEDROCK_REGION not set", () => {
+    it("AWS_REGION falls back to llm.extra.region when AWS_BEDROCK_REGION not set", () => {
       if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
       process.env.AWS_REGION = "ap-southeast-1";
       const cfg = loadConfig();
-      assert.strictEqual(cfg.llm.bedrock_region, "ap-southeast-1");
+      assert.strictEqual(cfg.llm.extra?.region, "ap-southeast-1");
     });
 
     it("AWS_BEDROCK_REGION takes priority over AWS_REGION", () => {
@@ -343,7 +343,15 @@ describe("config", () => {
       process.env.AWS_BEDROCK_REGION = "us-west-2";
       process.env.AWS_REGION = "eu-central-1";
       const cfg = loadConfig();
-      assert.strictEqual(cfg.llm.bedrock_region, "us-west-2");
+      assert.strictEqual(cfg.llm.extra?.region, "us-west-2");
+    });
+
+    it("BIKKY_LLM_EXTRA_<KEY> env vars populate llm.extra", () => {
+      if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
+      process.env.BIKKY_LLM_EXTRA_VIRTUAL_KEY = "vk-1";
+      const cfg = loadConfig();
+      assert.strictEqual(cfg.llm.extra?.virtual_key, "vk-1");
+      delete process.env.BIKKY_LLM_EXTRA_VIRTUAL_KEY;
     });
   });
 
