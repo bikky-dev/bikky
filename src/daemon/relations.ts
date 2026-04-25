@@ -205,12 +205,13 @@ const fetchFactContents = async (
 /**
  * Use LLM to infer a relationship label from shared facts.
  * Returns null if the LLM can't determine a meaningful relationship.
+ * The LLM decides directionality — `from` is the subject, `to` is the object.
  */
 const inferRelation = async (
   entityA: string,
   entityB: string,
   sharedFacts: Array<{ content: string; category: string }>,
-): Promise<{ type: string; content: string } | null> => {
+): Promise<{ from: string; type: string; to: string; content: string } | null> => {
   const factsText = sharedFacts
     .map((f, i) => `${i + 1}. [${f.category}] ${f.content}`)
     .join("\n");
@@ -219,20 +220,26 @@ const inferRelation = async (
     messages: [
       {
         role: "system",
-        content: `You infer relationships between entities based on shared facts.
-Output ONLY valid JSON: { "type": "verb-phrase", "content": "one sentence description" }
-The "type" should be a 1-3 word verb phrase (e.g. "owns", "uses", "works-on", "manages", "depends-on").
-The "content" should be a single sentence describing the relationship.
-If the facts don't suggest a clear relationship, output: { "type": null }`,
+        content: `You infer directed relationships between entities based on shared facts.
+
+Output ONLY valid JSON with this exact shape:
+{ "from": "subject-entity", "type": "verb-phrase", "to": "object-entity", "content": "one sentence" }
+
+Direction matters — "from" is the entity that DOES the action, "to" is acted upon:
+  ✅ { "from": "telegrambot", "type": "depends-on", "to": "bedrock" }
+  ❌ { "from": "bedrock", "type": "depends-on", "to": "telegrambot" }
+
+The "type" should be a 1-3 word verb phrase (e.g. "depends-on", "uses", "runs-on", "owns", "manages").
+The "from" and "to" MUST be one of the two entities provided — do not invent new names.
+If the facts don't suggest a clear directional relationship, output: { "type": null }`,
       },
       {
         role: "user",
-        content: `Entity A: "${entityA}"
-Entity B: "${entityB}"
+        content: `Entities: "${entityA}", "${entityB}"
 Shared facts (${sharedFacts.length}):
 ${factsText}
 
-Infer the primary relationship between these two entities.`,
+Infer the primary directed relationship between these two entities.`,
       },
     ],
     temperature: 0.1,
@@ -243,9 +250,34 @@ Infer the primary relationship between these two entities.`,
 
   try {
     const jsonStr = raw.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim();
-    const parsed = JSON.parse(jsonStr) as { type?: string | null; content?: string };
+    const parsed = JSON.parse(jsonStr) as {
+      from?: string | null;
+      type?: string | null;
+      to?: string | null;
+      content?: string;
+    };
     if (!parsed.type) return null;
-    return { type: parsed.type, content: parsed.content || `${entityA} ${parsed.type} ${entityB}` };
+
+    // Validate that from/to are the provided entities (not hallucinated)
+    const entities = new Set([entityA.toLowerCase(), entityB.toLowerCase()]);
+    const from = parsed.from?.toLowerCase() ?? "";
+    const to = parsed.to?.toLowerCase() ?? "";
+
+    if (!entities.has(from) || !entities.has(to) || from === to) {
+      logFn("WARN", `Relations: LLM returned invalid from/to for ${entityA}↔${entityB}: from="${parsed.from}", to="${parsed.to}"`);
+      return null;
+    }
+
+    // Use the LLM's chosen direction (normalised to original casing)
+    const resolvedFrom = from === entityA.toLowerCase() ? entityA : entityB;
+    const resolvedTo = to === entityA.toLowerCase() ? entityA : entityB;
+
+    return {
+      from: resolvedFrom,
+      type: parsed.type,
+      to: resolvedTo,
+      content: parsed.content || `${resolvedFrom} ${parsed.type} ${resolvedTo}`,
+    };
   } catch {
     logFn("WARN", `Relations: failed to parse LLM response for ${entityA}↔${entityB}: ${raw.slice(0, 100)}`);
     return null;
@@ -256,14 +288,14 @@ Infer the primary relationship between these two entities.`,
  * Store an inferred relation as a memory fact.
  */
 const storeRelation = async (
-  entityA: string,
-  entityB: string,
+  fromEntity: string,
+  toEntity: string,
   relationType: string,
   content: string,
   sharedFactIds: string[],
 ): Promise<string> => {
   const hash = createHash("sha256")
-    .update(`daemon-relation:${pairKey(entityA, entityB)}:${relationType}`)
+    .update(`daemon-relation:${pairKey(fromEntity, toEntity)}:${relationType}`)
     .digest("hex");
 
   const id = await qdrant.storeFact({
@@ -271,7 +303,7 @@ const storeRelation = async (
     category: "team",    // relations are about entity structure
     domain: "work",
     kind: "relation",
-    entities: [entityA, entityB],
+    entities: [fromEntity, toEntity],
     source: "daemon",
     confidence: 0.7,
     importance: 0.6,
@@ -281,13 +313,13 @@ const storeRelation = async (
       shared_fact_count: String(sharedFactIds.length),
     },
     relation: {
-      from: entityA,
+      from: fromEntity,
       type: relationType,
-      to: entityB,
+      to: toEntity,
     },
   });
 
-  logFn("INFO", `Relations: inferred ${entityA} —[${relationType}]→ ${entityB} (id: ${id})`);
+  logFn("INFO", `Relations: inferred ${fromEntity} —[${relationType}]→ ${toEntity} (id: ${id})`);
   return id;
 };
 
@@ -331,7 +363,7 @@ const tick = async (config: BikkyConfig): Promise<void> => {
 
         // Dedup check before storing
         const hash = createHash("sha256")
-          .update(`daemon-relation:${pairKey(candidate.entityA, candidate.entityB)}:${result.type}`)
+          .update(`daemon-relation:${pairKey(result.from, result.to)}:${result.type}`)
           .digest("hex");
         const dedup = await qdrant.dedupCheck(result.content, hash);
         if (dedup.action === "skip") {
@@ -340,8 +372,8 @@ const tick = async (config: BikkyConfig): Promise<void> => {
         }
 
         await storeRelation(
-          candidate.entityA,
-          candidate.entityB,
+          result.from,
+          result.to,
           result.type,
           result.content,
           candidate.factIds,

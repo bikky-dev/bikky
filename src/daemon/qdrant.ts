@@ -10,6 +10,7 @@ import { randomUUID } from "node:crypto";
 import { loadConfig } from "../config.js";
 import { embed, initEmbedding, getEmbeddingConfig } from "../llm/index.js";
 import type { EmbeddingProviderConfig } from "../llm/index.js";
+import { QdrantClient, type QdrantLogLevel } from "../lib/qdrant-client.js";
 
 // ---------------------------------------------------------------------------
 // Types (local)
@@ -110,11 +111,14 @@ let qdrantUrl: string | null = null;
 let qdrantApiKey: string | null = null;
 let collection: string = "bikky";
 let logFn: LogFn = () => {};
+let client: QdrantClient | null = null;
 
 const setLogger = (fn: LogFn): void => { logFn = fn; };
 const setEmbeddingConfig = (overrides?: Partial<EmbeddingProviderConfig>): void => {
   if (overrides) initEmbedding(overrides);
 };
+
+const clientLogAdapter = (level: QdrantLogLevel, msg: string): void => logFn(level, msg);
 
 // ---------------------------------------------------------------------------
 // Init — reads credentials from loadConfig()
@@ -140,35 +144,36 @@ const init = (): boolean => {
   logFn("INFO", `Embedding provider: ${embCfg.provider}/${embCfg.model} (${embCfg.dimensions}d) @ ${embCfg.baseUrl}`);
 
   const ready = !!(qdrantUrl && qdrantApiKey);
-  if (!ready) {
+  if (ready) {
+    client = new QdrantClient({
+      url: qdrantUrl as string,
+      apiKey: qdrantApiKey as string,
+      collection,
+      timeoutMs: cfg.qdrant_client.timeout_ms,
+      retries: cfg.qdrant_client.retries,
+      retryBaseDelayMs: cfg.qdrant_client.retry_base_delay_ms,
+      log: clientLogAdapter,
+    });
+  } else {
+    client = null;
     logFn("WARN", "Qdrant client: missing credentials (some memory features disabled)");
   }
   return ready;
 };
 
-const isReady = (): boolean => !!(qdrantUrl && qdrantApiKey);
+const isReady = (): boolean => !!(qdrantUrl && qdrantApiKey && client);
 
 // ---------------------------------------------------------------------------
 // HTTP requests
 // ---------------------------------------------------------------------------
 
 const qdrantRequest = async (method: string, urlPath: string, body?: unknown): Promise<Record<string, unknown>> => {
-  const url = `${qdrantUrl}${urlPath}`;
-  const opts: RequestInit = {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "api-key": qdrantApiKey!,
-    },
-  };
-  if (body) opts.body = JSON.stringify(body);
-
-  const resp = await fetch(url, opts);
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`Qdrant ${method} ${urlPath} failed (${resp.status}): ${text.slice(0, 200)}`);
+  if (!client) {
+    throw new Error(`Qdrant client not initialized — call init() first (${method} ${urlPath})`);
   }
-  return resp.json() as Promise<Record<string, unknown>>;
+  const result = await client.request<Record<string, unknown> | undefined>(method, urlPath, body);
+  // Some Qdrant endpoints return empty bodies on success — preserve old return shape.
+  return result ?? {};
 };
 
 // ---------------------------------------------------------------------------
