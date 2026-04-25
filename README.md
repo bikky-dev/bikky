@@ -125,7 +125,22 @@ bikky mcp       # start MCP server (stdio) — used by editors
 bikky setup     # interactive setup wizard
 bikky status    # check memory system health
 bikky install   # write MCP config for Copilot + Claude Code
+bikky render    # render a prompt to JSON (for eval harnesses & debugging)
 ```
+
+### `bikky render` — inspect prompts
+
+Render any of bikky's prompts to JSON without booting the MCP server. Useful for
+external evaluation harnesses, prompt debugging, and reproducing model calls.
+
+```bash
+bikky render --list                                    # list available prompts
+echo '{"transcript":"..."}' | bikky render extraction  # via stdin
+bikky render extraction --input case.json              # via file
+```
+
+Output: a JSON object with `promptName`, `messages`, `temperature`,
+`max_tokens`, and `response_format` — exactly what bikky sends to the LLM.
 
 ## License
 

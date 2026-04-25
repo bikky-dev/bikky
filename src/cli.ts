@@ -9,6 +9,7 @@
  *   bikky setup      — install MCP configs + start daemon (alias for start)
  *   bikky status     — check memory system status
  *   bikky ui         — open memory explorer web UI
+ *   bikky render     — render a prompt to JSON (for eval harnesses)
  *   bikky --version  — print version
  */
 
@@ -16,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { startMcpServer } from "./mcp/index.js";
 import { getDaemonStatus, startAll, killDaemon } from "./lifecycle.js";
+import { runRenderCli } from "./render.js";
 
 const command = process.argv[2] ?? "mcp";
 
@@ -85,6 +87,11 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "render": {
+      const code = await runRenderCli(process.argv.slice(3));
+      process.exit(code);
+    }
+
     case "ui": {
       const { execSync } = await import("node:child_process");
       console.log("🧠 Launching bikky ui…");
@@ -98,7 +105,7 @@ async function main(): Promise<void> {
 
     default:
       console.error(`Unknown command: ${command}`);
-      console.error("Usage: bikky [start|stop|mcp|daemon|setup|status|ui|--version]");
+      console.error("Usage: bikky [start|stop|mcp|daemon|setup|status|ui|render|--version]");
       process.exit(1);
   }
 }
