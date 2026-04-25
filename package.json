@@ -27,7 +27,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "check": "tsc --noEmit && eslint src/",
-    "test": "node --test dist/*.test.js dist/**/*.test.js",
+    "test": "node --test --test-concurrency=1 $(find dist -name '*.test.js')",
     "build:diagrams": "node scripts/build-diagrams.mjs",
     "prepublishOnly": "npm run build"
   },

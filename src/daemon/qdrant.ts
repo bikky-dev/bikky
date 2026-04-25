@@ -1,6 +1,6 @@
 /**
  * Qdrant client for the bikky daemon — direct HTTP access to Qdrant Cloud.
- * Embedding is handled by ../llm/embedding.ts (config-driven provider abstraction).
+ * Embedding is handled by ../llm/embedding (registry-based provider abstraction).
  *
  * Credentials: config file (~/.bikky/config.json) → env vars.
  */
@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 
 import { loadConfig } from "../config.js";
 import { embed, initEmbedding, getEmbeddingConfig } from "../llm/index.js";
-import type { EmbeddingProviderConfig } from "../llm/index.js";
+import type { InitEmbeddingInput } from "../llm/index.js";
 import { QdrantClient, type QdrantLogLevel } from "../lib/qdrant-client.js";
 
 // ---------------------------------------------------------------------------
@@ -114,8 +114,8 @@ let logFn: LogFn = () => {};
 let client: QdrantClient | null = null;
 
 const setLogger = (fn: LogFn): void => { logFn = fn; };
-const setEmbeddingConfig = (overrides?: Partial<EmbeddingProviderConfig>): void => {
-  if (overrides) initEmbedding(overrides);
+const setEmbeddingConfig = (overrides?: Partial<InitEmbeddingInput>): void => {
+  if (overrides && overrides.provider) initEmbedding(overrides as InitEmbeddingInput);
 };
 
 const clientLogAdapter = (level: QdrantLogLevel, msg: string): void => logFn(level, msg);
