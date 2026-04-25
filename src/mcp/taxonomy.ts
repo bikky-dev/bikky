@@ -642,6 +642,33 @@ export function layerValues(): NonEmptyStringArray {
   return Object.keys(LAYERS) as NonEmptyStringArray;
 }
 
+// ---------------------------------------------------------------------------
+// Prompt rendering helpers — single source of truth shared with src/prompts/*
+// ---------------------------------------------------------------------------
+
+/**
+ * Render the documentation block for a single category — used inside LLM prompts
+ * so the model sees the same description and examples that taxonomy.ts declares
+ * as canonical. Keeps prompts and code in sync.
+ */
+export function categoryPromptSection(category: string): string {
+  const def = (CATEGORIES as Record<string, { description?: string; examples?: readonly string[] }>)[category];
+  if (!def) return `### ${category}\n(unknown category)`;
+  const examples = (def.examples ?? []).map((ex) => `  • ${ex}`).join("\n");
+  return [
+    `### ${category}`,
+    def.description ?? "",
+    examples ? `Examples:\n${examples}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Render every category section back-to-back. */
+export function allCategoryPromptSections(): string {
+  return Object.keys(CATEGORIES).map(categoryPromptSection).join("\n\n");
+}
+
 export function memorySubtypeValues(): NonEmptyStringArray {
   return Object.values(MEMORY_SUBTYPES).flat() as NonEmptyStringArray;
 }

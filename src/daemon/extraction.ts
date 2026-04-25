@@ -25,6 +25,11 @@ import {
   validateMemorySubtype,
 } from "../mcp/taxonomy.js";
 import {
+  extractionPrompt,
+  EXTRACTION_PROMPT_DESCRIPTOR,
+  safeParseJson,
+} from "../prompts/index.js";
+import {
   CAPTURE_POLICY_VERSION,
   CAPTURE_TRIGGERS,
   DEFAULT_CAPTURE_CONTEXT,
@@ -477,67 +482,51 @@ export const isHighQualityExtractedFact = (fact: ExtractedFact): boolean => {
 const extractFacts = async (transcript: string, config?: BikkyConfig): Promise<ExtractedFact[]> => {
   if (!transcript.trim()) return [];
 
-  const prompt = config?.daemon.extraction_prompt || DEFAULT_EXTRACTION_PROMPT;
-
-  const result = await chatCompletion({
-    messages: [
-      { role: "system", content: prompt },
-      { role: "user", content: transcript },
-    ],
-    temperature: 0.1,
-    max_tokens: 4000,
-    response_format: { type: "json_object" },
+  const rendered = extractionPrompt({
+    transcript,
+    systemOverride: config?.daemon.extraction_prompt ?? null,
   });
+
+  const result = await chatCompletion(rendered);
 
   if (!result) {
     logFn("WARN", "Extraction LLM call returned null");
     return [];
   }
 
-  try {
-    // Strip markdown code fences (```json ... ```) that some models wrap around JSON
-    let cleaned = result.trim();
-    if (cleaned.startsWith("```")) {
-      cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+  // Parse — handle {facts: [...]}, raw array, or single-fact object
+  let parsed: unknown = safeParseJson<unknown>(result);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    const unwrapped = obj.facts || obj.results || obj.items;
+    if (Array.isArray(unwrapped)) {
+      parsed = unwrapped;
+    } else if (obj.content && typeof obj.content === "string") {
+      // Single fact object — wrap in array
+      parsed = [obj];
+    } else {
+      // Try first array value from the object
+      const firstVal = Object.values(obj).find(v => Array.isArray(v));
+      parsed = firstVal || [obj];
     }
+  }
 
-    // Parse — handle {facts: [...]}, raw array, or single-fact object
-    let parsed: unknown = JSON.parse(cleaned);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const obj = parsed as Record<string, unknown>;
-      const unwrapped = obj.facts || obj.results || obj.items;
-      if (Array.isArray(unwrapped)) {
-        parsed = unwrapped;
-      } else if (obj.content && typeof obj.content === "string") {
-        // Single fact object — wrap in array
-        parsed = [obj];
-      } else {
-        // Try first array value from the object
-        const firstVal = Object.values(obj).find(v => Array.isArray(v));
-        parsed = firstVal || [obj];
-      }
-    }
-
-    if (!Array.isArray(parsed)) {
-      logFn("WARN", `Extraction LLM returned non-array: ${result.slice(0, 300)}`);
-      return [];
-    }
-
-    return (parsed as Array<Record<string, unknown>>)
-      .map((raw) => {
-        const fact = normalizeExtractedFact(raw);
-        if (!fact) {
-          const content = typeof raw.content === "string" ? raw.content : JSON.stringify(raw).slice(0, 120);
-          logFn("DEBUG", `Extraction: dropping low-quality fact candidate: "${content.slice(0, 80)}…"`);
-          return null;
-        }
-        return fact;
-      })
-      .filter((fact): fact is ExtractedFact => fact !== null);
-  } catch (e) {
-    logFn("WARN", `Extraction LLM parse error: ${(e as Error).message} — raw: ${result.slice(0, 200)}`);
+  if (!Array.isArray(parsed)) {
+    logFn("WARN", `Extraction LLM returned non-array: ${result.slice(0, 300)}`);
     return [];
   }
+
+  return (parsed as Array<Record<string, unknown>>)
+    .map((raw) => {
+      const fact = normalizeExtractedFact(raw);
+      if (!fact) {
+        const content = typeof raw.content === "string" ? raw.content : JSON.stringify(raw).slice(0, 120);
+        logFn("DEBUG", `Extraction: dropping low-quality fact candidate: "${content.slice(0, 80)}…"`);
+        return null;
+      }
+      return fact;
+    })
+    .filter((fact): fact is ExtractedFact => fact !== null);
 };
 
 // ── Fact storage ─────────────────────────────────────────────────────────────
@@ -562,6 +551,7 @@ const storeFacts = async (
   const baseMeta: Record<string, string | number | boolean | null> = {
     extracted_from_session: sessionId,
     capture_policy_version: CAPTURE_POLICY_VERSION,
+    extracted_by_prompt: `${EXTRACTION_PROMPT_DESCRIPTOR.id}@${EXTRACTION_PROMPT_DESCRIPTOR.version}`,
   };
   let stored = 0;
 

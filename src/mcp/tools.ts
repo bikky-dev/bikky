@@ -166,9 +166,15 @@ function buildMemoryNudge(): string | null {
   const elapsed = Date.now() - lastStoreTime;
   if (elapsed < NUDGE_INTERVAL_MS) return null;
   const mins = Math.round(elapsed / 60000);
+  // Suggest the most likely category to record based on what an engineering
+  // session typically produces. The agent picks the best fit.
   return `🧠 Memory nudge: No memory_store calls in ${mins} minutes. ` +
-    "If you've learned project facts, made key decisions, discovered service quirks, " +
-    "or resolved errors — store them now so future sessions benefit.";
+    "Reflect on what's worth persisting:\n" +
+    "  • infrastructure — new services, ports, configs touched?\n" +
+    "  • decisions — architectural choices made (with rationale)?\n" +
+    "  • observation — debugging findings, gotchas, workarounds?\n" +
+    "  • projects — work-in-progress, blockers, completions?\n" +
+    "If yes, call memory_store now so future sessions inherit the knowledge.";
 }
 
 /**
@@ -1201,8 +1207,12 @@ export function registerTools(mcp: McpServer): void {
       }
 
       sections.push(
-        "🔍 **Reflect:** What have you learned, decided, or discovered since the last heartbeat? " +
-        "If anything is worth persisting for future sessions, call memory_store now.",
+        "🔍 Reflect: think about the LAST 10 minutes of work and answer in your head:\n" +
+        "  1. Did you touch a service, port, config, or file path you hadn't seen before?\n" +
+        "  2. Did you make a choice (library, pattern, approach) you'd want a future session to know about?\n" +
+        "  3. Did you hit an error and find a workaround?\n" +
+        "  4. Did the user state a preference or constraint?\n" +
+        "If any answer is yes, call memory_store now — one atomic fact per item, with category/domain/entities.",
       );
 
       return { content: [{ type: "text", text: sections.join("\n\n") }] };

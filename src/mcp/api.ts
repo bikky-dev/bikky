@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { QdrantFilter, QdrantGetResult, QdrantScrollResult, QdrantSearchResult } from "./types.js";
 import { embed, getEmbeddingDimensions, getEmbeddingConfig, initEmbedding, chatCompletion, initLLM } from "../llm/index.js";
+import type { ChatCompletionOpts } from "../llm/index.js";
 export type { ResolvedEmbeddingConfig } from "../llm/index.js";
 export { embed, getEmbeddingDimensions, getEmbeddingConfig, initEmbedding };
 
@@ -86,22 +87,7 @@ function rebuildClient(): void {
 // ---------------------------------------------------------------------------
 
 export async function chatComplete(systemPrompt: string, userPrompt: string): Promise<string> {
-  if (!llmInitialized) {
-    const cfg = loadConfig();
-    initLLM({
-      config: {
-        provider: cfg.llm.provider,
-        model: cfg.llm.model,
-        baseUrl: cfg.llm.base_url,
-        apiKey: cfg.llm.api_key ?? null,
-        fallback: cfg.llm.fallback_provider ?? null,
-        extra: cfg.llm.extra ?? {},
-      },
-      logger: log as (...args: unknown[]) => void,
-    });
-    llmInitialized = true;
-  }
-
+  ensureLLMInitialized();
   const result = await chatCompletion({
     messages: [
       { role: "system", content: systemPrompt },
@@ -113,6 +99,34 @@ export async function chatComplete(systemPrompt: string, userPrompt: string): Pr
 
   if (!result) throw new Error("LLM chat completion failed");
   return result;
+}
+
+/**
+ * Run a pre-rendered prompt (from src/prompts/*) through the LLM. The
+ * RenderedPrompt already carries messages, response_format, temperature, etc.
+ */
+export async function chatCompleteRendered(opts: ChatCompletionOpts): Promise<string> {
+  ensureLLMInitialized();
+  const result = await chatCompletion(opts);
+  if (!result) throw new Error("LLM chat completion failed");
+  return result;
+}
+
+function ensureLLMInitialized(): void {
+  if (llmInitialized) return;
+  const cfg = loadConfig();
+  initLLM({
+    config: {
+      provider: cfg.llm.provider,
+      model: cfg.llm.model,
+      baseUrl: cfg.llm.base_url,
+      apiKey: cfg.llm.api_key ?? null,
+      fallback: cfg.llm.fallback_provider ?? null,
+      extra: cfg.llm.extra ?? {},
+    },
+    logger: log as (...args: unknown[]) => void,
+  });
+  llmInitialized = true;
 }
 
 // ---------------------------------------------------------------------------
