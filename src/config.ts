@@ -49,6 +49,12 @@ export interface DaemonConfig {
   staleness_threshold_days: number;
 }
 
+export interface QdrantClientConfig {
+  timeout_ms: number;
+  retries: number;
+  retry_base_delay_ms: number;
+}
+
 export interface WatcherConfig {
   copilot: { enabled: boolean; path: string };
   claude: { enabled: boolean; path: string };
@@ -63,6 +69,7 @@ export interface BikkyConfig {
   llm: LLMConfig;
   daemon: DaemonConfig;
   watchers: WatcherConfig;
+  qdrant_client: QdrantClientConfig;
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +107,11 @@ const DEFAULTS: BikkyConfig = {
   watchers: {
     copilot: { enabled: true, path: path.join(os.homedir(), ".copilot", "session-state") },
     claude: { enabled: false, path: path.join(os.homedir(), ".claude", "projects") },
+  },
+  qdrant_client: {
+    timeout_ms: 10_000,
+    retries: 3,
+    retry_base_delay_ms: 250,
   },
 };
 
@@ -168,6 +180,20 @@ export function loadConfig(): BikkyConfig {
   if (process.env.AWS_BEDROCK_REGION) config.llm.bedrock_region = process.env.AWS_BEDROCK_REGION;
   if (process.env.AWS_REGION && !process.env.AWS_BEDROCK_REGION) config.llm.bedrock_region = process.env.AWS_REGION;
   if (process.env.AWS_PROFILE) config.aws_profile = process.env.AWS_PROFILE;
+
+  // Qdrant client tuning env overrides
+  if (process.env.QDRANT_TIMEOUT_MS) {
+    const n = parseInt(process.env.QDRANT_TIMEOUT_MS, 10);
+    if (Number.isFinite(n) && n >= 0) config.qdrant_client.timeout_ms = n;
+  }
+  if (process.env.QDRANT_RETRIES) {
+    const n = parseInt(process.env.QDRANT_RETRIES, 10);
+    if (Number.isFinite(n) && n >= 0) config.qdrant_client.retries = n;
+  }
+  if (process.env.QDRANT_RETRY_BASE_DELAY_MS) {
+    const n = parseInt(process.env.QDRANT_RETRY_BASE_DELAY_MS, 10);
+    if (Number.isFinite(n) && n >= 0) config.qdrant_client.retry_base_delay_ms = n;
+  }
 
   // Propagate aws_profile into env so both Bedrock clients (LLM + embedding)
   // pick it up via the SDK's default credential chain.
