@@ -159,8 +159,6 @@ describe("mcp/tools handlers", () => {
       "memory_forget",
       "memory_verify",
       "memory_review",
-      "memory_session_summary",
-      "memory_distill",
       "memory_heartbeat",
     ]) {
       assert.ok(handlers.has(name), `expected handler '${name}' to be registered`);
@@ -297,7 +295,14 @@ describe("mcp/tools handlers", () => {
         payloadCalls.push(call.body as Record<string, unknown>);
         return { status: "ok" };
       });
-      on(/\/points$/, () => ({ status: "ok" }));
+      on(/\/points$/, (call) => {
+        // POST without `points` key = qdrantGetPoints (lookup of supersedes target)
+        const body = call.body as { points?: unknown; ids?: unknown };
+        if (call.method === "POST" && !body.points) {
+          return { result: [{ id: "old-fact-id", payload: { content: "old fact" } }] };
+        }
+        return { status: "ok" };
+      });
 
       const result = await invoke("memory_store", {
         content: "qdrant now on 7000",
@@ -465,19 +470,23 @@ describe("mcp/tools handlers", () => {
     it("aggregates facts mentioning the entity plus from/to relations and dedups", async () => {
       on("/points/scroll", (call) => {
         const body = call.body as { filter: { must: Array<Record<string, unknown>> } };
-        const cond = body.filter.must[0] as { key: string; match: { value: string } };
+        // Filter may contain workspace_id conditions first; scan all conditions for the entity-shaped one.
+        const conds = body.filter.must as Array<{ key?: string; match?: { value?: string } }>;
+        const entityCond = conds.find((c) => c.key === "entities" && c.match?.value === "platform");
+        const fromCond = conds.find((c) => c.key === "from_entity" && c.match?.value === "platform");
+        const toCond = conds.find((c) => c.key === "to_entity" && c.match?.value === "platform");
 
-        if (cond.key === "entities" && cond.match.value === "platform") {
+        if (entityCond) {
           return { result: { points: [
             { id: "f1", payload: { content: "platform fact", category: "infrastructure", entities: ["platform"], reinforcement_count: 1 } },
           ] } };
         }
-        if (cond.key === "from_entity" && cond.match.value === "platform") {
+        if (fromCond) {
           return { result: { points: [
             { id: "r1", payload: { content: "platform uses qdrant", category: "team", from_entity: "platform", to_entity: "qdrant", relation_type: "uses" } },
           ] } };
         }
-        if (cond.key === "to_entity" && cond.match.value === "platform") {
+        if (toCond) {
           // Same relation appears as 'to' lookup too — must be deduped by id.
           return { result: { points: [
             { id: "r1", payload: { content: "platform uses qdrant", category: "team", from_entity: "platform", to_entity: "qdrant", relation_type: "uses" } },
@@ -512,6 +521,14 @@ describe("mcp/tools handlers", () => {
       let body: Record<string, unknown> | null = null;
       on("/points/payload", (call) => {
         body = call.body as Record<string, unknown>;
+        return { status: "ok" };
+      });
+      // memory_forget first calls qdrantGetPoints (POST /points with {ids,...}) for the workspace check.
+      on(/\/points$/, (call) => {
+        const callBody = call.body as { ids?: unknown };
+        if (call.method === "POST" && callBody.ids) {
+          return { result: [{ id: "victim", payload: { content: "to be forgotten" } }] };
+        }
         return { status: "ok" };
       });
 

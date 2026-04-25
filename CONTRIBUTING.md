@@ -85,6 +85,25 @@ Good references for new tests:
 | Mocking `globalThis.fetch`       | `src/mcp/api.test.ts`, `packages/ui/src/lib/qdrant.test.ts` |
 | Hono route via `app.fetch`       | `packages/ui/src/routes/memory.test.ts` |
 
+### Integration tests (opt-in, real Qdrant)
+
+The default `npm test` mocks every external call. We also ship one **opt-in** end-to-end smoke test that talks to a real Qdrant Cloud instance and a real embedding provider — it's the only thing that catches filter-shape rejections, payload-index mismatches, vector-dimension drift, and whether the dedup similarity thresholds (`THRESHOLD_DUPLICATE`, `THRESHOLD_RELATED`) actually correspond to near-duplicates against your embedding model.
+
+```bash
+# Uses your existing ~/.bikky/config.json + QDRANT_URL/QDRANT_API_KEY env.
+BIKKY_INTEGRATION=1 npm run test:integration
+```
+
+What it does:
+
+1. Creates a throwaway collection named `bikky-it-<short-uuid>` with the real payload indexes.
+2. Exercises `memory_store` (insert, exact-dup, near-duplicate paraphrase), `memory_recall`, `memory_entity`, and `memory_forget` against live Qdrant + your real embeddings.
+3. Drops the collection in `after()` regardless of pass/fail.
+
+Cost is negligible — a handful of small embedding calls per run (≈ $0.0001 on OpenAI's `text-embedding-3-small`, free on Ollama). Files end in `.itest.ts` so the default `*.test.js` glob never picks them up.
+
+If the near-duplicate paraphrase doesn't reinforce on your embedding model, the test logs the actual similarity score so you can re-tune `THRESHOLD_DUPLICATE` rather than failing outright.
+
 ## Adding an embedding or LLM provider
 
 The most common contribution is **adding a new embedding or LLM provider**. Each provider is a single file. The registry dispatches by `provider.name`, so no central edits are required beyond adding one import line to the barrel.
