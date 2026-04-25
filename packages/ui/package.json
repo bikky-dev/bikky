@@ -22,6 +22,7 @@
     "build:ui": "vite build --config app/vite.config.ts",
     "dev": "vite --config app/vite.config.ts",
     "typecheck": "tsc --noEmit",
+    "test": "tsc && node --test --test-isolation=process --test-concurrency=1 \"dist/**/*.test.js\"",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

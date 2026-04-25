@@ -81,3 +81,11 @@ export function loadConfig(): BikkyUIConfig {
   _config = config;
   return config;
 }
+
+/**
+ * Test-only: clear the memoised config so the next loadConfig() call
+ * re-reads the file and environment variables.
+ */
+export function _resetConfig(): void {
+  _config = null;
+}
