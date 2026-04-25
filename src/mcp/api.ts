@@ -12,6 +12,7 @@ export { embed, getEmbeddingDimensions, getEmbeddingConfig, initEmbedding };
 
 import { createLogger } from "../logger.js";
 import { BIKKY_DIR, LOG_DIR, loadConfig } from "../config.js";
+import { QdrantClient, type QdrantLogLevel } from "../lib/qdrant-client.js";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -21,7 +22,10 @@ export const MEMORY_DIR = BIKKY_DIR;
 let collectionName = "bikky";
 
 export function getCollection(): string { return collectionName; }
-export function setCollection(name: string): void { collectionName = name; }
+export function setCollection(name: string): void {
+  collectionName = name;
+  rebuildClient();
+}
 
 fs.mkdirSync(MEMORY_DIR, { recursive: true });
 fs.mkdirSync(LOG_DIR, { recursive: true });
@@ -36,8 +40,16 @@ export let qdrantUrl: string | null = null;
 export let qdrantApiKey: string | null = null;
 export let ready = false;
 
-export function setQdrantUrl(v: string | null): void { qdrantUrl = v; }
-export function setQdrantApiKey(v: string | null): void { qdrantApiKey = v; }
+let client: QdrantClient | null = null;
+
+export function setQdrantUrl(v: string | null): void {
+  qdrantUrl = v ? v.replace(/\/+$/, "") : v;
+  rebuildClient();
+}
+export function setQdrantApiKey(v: string | null): void {
+  qdrantApiKey = v;
+  rebuildClient();
+}
 export function setReady(v: boolean): void { ready = v; }
 
 // ---------------------------------------------------------------------------
@@ -48,6 +60,26 @@ export const log = createLogger("memory-mcp", path.join(LOG_DIR, "mcp.log"), {
   maxSize: 2 * 1024 * 1024,
   maxFiles: 3,
 });
+
+// Adapter to bridge QdrantClient's QdrantLogFn signature to our file logger.
+const qdrantLogAdapter = (level: QdrantLogLevel, msg: string): void => log(level, msg);
+
+function rebuildClient(): void {
+  if (qdrantUrl && qdrantApiKey && collectionName) {
+    const cfg = loadConfig();
+    client = new QdrantClient({
+      url: qdrantUrl,
+      apiKey: qdrantApiKey,
+      collection: collectionName,
+      timeoutMs: cfg.qdrant_client.timeout_ms,
+      retries: cfg.qdrant_client.retries,
+      retryBaseDelayMs: cfg.qdrant_client.retry_base_delay_ms,
+      log: qdrantLogAdapter,
+    });
+  } else {
+    client = null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // LLM Chat Completion (for distillation)
@@ -88,51 +120,23 @@ export async function chatComplete(systemPrompt: string, userPrompt: string): Pr
 // Qdrant REST Client
 // ---------------------------------------------------------------------------
 
-function qdrantHeaders(): Record<string, string> {
-  return {
-    "Content-Type": "application/json",
-    "api-key": qdrantApiKey ?? "",
-  };
+function getClient(): QdrantClient {
+  if (!client) {
+    throw new Error(
+      "Qdrant client not initialized — credentials missing. " +
+        "Use configure_credentials or set QDRANT_URL + QDRANT_API_KEY.",
+    );
+  }
+  return client;
 }
 
 export async function qdrantReq<T>(method: string, urlPath: string, body?: unknown): Promise<T> {
-  const url = `${qdrantUrl}${urlPath}`;
-  const opts: RequestInit = { method, headers: qdrantHeaders() };
-  if (body) opts.body = JSON.stringify(body);
-  const resp = await fetch(url, opts);
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Qdrant ${method} ${urlPath} failed (${resp.status}): ${text}`);
-  }
-  return resp.json() as Promise<T>;
+  return getClient().request<T>(method, urlPath, body);
 }
 
 export async function ensureCollection(indexes: Array<{ field_name: string; field_schema: string }>): Promise<void> {
-  const col = getCollection();
-  let exists = false;
-  try {
-    await qdrantReq<unknown>("GET", `/collections/${col}`);
-    log("INFO", `Collection '${col}' exists ✓`);
-    exists = true;
-  } catch (e) {
-    if (!(e instanceof Error && e.message.includes("404"))) throw e;
-  }
-
-  if (!exists) {
-    await qdrantReq<unknown>("PUT", `/collections/${col}`, {
-      vectors: { size: getEmbeddingDimensions(), distance: "Cosine" },
-    });
-    log("INFO", `Collection '${col}' created`);
-  }
-
-  for (const idx of indexes) {
-    try {
-      await qdrantReq<unknown>("PUT", `/collections/${col}/index`, idx);
-    } catch (e) {
-      log("WARN", `Index creation for ${idx.field_name}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-  log("INFO", "Payload indexes created");
+  await getClient().ensureCollection(getEmbeddingDimensions(), indexes);
+  log("INFO", `Collection '${getCollection()}' ready (vector size ${getEmbeddingDimensions()}, ${indexes.length} indexes)`);
 }
 
 export async function qdrantUpsert(id: string, vector: number[], payload: Record<string, unknown>): Promise<unknown> {
