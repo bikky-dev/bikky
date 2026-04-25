@@ -15,6 +15,11 @@
 import { createHash } from "node:crypto";
 import * as qdrant from "./qdrant.js";
 import { chatCompletion } from "../llm/index.js";
+import {
+  relationsPrompt,
+  RELATIONS_PROMPT_DESCRIPTOR,
+  safeParseJson,
+} from "../prompts/index.js";
 import type { BikkyConfig } from "../config.js";
 import type { LogFn, QdrantPayload } from "./qdrant.js";
 
@@ -211,77 +216,59 @@ const inferRelation = async (
   entityA: string,
   entityB: string,
   sharedFacts: Array<{ content: string; category: string }>,
-): Promise<{ from: string; type: string; to: string; content: string } | null> => {
-  const factsText = sharedFacts
-    .map((f, i) => `${i + 1}. [${f.category}] ${f.content}`)
-    .join("\n");
-
-  const raw = await chatCompletion({
-    messages: [
-      {
-        role: "system",
-        content: `You infer directed relationships between entities based on shared facts.
-
-Output ONLY valid JSON with this exact shape:
-{ "from": "subject-entity", "type": "verb-phrase", "to": "object-entity", "content": "one sentence" }
-
-Direction matters — "from" is the entity that DOES the action, "to" is acted upon:
-  ✅ { "from": "telegrambot", "type": "depends-on", "to": "bedrock" }
-  ❌ { "from": "bedrock", "type": "depends-on", "to": "telegrambot" }
-
-The "type" should be a 1-3 word verb phrase (e.g. "depends-on", "uses", "runs-on", "owns", "manages").
-The "from" and "to" MUST be one of the two entities provided — do not invent new names.
-If the facts don't suggest a clear directional relationship, output: { "type": null }`,
-      },
-      {
-        role: "user",
-        content: `Entities: "${entityA}", "${entityB}"
-Shared facts (${sharedFacts.length}):
-${factsText}
-
-Infer the primary directed relationship between these two entities.`,
-      },
-    ],
-    temperature: 0.1,
-    max_tokens: 150,
-  });
+): Promise<{ from: string; type: string; to: string; content: string; evidence?: string; confidence?: number } | null> => {
+  const rendered = relationsPrompt({ entityA, entityB, sharedFacts });
+  const raw = await chatCompletion(rendered);
 
   if (!raw) return null;
 
-  try {
-    const jsonStr = raw.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim();
-    const parsed = JSON.parse(jsonStr) as {
-      from?: string | null;
-      type?: string | null;
-      to?: string | null;
-      content?: string;
-    };
-    if (!parsed.type) return null;
+  const parsed = safeParseJson<{
+    from?: string | null;
+    type?: string | null;
+    to?: string | null;
+    content?: string;
+    evidence?: string;
+    confidence?: number;
+    reason?: string;
+  }>(raw);
 
-    // Validate that from/to are the provided entities (not hallucinated)
-    const entities = new Set([entityA.toLowerCase(), entityB.toLowerCase()]);
-    const from = parsed.from?.toLowerCase() ?? "";
-    const to = parsed.to?.toLowerCase() ?? "";
+  if (!parsed || !parsed.type) return null;
 
-    if (!entities.has(from) || !entities.has(to) || from === to) {
-      logFn("WARN", `Relations: LLM returned invalid from/to for ${entityA}↔${entityB}: from="${parsed.from}", to="${parsed.to}"`);
-      return null;
-    }
+  // Validate that from/to are the provided entities (not hallucinated)
+  const entities = new Set([entityA.toLowerCase(), entityB.toLowerCase()]);
+  const from = parsed.from?.toLowerCase() ?? "";
+  const to = parsed.to?.toLowerCase() ?? "";
 
-    // Use the LLM's chosen direction (normalised to original casing)
-    const resolvedFrom = from === entityA.toLowerCase() ? entityA : entityB;
-    const resolvedTo = to === entityA.toLowerCase() ? entityA : entityB;
-
-    return {
-      from: resolvedFrom,
-      type: parsed.type,
-      to: resolvedTo,
-      content: parsed.content || `${resolvedFrom} ${parsed.type} ${resolvedTo}`,
-    };
-  } catch {
-    logFn("WARN", `Relations: failed to parse LLM response for ${entityA}↔${entityB}: ${raw.slice(0, 100)}`);
+  if (!entities.has(from) || !entities.has(to) || from === to) {
+    logFn("WARN", `Relations: LLM returned invalid from/to for ${entityA}↔${entityB}: from="${parsed.from}", to="${parsed.to}"`);
     return null;
   }
+
+  // Verify evidence quote actually appears in shared facts (anti-hallucination guard).
+  if (parsed.evidence) {
+    const haystack = sharedFacts.map((f) => f.content).join(" ").toLowerCase();
+    const needle = parsed.evidence.toLowerCase().slice(0, 30);
+    if (needle.length > 0 && !haystack.includes(needle)) {
+      logFn(
+        "WARN",
+        `Relations: evidence quote not found in source facts for ${entityA}↔${entityB}: "${parsed.evidence.slice(0, 80)}"`,
+      );
+      return null;
+    }
+  }
+
+  // Use the LLM's chosen direction (normalised to original casing)
+  const resolvedFrom = from === entityA.toLowerCase() ? entityA : entityB;
+  const resolvedTo = to === entityA.toLowerCase() ? entityA : entityB;
+
+  return {
+    from: resolvedFrom,
+    type: parsed.type,
+    to: resolvedTo,
+    content: parsed.content || `${resolvedFrom} ${parsed.type} ${resolvedTo}`,
+    evidence: parsed.evidence,
+    confidence: typeof parsed.confidence === "number" ? parsed.confidence : undefined,
+  };
 };
 
 /**
@@ -293,10 +280,21 @@ const storeRelation = async (
   relationType: string,
   content: string,
   sharedFactIds: string[],
+  extras: { evidence?: string; confidence?: number } = {},
 ): Promise<string> => {
   const hash = createHash("sha256")
     .update(`daemon-relation:${pairKey(fromEntity, toEntity)}:${relationType}`)
     .digest("hex");
+
+  const metadata: Record<string, string> = {
+    inferred_from: sharedFactIds.slice(0, 5).join(","),
+    shared_fact_count: String(sharedFactIds.length),
+    inferred_by_prompt: `${RELATIONS_PROMPT_DESCRIPTOR.id}@${RELATIONS_PROMPT_DESCRIPTOR.version}`,
+  };
+  if (extras.evidence) {
+    // Truncate to 500 chars to keep metadata payload bounded.
+    metadata.evidence_quote = extras.evidence.slice(0, 500);
+  }
 
   const id = await qdrant.storeFact({
     content,
@@ -305,13 +303,10 @@ const storeRelation = async (
     kind: "relation",
     entities: [fromEntity, toEntity],
     source: "daemon",
-    confidence: 0.7,
+    confidence: extras.confidence ?? 0.7,
     importance: 0.6,
     content_hash: hash,
-    metadata: {
-      inferred_from: sharedFactIds.slice(0, 5).join(","),
-      shared_fact_count: String(sharedFactIds.length),
-    },
+    metadata,
     relation: {
       from: fromEntity,
       type: relationType,
@@ -377,6 +372,7 @@ const tick = async (config: BikkyConfig): Promise<void> => {
           result.type,
           result.content,
           candidate.factIds,
+          { evidence: result.evidence, confidence: result.confidence },
         );
         inferred++;
       } catch (e: unknown) {
