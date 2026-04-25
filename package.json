@@ -28,6 +28,7 @@
     "lint": "eslint src/",
     "check": "tsc --noEmit && eslint src/",
     "test": "node --test dist/*.test.js dist/**/*.test.js",
+    "test:integration": "tsc && BIKKY_INTEGRATION=${BIKKY_INTEGRATION:-1} node --test dist/**/*.itest.js",
     "build:diagrams": "node scripts/build-diagrams.mjs",
     "prepublishOnly": "npm run build"
   },
