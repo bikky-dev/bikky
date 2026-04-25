@@ -31,6 +31,12 @@ interface GraphData {
   nodes: GraphNode[];
   edges: GraphEdge[];
   factCount: number;
+  factsScanned?: number;
+  truncated?: boolean;
+  limit?: number;
+  topN?: number | null;
+  nodesPruned?: number;
+  totalNodes?: number;
 }
 
 interface SharedFact {
@@ -108,7 +114,9 @@ export default function Graph() {
   });
 
   useEffect(() => {
-    apiFetch<GraphData>("/api/memory/graph")
+    // Default cap at top-200 nodes server-side to keep d3-force responsive on
+    // large corpora. Banner below surfaces if the server pruned anything.
+    apiFetch<GraphData>("/api/memory/graph?topN=200")
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -487,6 +495,17 @@ export default function Graph() {
           {data && (
             <p className="text-sm text-zinc-500 mt-1">
               {data.nodes.length} entities · {data.edges.length} connections · {data.factCount} facts
+            </p>
+          )}
+          {data && (data.truncated || (data.nodesPruned ?? 0) > 0) && (
+            <p className="text-xs text-amber-400 mt-1">
+              {data.truncated && `Graph based on first ${data.factsScanned?.toLocaleString() ?? data.factCount} facts (limit ${data.limit?.toLocaleString() ?? "?"}).`}
+              {(data.nodesPruned ?? 0) > 0 && (
+                <>
+                  {data.truncated ? " " : ""}
+                  Showing top {data.nodes.length} of {data.totalNodes?.toLocaleString() ?? "?"} entities by fact count.
+                </>
+              )}
             </p>
           )}
           {loading && <p className="text-sm text-zinc-500 mt-1">Loading graph data…</p>}

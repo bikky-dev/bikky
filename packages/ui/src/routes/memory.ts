@@ -13,6 +13,40 @@ function formatPoint(p: QdrantPoint) {
   return { id: p.id, score: p.score ?? null, ...p.payload };
 }
 
+// --- Query helpers ---
+
+function parseLimit(raw: string | undefined, def: number, max: number): number {
+  const n = parseInt(raw || String(def), 10);
+  if (!Number.isFinite(n) || n <= 0) return def;
+  return Math.min(n, max);
+}
+
+function parseTopN(raw: string | undefined, max: number): number | null {
+  if (!raw) return null;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.min(n, max);
+}
+
+// --- TTL cache (module-scope, per-process) ---
+
+interface CacheEntry<T> { value: T; expiresAt: number; }
+const cache = new Map<string, CacheEntry<unknown>>();
+
+function cacheGet<T>(key: string): T | null {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (hit.expiresAt < Date.now()) { cache.delete(key); return null; }
+  return hit.value as T;
+}
+
+function cacheSet<T>(key: string, value: T, ttlMs: number): void {
+  cache.set(key, { value, expiresAt: Date.now() + ttlMs });
+}
+
+const STATS_TTL_MS = 30_000;
+const GRAPH_TTL_MS = 60_000;
+
 // GET /api/memory/search?q=...&category=...&entity=...&domain=...&kind=...&limit=...
 memoryRoutes.get("/search", async (c) => {
   const q = c.req.query("q");
@@ -174,27 +208,39 @@ memoryRoutes.post("/facts", async (c) => {
   return c.json({ ok: true, id }, 201);
 });
 
-// GET /api/memory/entities/:name
+// GET /api/memory/entities/:name?limit=&offset=&relationsLimit=
 memoryRoutes.get("/entities/:name", async (c) => {
   const name = c.req.param("name").toLowerCase();
   const qdrant = createQdrantClient();
 
-  const filter = buildFilter({ entity: name });
-  const { points } = await qdrant.scroll(filter, 50);
+  const limit = parseLimit(c.req.query("limit"), 50, 200);
+  const offset = c.req.query("offset") || undefined;
+  const relationsLimit = parseLimit(c.req.query("relationsLimit"), 50, 200);
 
-  const fromFilter = { must: [
+  const filter = buildFilter({ entity: name });
+  const fromFilter: QdrantFilter = { must: [
     { is_null: { key: "superseded_by" } },
     { key: "from_entity", match: { value: name } },
   ]};
-  const toFilter = { must: [
+  const toFilter: QdrantFilter = { must: [
     { is_null: { key: "superseded_by" } },
     { key: "to_entity", match: { value: name } },
   ]};
 
-  const [fromRels, toRels] = await Promise.all([
-    qdrant.scroll(fromFilter, 50),
-    qdrant.scroll(toFilter, 50),
+  const safeCount = async (f: QdrantFilter) => {
+    try { return await qdrant.count(f); } catch { return null; }
+  };
+
+  const [scroll, fromRels, toRels, factsTotal, fromTotal, toTotal] = await Promise.all([
+    qdrant.scroll(filter, limit, offset),
+    qdrant.scroll(fromFilter, relationsLimit),
+    qdrant.scroll(toFilter, relationsLimit),
+    safeCount(filter),
+    safeCount(fromFilter),
+    safeCount(toFilter),
   ]);
+
+  const { points, nextOffset } = scroll;
 
   const relations = [
     ...fromRels.points.map((p) => ({
@@ -205,19 +251,37 @@ memoryRoutes.get("/entities/:name", async (c) => {
     })),
   ];
 
+  const fromTrunc = fromRels.nextOffset !== null;
+  const toTrunc = toRels.nextOffset !== null;
+  const relationsTotal =
+    fromTotal !== null && toTotal !== null ? fromTotal + toTotal : null;
+
   return c.json({
-    entity: name, facts: points.map(formatPoint), relations,
-    factCount: points.length, relationCount: relations.length,
+    entity: name,
+    facts: points.map(formatPoint),
+    relations,
+    factCount: points.length,
+    relationCount: relations.length,
+    factsTotal,
+    relationsTotal,
+    factsTruncated: nextOffset !== null,
+    factsNextOffset: nextOffset,
+    relationsTruncated: fromTrunc || toTrunc,
+    limit,
+    relationsLimit,
   });
 });
 
-// GET /api/memory/shared?a=...&b=...
+// GET /api/memory/shared?a=...&b=...&limit=&offset=
 memoryRoutes.get("/shared", async (c) => {
   const a = c.req.query("a")?.toLowerCase();
   const b = c.req.query("b")?.toLowerCase();
   if (!a || !b) return c.json({ error: "Missing 'a' and 'b' entity parameters" }, 400);
 
   const qdrant = createQdrantClient();
+  const limit = parseLimit(c.req.query("limit"), 50, 200);
+  const offset = c.req.query("offset") || undefined;
+
   const filter: QdrantFilter = {
     must: [
       { is_null: { key: "superseded_by" } },
@@ -225,21 +289,36 @@ memoryRoutes.get("/shared", async (c) => {
       { key: "entities", match: { value: b } },
     ],
   };
-  const { points } = await qdrant.scroll(filter, 50);
 
-  return c.json({ entityA: a, entityB: b, facts: points.map(formatPoint), count: points.length });
+  const [scroll, total] = await Promise.all([
+    qdrant.scroll(filter, limit, offset),
+    qdrant.count(filter).catch(() => null as number | null),
+  ]);
+
+  return c.json({
+    entityA: a,
+    entityB: b,
+    facts: scroll.points.map(formatPoint),
+    count: scroll.points.length,
+    total,
+    truncated: scroll.nextOffset !== null,
+    nextOffset: scroll.nextOffset,
+    limit,
+  });
 });
 
-// GET /api/memory/relations?entity=...&type=...&direction=...
+// GET /api/memory/relations?entity=...&type=...&direction=...&limit=
 memoryRoutes.get("/relations", async (c) => {
   const entity = c.req.query("entity")?.toLowerCase();
   const relationType = c.req.query("type");
   const direction = c.req.query("direction") || "both";
+  const limit = parseLimit(c.req.query("limit"), 50, 200);
 
   if (!entity) return c.json({ error: "Missing 'entity' parameter" }, 400);
 
   const qdrant = createQdrantClient();
   const results: QdrantPoint[] = [];
+  let truncated = false;
 
   if (direction === "from" || direction === "both") {
     const must: Array<Record<string, unknown>> = [
@@ -247,8 +326,9 @@ memoryRoutes.get("/relations", async (c) => {
       { key: "from_entity", match: { value: entity } },
     ];
     if (relationType) must.push({ key: "relation_type", match: { value: relationType } });
-    const { points } = await qdrant.scroll({ must } as QdrantFilter, 50);
+    const { points, nextOffset } = await qdrant.scroll({ must } as QdrantFilter, limit);
     results.push(...points);
+    if (nextOffset !== null) truncated = true;
   }
 
   if (direction === "to" || direction === "both") {
@@ -257,8 +337,9 @@ memoryRoutes.get("/relations", async (c) => {
       { key: "to_entity", match: { value: entity } },
     ];
     if (relationType) must.push({ key: "relation_type", match: { value: relationType } });
-    const { points } = await qdrant.scroll({ must } as QdrantFilter, 50);
+    const { points, nextOffset } = await qdrant.scroll({ must } as QdrantFilter, limit);
     results.push(...points);
+    if (nextOffset !== null) truncated = true;
   }
 
   const seen = new Set<string>();
@@ -273,13 +354,24 @@ memoryRoutes.get("/relations", async (c) => {
       id: p.id, from: p.payload.from_entity, type: p.payload.relation_type, to: p.payload.to_entity, content: p.payload.content,
     })),
     count: unique.length,
+    truncated,
+    limit,
   });
 });
 
-// GET /api/memory/graph
+// GET /api/memory/graph?limit=&topN=&refresh=
 memoryRoutes.get("/graph", async (c) => {
-  const qdrant = createQdrantClient();
+  const limit = parseLimit(c.req.query("limit"), 2000, 5000);
+  const topN = parseTopN(c.req.query("topN"), 1000);
+  const refresh = c.req.query("refresh") === "true";
 
+  const cacheKey = `graph:limit=${limit}:topN=${topN ?? ""}`;
+  if (!refresh) {
+    const hit = cacheGet<unknown>(cacheKey);
+    if (hit) return c.json(hit);
+  }
+
+  const qdrant = createQdrantClient();
   const allFacts: QdrantPoint[] = [];
   let offset: string | null = null;
   const filter = buildFilter({});
@@ -287,7 +379,10 @@ memoryRoutes.get("/graph", async (c) => {
     const { points, nextOffset } = await qdrant.scroll(filter, 100, offset);
     allFacts.push(...points);
     offset = nextOffset;
-  } while (offset && allFacts.length < 2000);
+  } while (offset && allFacts.length < limit);
+
+  const truncated = offset !== null;
+  const factsScanned = allFacts.length;
 
   const entityStats = new Map<string, { factCount: number; categories: Set<string> }>();
   const edgeMap = new Map<string, { source: string; target: string; weight: number; type: string }>();
@@ -324,19 +419,48 @@ memoryRoutes.get("/graph", async (c) => {
     }
   }
 
-  const nodes = Array.from(entityStats.entries()).map(([id, stat]) => ({
+  let nodes = Array.from(entityStats.entries()).map(([id, stat]) => ({
     id, label: id, factCount: stat.factCount,
     categories: Array.from(stat.categories),
     primaryCategory: Array.from(stat.categories).sort((a, b) => a.localeCompare(b))[0] ?? "infrastructure",
   }));
 
-  return c.json({ nodes, edges: Array.from(edgeMap.values()), factCount: allFacts.length });
+  let edges = Array.from(edgeMap.values());
+  const totalNodes = nodes.length;
+  let nodesPruned = 0;
+
+  if (topN !== null && nodes.length > topN) {
+    nodes = [...nodes].sort((a, b) => b.factCount - a.factCount).slice(0, topN);
+    const keep = new Set(nodes.map((n) => n.id));
+    edges = edges.filter((e) => keep.has(e.source) && keep.has(e.target));
+    nodesPruned = totalNodes - nodes.length;
+  }
+
+  const payload = {
+    nodes,
+    edges,
+    factCount: factsScanned,
+    factsScanned,
+    truncated,
+    limit,
+    topN,
+    nodesPruned,
+    totalNodes,
+  };
+  cacheSet(cacheKey, payload, GRAPH_TTL_MS);
+  return c.json(payload);
 });
 
-// GET /api/memory/stats
+// GET /api/memory/stats?refresh=
 memoryRoutes.get("/stats", async (c) => {
+  const refresh = c.req.query("refresh") === "true";
+  const cacheKey = "stats";
+  if (!refresh) {
+    const hit = cacheGet<unknown>(cacheKey);
+    if (hit) return c.json(hit);
+  }
+
   const qdrant = createQdrantClient();
-  const info = await qdrant.collectionInfo();
 
   // Safe count — returns 0 if filter field lacks a payload index
   const safeCount = async (filter?: QdrantFilter) => {
@@ -344,24 +468,25 @@ memoryRoutes.get("/stats", async (c) => {
   };
 
   const categories = ["infrastructure", "decisions", "observation", "preferences", "projects", "team"];
-  const categoryCounts: Record<string, number> = {};
-  await Promise.all(categories.map(async (cat) => {
-    categoryCounts[cat] = await safeCount(buildFilter({ category: cat }));
-  }));
-
   const kinds = ["fact", "summary", "distilled", "relation"];
-  const kindCounts: Record<string, number> = {};
-  await Promise.all(kinds.map(async (k) => {
-    kindCounts[k] = await safeCount(buildFilter({ kind: k }));
-  }));
 
-  const allCount = await safeCount({ must: [] });
+  // All counts in one Promise.all instead of three sequential awaits.
+  const [info, catCounts, kindCounts, allCount] = await Promise.all([
+    qdrant.collectionInfo(),
+    Promise.all(categories.map(async (cat) => [cat, await safeCount(buildFilter({ category: cat }))] as const)),
+    Promise.all(kinds.map(async (k) => [k, await safeCount(buildFilter({ kind: k }))] as const)),
+    safeCount({ must: [] }),
+  ]);
 
-  return c.json({
-    total: info.points_count, active: allCount,
+  const payload = {
+    total: info.points_count,
+    active: allCount,
     superseded: info.points_count - allCount,
-    byCategory: categoryCounts, byKind: kindCounts,
-  });
+    byCategory: Object.fromEntries(catCounts),
+    byKind: Object.fromEntries(kindCounts),
+  };
+  cacheSet(cacheKey, payload, STATS_TTL_MS);
+  return c.json(payload);
 });
 
 async function hashContent(content: string): Promise<string> {

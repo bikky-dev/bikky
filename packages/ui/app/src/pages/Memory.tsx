@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Search, Loader2, Database, ArrowUpDown } from "lucide-react";
 import { apiFetch } from "../lib/api";
+import { getStats, type MemoryStats as Stats } from "../lib/statsCache";
 import FactCard, { type Fact } from "../components/FactCard";
 
 const CATEGORIES = ["infrastructure", "decisions", "observation", "preferences", "projects", "team"];
@@ -13,14 +14,6 @@ const SORT_OPTIONS = [
   { value: "newest", label: "Newest first" },
   { value: "oldest", label: "Oldest first" },
 ];
-
-interface Stats {
-  total: number;
-  active: number;
-  superseded: number;
-  byCategory: Record<string, number>;
-  byKind: Record<string, number>;
-}
 
 interface BrowseResponse {
   results: Fact[];
@@ -56,9 +49,9 @@ export default function Memory() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState("");
 
-  // Load stats on mount
+  // Load stats on mount (shared cache → no double fetch with Dashboard)
   useEffect(() => {
-    apiFetch<Stats>("/api/memory/stats").then(setStats).catch(() => {});
+    getStats().then(setStats).catch(() => {});
   }, []);
 
   const buildParams = useCallback(() => {
