@@ -1,16 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { apiFetch, ApiError } from "../lib/api";
+import { ApiError } from "../lib/api";
+import { getStats, type MemoryStats } from "../lib/statsCache";
 import { CATEGORY_COLORS } from "../lib/format";
 import Badge from "../components/Badge";
-
-interface MemoryStats {
-  total: number;
-  active: number;
-  superseded: number;
-  byCategory: Record<string, number>;
-  byKind: Record<string, number>;
-}
 
 type LoadState<T> = { loading: true } | { loading: false; data: T } | { loading: false; error: string };
 
@@ -51,7 +44,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<LoadState<MemoryStats>>({ loading: true });
 
   useEffect(() => {
-    apiFetch<MemoryStats>("/api/memory/stats")
+    getStats()
       .then((data) => setStats({ loading: false, data }))
       .catch((e) => {
         const code = e instanceof ApiError ? e.code : undefined;
