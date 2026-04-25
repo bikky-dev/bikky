@@ -2,7 +2,7 @@
 
 **Shared persistent memory for AI coding agents.**
 
-bikky gives your team's AI agents (GitHub Copilot, Claude Code) long-term memory that persists across sessions and is shared across team members. What one engineer's agent learns today, every agent on the team knows tomorrow.
+bikky gives your team's AI agents (GitHub Copilot, Claude Code) long-term memory that persists across sessions and is shared across team members. What one engineer's agent learns today, every agent on the team knows tomorrow — turning your engineering org into a **queryable organisation** whose institutional knowledge is recalled on demand instead of lost in chat threads.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/team-memory.svg" alt="Team memory — facts flow from individual sessions into a shared, self-curating knowledge store" width="720" />
@@ -14,7 +14,7 @@ bikky gives your team's AI agents (GitHub Copilot, Claude Code) long-term memory
 
 ### The problem
 
-Every engineering team runs on institutional knowledge — why that config value exists, which deploy steps matter, what broke last quarter. It lives in people's heads, chat threads, and closed PRs. When someone switches projects, it's gone. AI coding agents amplify this: teams generate more decisions and discoveries per day than anyone can track, and hand-written knowledge bases drift the moment they're published. The things learned *during* sessions — the most valuable knowledge — still vanish when the session closes.
+Every engineering team runs on institutional knowledge — why that config value exists, which deploy steps matter, what broke last quarter. It lives in people's heads, chat threads, and closed PRs. When someone switches projects, it's gone. AI coding agents amplify this: modern teams are becoming **software factories** that generate more decisions and discoveries per day than anyone can track, and hand-written knowledge bases drift the moment they're published. The things learned *during* sessions — the most valuable knowledge — still vanish when the session closes.
 
 ### How bikky solves it
 
@@ -24,6 +24,8 @@ Every engineering team runs on institutional knowledge — why that config value
 | **Share** | Every team member's agent recalls from the same knowledge store via semantic search |
 | **Curate** | Deduplication, confidence decay, contradiction detection, and distillation run autonomously |
 | **Compound** | Session 50 is dramatically better than session 1 — accumulated memory, not better prompts |
+
+bikky closes the loop on AI-augmented engineering: every session both **reads** from the shared store and **writes** back into it, so capture → curation → recall becomes a self-reinforcing cycle. The longer the team uses it, the smarter the next session starts.
 
 ---
 

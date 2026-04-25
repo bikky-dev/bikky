@@ -18,8 +18,8 @@ export const CATEGORIES: Record<string, CategoryDef> = {
     extractionHint:
       "Look for: service names, ports, hosts, connection strings, database engines, cluster details, deployment targets, environment variables, config values",
     examples: [
-      { content: "ClickHouse runs on port 8123 in production clusters", entities: ["clickhouse"], confidence: 0.95, importance: 0.8 },
-      { content: "The dbt project uses ReplacingMergeTree engine for dedup tables", entities: ["dbt", "clickhouse"], confidence: 0.9, importance: 0.7 },
+      { content: "Postgres primary runs on port 5432 in the prod VPC", entities: ["postgres"], confidence: 0.95, importance: 0.8 },
+      { content: "API service container exposes /healthz on port 8080", entities: ["api"], confidence: 0.9, importance: 0.7 },
       { content: "Redis cache is on redis-prod.internal:6379 with 30-min TTL", entities: ["redis"], confidence: 0.9, importance: 0.8 },
     ],
   },
@@ -37,7 +37,7 @@ export const CATEGORIES: Record<string, CategoryDef> = {
     extractionHint:
       "Look for: error messages, debugging steps, 'turns out', 'the issue was', workarounds, unexpected behavior, gotchas, caveats",
     examples: [
-      { content: "ClickHouse OPTIMIZE FINAL is slow on large tables — use OPTIMIZE DEDUPLICATE instead", entities: ["clickhouse"], confidence: 0.9, importance: 0.7 },
+      { content: "Postgres VACUUM FULL takes an exclusive lock — use pg_repack instead for online tables", entities: ["postgres"], confidence: 0.9, importance: 0.7 },
       { content: "Node 25 fetch() doesn't support AbortSignal.timeout() in some edge cases", entities: ["node"], confidence: 0.7, importance: 0.5 },
     ],
   },
@@ -65,7 +65,7 @@ export const CATEGORIES: Record<string, CategoryDef> = {
       "Look for: names, titles, roles, reporting lines, team membership, expertise areas, contact details, who owns what",
     examples: [
       { content: "Alice is the lead engineer on the platform team", entities: ["alice", "platform"], confidence: 0.95, importance: 0.7 },
-      { content: "Alex handles DevOps and Kubernetes cluster management", entities: ["alex", "devops", "kubernetes"], confidence: 0.9, importance: 0.6 },
+      { content: "Sam owns the build and release pipeline", entities: ["sam", "ci"], confidence: 0.9, importance: 0.6 },
     ],
   },
 };

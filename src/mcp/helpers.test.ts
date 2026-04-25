@@ -70,8 +70,8 @@ describe("contentHash", () => {
   });
 
   it("is case-insensitive", () => {
-    const a = contentHash("infrastructure", "ClickHouse port 8123");
-    const b = contentHash("infrastructure", "clickhouse port 8123");
+    const a = contentHash("infrastructure", "Postgres port 5432");
+    const b = contentHash("infrastructure", "postgres port 5432");
     assert.strictEqual(a, b);
   });
 
@@ -433,11 +433,11 @@ describe("buildFilter", () => {
   });
 
   it("adds entity filter (lowercased)", () => {
-    const result = buildFilter({ entity: "ClickHouse" });
+    const result = buildFilter({ entity: "Postgres" });
     assert.ok(result);
     const entityFilter = result.must.find((c) => c.key === "entities");
     assert.ok(entityFilter);
-    assert.deepStrictEqual(entityFilter.match, { value: "clickhouse" });
+    assert.deepStrictEqual(entityFilter.match, { value: "postgres" });
   });
 
   it("adds since filter with range gte", () => {

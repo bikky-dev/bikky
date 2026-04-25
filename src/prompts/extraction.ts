@@ -26,9 +26,9 @@ A fact must pass AT LEAST ONE of these or it is noise — skip it:
 
 const ALWAYS_SKIP = `## What to ALWAYS skip
 - Session narration: "the user asked X, then we looked at Y" — that's a log, not a reference
-- Meta-observations: "the agent used kubectl" — obvious from context
+- Meta-observations: "the agent ran a shell command" — obvious from context
 - Debugging state: "test 67 fails" / "got a 404" — transient unless it reveals a permanent quirk
-- Vague summaries: "the bot was updated" — which bot? which update? which PR?
+- Vague summaries: "the service was updated" — which service? which update? which PR?
 - Opinions without rationale: "X is good" — good for what? compared to what?
 - Anything you cannot anchor to a file, service, command, or decision`;
 

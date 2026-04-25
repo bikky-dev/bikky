@@ -29,9 +29,9 @@ Read the session summaries in the user message (each tagged <summary id="N" date
 </rules>
 
 <examples>
-Good: "dbt LLM enrichment step is the single point of failure for hourly dbt runs across all production clusters; non-blocking handling was added in PR #143"
-Good: "Local kubectl operations consistently break unless --context is explicit because multiple agents share the host"
-Bad:  "We worked on dbt and kubectl this week" (narrative, not a pattern)
+Good: "The auth-service rate limiter is the recurring blocker for end-to-end test suites because its Redis backend is shared across staging and CI"
+Good: "Database migrations consistently need an explicit lock_timeout setting because long-running queries hold ACCESS EXCLUSIVE locks during ALTER TABLE"
+Bad:  "We worked on auth and migrations this week" (narrative, not a pattern)
 </examples>
 
 <format>

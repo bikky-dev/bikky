@@ -36,16 +36,16 @@ Pick the SINGLE strongest match across all candidates. If none match, output com
 </rules>
 
 <examples>
-NEW: "SMS bot v0.7.0 deployed on stg-apse2"
-EXISTING #abc123: "SMS bot v0.5.0 deployed on stg-apse2"
+NEW: "api-service v0.7.0 deployed to staging"
+EXISTING #abc123: "api-service v0.5.0 deployed to staging"
 → {"outcome":"superseded","existing_id":"abc123","reason":"version progression on the same target"}
 
 NEW: "Redis is on port 7000"
 EXISTING #def456: "Redis is on port 6379"
 → {"outcome":"contradicted","existing_id":"def456","reason":"two different ports for the same service with no temporal signal"}
 
-NEW: "ClickHouse has a ReplacingMergeTree table"
-EXISTING #ghi789: "Airbyte syncs run hourly"
+NEW: "Postgres uses logical replication for the analytics replica"
+EXISTING #ghi789: "Cron jobs run hourly via the scheduler service"
 → {"outcome":"compatible","reason":"unrelated subsystems"}
 </examples>
 
