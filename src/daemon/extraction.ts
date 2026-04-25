@@ -18,6 +18,21 @@ import * as qdrant from "./qdrant.js";
 import { chatCompletion } from "../llm/index.js";
 import { detectContradiction } from "./consolidation.js";
 import type { LogFn, StoreFact } from "./qdrant.js";
+import {
+  normalizeCategory,
+  normalizeEntities,
+  normalizeMemorySubtype,
+  validateMemorySubtype,
+} from "../mcp/taxonomy.js";
+import {
+  CAPTURE_POLICY_VERSION,
+  CAPTURE_TRIGGERS,
+  DEFAULT_CAPTURE_CONTEXT,
+  QUALITY_THRESHOLDS,
+  promptVersionForSubtype,
+  subtypeForCategory,
+} from "./capture-policy.js";
+import { shouldSummarizeEvents, updateSessionSummary } from "./session-summary.js";
 
 // ── Module state ─────────────────────────────────────────────────────────────
 
@@ -36,78 +51,65 @@ const EXTRACTABLE_TYPES = new Set([
   "session.compaction_complete",
 ]);
 
-const DEFAULT_EXTRACTION_PROMPT = `You are a knowledge extraction agent for software engineers. Extract ENGINEERING REFERENCES — durable facts that help an engineer navigate codebases, understand infrastructure, run operations, and make decisions.
+export const DEFAULT_EXTRACTION_PROMPT = `You are Bikky's memory extraction agent for open-source coding agents. Extract durable, reusable facts that help a future agent continue work without rereading the whole transcript.
 
-## Quality Gate (apply to EVERY candidate fact)
-A fact must pass AT LEAST ONE of these tests or it is noise — skip it:
-1. GREPPABLE — contains a file path, service name, config key, CLI flag, or symbol an engineer could search for
-2. RUNNABLE — contains a command, URL, port, or procedure that could be executed
-3. NAVIGABLE — tells you where to look for something specific (which repo, which module, which config)
-4. DECISIVE — records a choice with enough rationale that a future engineer won't re-debate it
+## Core rule
+Extract fewer, sharper memories. A candidate fact must be independently useful after the session is gone.
 
-## 7 Reference Types (extract ONLY these)
+## Quality gate
+Every fact must pass at least one gate:
+1. GREPPABLE: names a file path, package, symbol, config key, CLI flag, issue/PR, service, or API a future agent can search for.
+2. RUNNABLE: contains a command, URL, setting, port, or procedure that can be executed or checked.
+3. NAVIGABLE: tells a future agent where to look and what that location means.
+4. DECISIVE: records a durable decision, rationale, constraint, convention, preference, or ownership rule.
+5. DIAGNOSTIC: captures a repeatable failure mode, root cause, or troubleshooting gotcha.
 
-### 1. Codebase Map — "where does X live?"
-File paths, entry points, module ownership, call chains.
-GOOD: "Alert extraction logic is in src/enrichers/bank-account-enricher.ts, called by the DM pipeline handler (src/pipeline/dm-handler.ts), not the group handler"
-BAD: "The code was updated to fix extraction" (no path, no specifics)
+## Ontology
+- domain is the activity profile. For coding-agent captures use "software_engineering".
+- category is subject matter: codebase | infrastructure | operations | decisions | product_domain | projects | people | preferences | observations.
+- kind is object shape. For this prompt, emit only kind="fact".
+- memory_subtype must be one of:
+  codebase_map | architecture_decision | infra_topology | access_pattern | deployment_procedure | operational_procedure | domain_rule | troubleshooting_gotcha | preference | ownership.
 
-### 2. Architecture Decision — "why was X chosen?"
-Choice + alternatives considered + rationale + constraints.
-GOOD: "Chose Portkey over direct Bedrock calls for LLM routing — gives per-model fallback chains and spend tracking without vendor lock-in. Decided in PR #847"
-BAD: "We use Portkey for LLM" (no rationale, no context)
+## Examples
+GOOD:
+- "The UI smoke tests live in packages/ui/tests/smoke.spec.ts and run through npm run test:e2e with mocked /api/memory/* responses."
+- "Use workspace_id as the tenancy/access boundary; domain is reserved for activity profile such as software_engineering."
+- "If Qdrant order_by fails with a missing index error, create a datetime payload index for the sorted field before retrying."
+- "Prefer Node's built-in test runner for root tests; do not add Jest just for daemon unit tests."
 
-### 3. Infrastructure Topology — "what connects to what?"
-Endpoints, ports, resource IDs, service connections, cluster names, regions.
-GOOD: "ClickHouse in lloyds cluster accessed via port-forward: kubectl port-forward svc/clickhouse 9000:9000 --context arn:aws:eks:eu-west-2:871829501674:cluster/lloyds"
-BAD: "ClickHouse is running" (no actionable detail)
-
-### 4. Access & Credentials — "how do I authenticate?"
-Where secrets live, IAM roles, auth patterns, permission gotchas.
-GOOD: "saber IAM user blocked by EnforceMFA for ECR/S3 — use --profile mfa. EC2 instance role agent00-cortex-ec2 has ECR pull+push scoped to arn:aws:ecr:ap-southeast-2:871829501674:repository/agent00-cortex"
-BAD: "AWS credentials are configured" (useless)
-
-### 5. Deployment & Shipping — "how do I release X?"
-Build, release, CI/CD pipelines, verification steps.
-GOOD: "EC2 cortex deploys via SSM: download repo tarball from GitHub API (needs saber-zrelli-private token) → build on EC2 (native amd64) → push to ECR → docker compose pull && up -d. SSM executionTimeout must be ≥600s"
-BAD: "The deployment was successful" (not reusable)
-
-### 6. Operational Procedure — "how do I do X on a live system?"
-kubectl recipes, patching commands, rollout procedures, scaling ops, cleanup, troubleshooting.
-GOOD: "To roll TG bot images across lloyds fleet: kubectl get deploy -l app=tg-bot --context lloyds-ctx, then patch each with image update. Wait 30s between batches to avoid message loss"
-BAD: "Bot images were updated" (no procedure)
-
-### 7. Business Logic Rule — "what are the domain rules?"
-Data flow semantics, edge cases that affect code, domain-specific constraints.
-GOOD: "SA bank accounts (Capitec branch 470010, TymeBank 678910, FNB 250655) are frequently misclassified as AU BSBs because branch codes are 6 digits. Recovery script stage 1b re-extracts with ZA country tagging"
-BAD: "Bank accounts are extracted" (no specifics)
-
-## What to ALWAYS SKIP
-- Session narration: "the user asked to fix X, then we looked at Y" — that's a log, not a reference
-- Meta-observations about tools: "bikky handles extraction" / "the agent used kubectl" — obvious from context
-- Debugging state: "test 67 fails" / "got a 404" — transient unless it reveals a PERMANENT quirk
-- Vague summaries: "WhatsApp bot was updated" — which bot? which update? which PR?
-- Opinions without rationale: "Nova Lite is good" — good for what? compared to what?
-- Anything you can't add specifics to: if you can't name a file, service, command, or decision — skip it
+BAD:
+- "The tests were fixed." (status only)
+- "We reviewed the code." (session narration)
+- "The deployment succeeded." (transient and not reusable)
+- "The agent used npm." (tool narration)
+- "There was an error." (no root cause or reusable detail)
 
 ## Output format
-{"facts": [
+Return strict JSON:
+{"facts":[
   {
-    "content": "EC2 cortex has no git installed — deploys download repo tarball via GitHub API (curl -sL -H 'Authorization: token $TOKEN' https://api.github.com/repos/OWNER/REPO/tarball/main) then build locally on EC2",
-    "category": "infrastructure",
-    "entities": ["ec2", "ecr", "github-api"],
-    "confidence": 0.9,
-    "importance": 0.8
+    "content":"One self-contained durable fact.",
+    "category":"codebase",
+    "memory_subtype":"codebase_map",
+    "entities":["repo-or-tool","specific-module"],
+    "confidence":0.9,
+    "importance":0.7,
+    "quality_score":0.8,
+    "confidence_reason":"Explicitly stated in the transcript.",
+    "repo":"optional/repo-or-package",
+    "branch":"optional-branch",
+    "task_key":"optional issue/PR/task key",
+    "workstream_key":"optional stable workstream key"
   }
 ]}
 
-- Category: infrastructure | decisions | observation | preferences | projects | team
-- Entities: lowercase identifiers (service names, tools, repos — things you'd grep for)
-- Confidence 0.0-1.0: 0.9 for explicit statements, 0.6 for inferences
-- Importance 0.0-1.0: 0.7+ for architecture/infra/access/ops, 0.5-0.7 for decisions/business rules
+Scoring:
+- confidence: 0.9 explicit, 0.7 strong inference, 0.55 weak but useful inference.
+- importance: 0.8+ for decisions, infra, procedures, access, recurring failures; 0.6+ for useful codebase maps/preferences.
+- quality_score: 0.8+ passes multiple gates, 0.6+ passes one strong gate, below 0.6 should usually be omitted.
 
-Prefer fewer, higher-quality facts over many weak ones. 3 good references beat 10 vague observations.
-If nothing passes the quality gate, return: {"facts": []}`;
+If nothing passes the quality gate, return {"facts":[]}.`;
 
 // ── JSON-file state persistence ──────────────────────────────────────────────
 
@@ -331,13 +333,143 @@ const buildTranscript = (events: ParsedEvent[]): string => {
 
 // ── LLM extraction ──────────────────────────────────────────────────────────
 
-interface ExtractedFact {
+export interface ExtractedFact {
   content: string;
   category: string;
+  memory_subtype?: string | null;
   entities: string[];
   confidence: number;
   importance: number;
+  quality_score?: number | null;
+  confidence_reason?: string | null;
+  repo?: string | null;
+  branch?: string | null;
+  task_key?: string | null;
+  workstream_key?: string | null;
 }
+
+export interface FactQualitySignals {
+  wordCount: number;
+  hasDurableAnchor: boolean;
+  isStatusOnly: boolean;
+  isShortUseful: boolean;
+  computedQualityScore: number;
+}
+
+const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
+
+const textWordCount = (text: string): number => text.trim().split(/\s+/).filter(Boolean).length;
+
+const hasDurableAnchor = (content: string, entities: string[]): boolean => {
+  const text = content.trim();
+  return Boolean(
+    /(?:^|\s)(?:[\w.-]+\/)+[\w./-]+/.test(text) ||
+    /`[^`]+`/.test(text) ||
+    /\b(?:npm|pnpm|yarn|node|git|gh|docker|kubectl|make|go|python|pip|cargo|terraform|aws|curl)\b/.test(text) ||
+    /https?:\/\/\S+/.test(text) ||
+    /\b[A-Z][A-Z0-9_]{2,}\b/.test(text) ||
+    /\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|rb|php|json|ya?ml|toml|md|sql|sh)\b/.test(text) ||
+    /\b(?:issue|pr|pull request)\s*#?\d+\b/i.test(text) ||
+    entities.length >= 2,
+  );
+};
+
+const isStatusOnlyContent = (content: string, entities: string[]): boolean => {
+  const lower = content.trim().toLowerCase();
+  if (hasDurableAnchor(content, entities)) return false;
+  if (textWordCount(content) > 16) return false;
+  return /\b(done|fixed|updated|implemented|reviewed|tested|works|passed|failed|succeeded|completed|started|looked|changed|deployed)\b/.test(lower);
+};
+
+export const factQualitySignals = (fact: ExtractedFact): FactQualitySignals => {
+  const content = fact.content.trim();
+  const entities = normalizeEntities(fact.entities ?? []);
+  const subtype = normalizeMemorySubtype("fact", fact.memory_subtype) ?? subtypeForCategory(normalizeCategory(fact.category));
+  const wordCount = textWordCount(content);
+  const durableAnchor = hasDurableAnchor(content, entities);
+  const statusOnly = isStatusOnlyContent(content, entities);
+  const isPreferenceLike = subtype === "preference" || subtype === "ownership" || subtype === "domain_rule";
+  const isDecisionLike = subtype === "architecture_decision" || subtype === "troubleshooting_gotcha";
+  const shortUseful = wordCount >= 7 && wordCount <= 22 && (isPreferenceLike || isDecisionLike) && (entities.length > 0 || durableAnchor);
+
+  let score = 0.25;
+  if (wordCount >= 8) score += 0.1;
+  if (wordCount >= 14) score += 0.1;
+  if (durableAnchor) score += 0.25;
+  if (isPreferenceLike || isDecisionLike) score += 0.15;
+  if ((fact.confidence ?? 0) >= 0.75) score += 0.1;
+  if ((fact.importance ?? 0) >= 0.7) score += 0.1;
+  if (statusOnly) score -= 0.4;
+
+  return {
+    wordCount,
+    hasDurableAnchor: durableAnchor,
+    isStatusOnly: statusOnly,
+    isShortUseful: shortUseful,
+    computedQualityScore: Math.round(clamp01(score) * 100) / 100,
+  };
+};
+
+export const normalizeExtractedFact = (raw: Record<string, unknown>): ExtractedFact | null => {
+  if (!raw.content || typeof raw.content !== "string") return null;
+
+  const category = normalizeCategory(typeof raw.category === "string" ? raw.category : "observations");
+  const requestedSubtype = typeof raw.memory_subtype === "string" ? raw.memory_subtype : null;
+  let memorySubtype = requestedSubtype ? normalizeMemorySubtype("fact", requestedSubtype) : null;
+  if (!memorySubtype) {
+    memorySubtype = subtypeForCategory(category);
+  }
+
+  try {
+    validateMemorySubtype("fact", memorySubtype);
+  } catch {
+    memorySubtype = subtypeForCategory(category);
+  }
+
+  const confidence = typeof raw.confidence === "number" ? clamp01(raw.confidence) : 0.7;
+  const importance = typeof raw.importance === "number" ? clamp01(raw.importance) : 0.5;
+  const qualityScore = typeof raw.quality_score === "number" ? clamp01(raw.quality_score) : null;
+  const entities = Array.isArray(raw.entities)
+    ? normalizeEntities(raw.entities.map((entity) => String(entity)))
+    : [];
+
+  const fact: ExtractedFact = {
+    content: raw.content.trim(),
+    category,
+    memory_subtype: memorySubtype,
+    entities,
+    confidence,
+    importance,
+    quality_score: qualityScore,
+    confidence_reason: typeof raw.confidence_reason === "string" ? raw.confidence_reason.trim() : null,
+    repo: typeof raw.repo === "string" ? raw.repo.trim() : null,
+    branch: typeof raw.branch === "string" ? raw.branch.trim() : null,
+    task_key: typeof raw.task_key === "string" ? raw.task_key.trim() : null,
+    workstream_key: typeof raw.workstream_key === "string" ? raw.workstream_key.trim() : null,
+  };
+
+  return isHighQualityExtractedFact(fact) ? fact : null;
+};
+
+export const isHighQualityExtractedFact = (fact: ExtractedFact): boolean => {
+  const content = fact.content.trim();
+  if (content.length < 30) return false;
+
+  const signals = factQualitySignals(fact);
+  if (QUALITY_THRESHOLDS.rejectStatusOnlyFacts && signals.isStatusOnly) return false;
+
+  const confidence = fact.confidence ?? 0.7;
+  const importance = fact.importance ?? 0.5;
+  if (confidence < QUALITY_THRESHOLDS.minFactConfidence && importance < QUALITY_THRESHOLDS.minImportanceForLowConfidenceFact) {
+    return false;
+  }
+
+  const qualityScore = fact.quality_score ?? signals.computedQualityScore;
+  if (qualityScore < QUALITY_THRESHOLDS.minFactQualityScore && !signals.isShortUseful) return false;
+  if (!signals.hasDurableAnchor && !signals.isShortUseful) return false;
+
+  return true;
+};
 
 /**
  * Call the LLM to extract facts from a conversation transcript.
@@ -392,21 +524,16 @@ const extractFacts = async (transcript: string, config?: BikkyConfig): Promise<E
     }
 
     return (parsed as Array<Record<string, unknown>>)
-      .filter(f => f.content && typeof f.content === "string" && f.category)
-      .map(f => ({
-        content: f.content as string,
-        category: f.category as string,
-        entities: Array.isArray(f.entities) ? (f.entities as string[]).map(e => String(e).toLowerCase()) : [],
-        confidence: typeof f.confidence === "number" ? f.confidence : 0.7,
-        importance: typeof f.importance === "number" ? f.importance : 0.5,
-      }))
-      .filter(f => {
-        if (f.importance < 0.5) {
-          logFn("DEBUG", `Extraction: dropping low-importance fact (${f.importance}): "${f.content.slice(0, 80)}…"`);
-          return false;
+      .map((raw) => {
+        const fact = normalizeExtractedFact(raw);
+        if (!fact) {
+          const content = typeof raw.content === "string" ? raw.content : JSON.stringify(raw).slice(0, 120);
+          logFn("DEBUG", `Extraction: dropping low-quality fact candidate: "${content.slice(0, 80)}…"`);
+          return null;
         }
-        return true;
-      });
+        return fact;
+      })
+      .filter((fact): fact is ExtractedFact => fact !== null);
   } catch (e) {
     logFn("WARN", `Extraction LLM parse error: ${(e as Error).message} — raw: ${result.slice(0, 200)}`);
     return [];
@@ -432,15 +559,21 @@ const storeFacts = async (
     return 0;
   }
 
-  const baseMeta: Record<string, string> = { extracted_from_session: sessionId };
-
+  const baseMeta: Record<string, string | number | boolean | null> = {
+    extracted_from_session: sessionId,
+    capture_policy_version: CAPTURE_POLICY_VERSION,
+  };
   let stored = 0;
 
   for (const fact of facts) {
     const hash = contentHash(fact.content);
+    const sanitizedFact: ExtractedFact = {
+      ...fact,
+      entities: fact.entities.map((entity) => entity.toLowerCase()),
+    };
 
     try {
-      const dedup = await qdrant.dedupCheck(fact.content, hash);
+      const dedup = await qdrant.dedupCheck(sanitizedFact.content, hash);
 
       if (dedup.action === "skip") {
         // Reinforce existing fact
@@ -453,7 +586,7 @@ const storeFacts = async (
       // Run contradiction detection for non-trivial facts
       if (config && (fact.confidence ?? 0.5) >= 0.5) {
         try {
-          const contradiction = await detectContradiction(fact, config);
+          const contradiction = await detectContradiction(sanitizedFact, config);
           if (contradiction.contradiction && contradiction.existingId) {
             logFn("INFO", `Extraction: contradiction detected for "${fact.content.slice(0, 60)}..." vs ${contradiction.existingId}: ${contradiction.reason}`);
             // Log contradiction instead of writing to inbox
@@ -463,15 +596,30 @@ const storeFacts = async (
         }
       }
 
+      const subtype = validateMemorySubtype("fact", sanitizedFact.memory_subtype)
+        ?? subtypeForCategory(normalizeCategory(sanitizedFact.category));
+
       const storePayload: StoreFact = {
-        content: fact.content,
-        category: fact.category,
-        entities: fact.entities,
+        content: sanitizedFact.content,
+        category: sanitizedFact.category,
+        domain: DEFAULT_CAPTURE_CONTEXT.domain,
+        memory_subtype: subtype,
+        entities: sanitizedFact.entities,
         source: "daemon",
         kind: "fact",
         confidence: fact.confidence,
         importance: fact.importance,
         content_hash: hash,
+        prompt_version: promptVersionForSubtype(subtype),
+        capture_policy_version: CAPTURE_POLICY_VERSION,
+        quality_score: fact.quality_score ?? factQualitySignals(fact).computedQualityScore,
+        confidence_reason: fact.confidence_reason,
+        review_status: DEFAULT_CAPTURE_CONTEXT.reviewStatus,
+        volatility: DEFAULT_CAPTURE_CONTEXT.volatility,
+        repo: fact.repo,
+        branch: fact.branch,
+        task_key: fact.task_key,
+        workstream_key: fact.workstream_key,
         metadata: baseMeta,
       };
 
@@ -489,6 +637,24 @@ const storeFacts = async (
   }
 
   return stored;
+};
+
+const updateSummaryForTranscript = async (
+  sessionId: string,
+  transcript: string,
+  eventCount: number,
+  config?: BikkyConfig,
+): Promise<void> => {
+  try {
+    const result = await updateSessionSummary({ sessionId, transcript, eventCount, config });
+    if (result.action === "stored" || result.action === "updated") {
+      logFn("INFO", `Summary: ${result.action} session summary ${result.factId} for ${sessionId}`);
+    } else {
+      logFn("DEBUG", `Summary: skipped for ${sessionId} (${result.reason})`);
+    }
+  } catch (e) {
+    logFn("WARN", `Summary: failed for ${sessionId}: ${(e as Error).message}`);
+  }
 };
 
 // ── Tick entry point ─────────────────────────────────────────────────────────
@@ -517,7 +683,7 @@ export const tick = async (config: BikkyConfig): Promise<void> => {
   if (now - lastTickAt < intervalMs) return;
   lastTickAt = now;
 
-  const minEvents = config.daemon.extract_min_events || 5;
+  const minEvents = config.daemon.extract_min_events || CAPTURE_TRIGGERS.factExtraction.minEvents;
 
   try {
     // Extract from ALL active Copilot sessions with events.jsonl
@@ -563,7 +729,9 @@ const extractForUuid = async (
   // Read new events
   const { events, newOffset, totalLines } = await readNewEvents(eventsPath, state.byte_offset);
 
-  if (events.length < minEvents) {
+  const shouldSummarize = shouldSummarizeEvents(events, minEvents);
+
+  if (events.length < minEvents && !shouldSummarize) {
     // Still update offset to avoid re-scanning non-extractable events
     if (newOffset > state.byte_offset) {
       state.byte_offset = newOffset;
@@ -580,12 +748,17 @@ const extractForUuid = async (
   for (let i = 0; i < chunks.length; i++) {
     const transcript = buildTranscript(chunks[i]!);
     logFn("DEBUG", `Extraction: UUID ${uuid.slice(0, 8)} — chunk ${i + 1}/${chunks.length}, ${chunks[i]!.length} events, ${transcript.length} chars`);
-    const facts = await extractFacts(transcript, config);
 
-    if (facts.length > 0) {
-      const stored = await storeFacts(facts, stateKey, config);
-      totalFacts += stored;
+    if (events.length >= minEvents) {
+      const facts = await extractFacts(transcript, config);
+
+      if (facts.length > 0) {
+        const stored = await storeFacts(facts, stateKey, config);
+        totalFacts += stored;
+      }
     }
+
+    await updateSummaryForTranscript(stateKey, transcript, chunks[i]!.length, config);
   }
 
   if (totalFacts > 0) {

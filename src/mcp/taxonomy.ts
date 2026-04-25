@@ -1,246 +1,655 @@
 /**
- * Memory Taxonomy — Single source of truth for all classification axes.
+ * Bikky memory ontology.
  *
- * Four orthogonal axes classify every fact:
- *   category — topic/subject matter (what the fact is about)
- *   domain   — life scope (work vs personal context)
- *   kind     — epistemic type (how the knowledge exists)
- *   source   — provenance (who/what created this fact)
+ * Ontology v2 separates ownership boundaries from semantic meaning:
+ * workspace -> domain -> repo/project/surface -> workstream -> episode -> memory objects.
  */
 
-import type { AxisDef, CategoryDef, QdrantIndex } from "./types.js";
+// ---------------------------------------------------------------------------
+// Categories: subject matter
+// ---------------------------------------------------------------------------
 
-// ─── Category: topic/subject matter ─────────────────────────────────────────
-
-export const CATEGORIES: Record<string, CategoryDef> = {
-  infrastructure: {
-    description: "Services, ports, configs, databases, deployments, environments",
-    extractionHint:
-      "Look for: service names, ports, hosts, connection strings, database engines, cluster details, deployment targets, environment variables, config values",
+export const CATEGORIES = {
+  codebase: {
+    description:
+      "Repository structure, modules, important files, APIs, build/test commands, and code navigation knowledge.",
     examples: [
-      { content: "ClickHouse runs on port 8123 in production clusters", entities: ["clickhouse"], confidence: 0.95, importance: 0.8 },
-      { content: "The dbt project uses ReplacingMergeTree engine for dedup tables", entities: ["dbt", "clickhouse"], confidence: 0.9, importance: 0.7 },
-      { content: "Redis cache is on redis-prod.internal:6379 with 30-min TTL", entities: ["redis"], confidence: 0.9, importance: 0.8 },
+      "The auth middleware lives in src/server/auth.ts.",
+      "Run npm test -- --runInBand for flaky integration tests.",
+    ],
+  },
+  infrastructure: {
+    description:
+      "Cloud, deployment, runtime, secrets, queues, databases, CI/CD, and environment topology.",
+    examples: [
+      "Production uses Qdrant Cloud for vector storage.",
+      "Deployments are promoted through GitHub Actions.",
+    ],
+  },
+  operations: {
+    description:
+      "Runbooks, incident handling, maintenance procedures, debugging steps, and operational gotchas.",
+    examples: [
+      "Restart the worker after changing queue visibility timeout.",
+      "If migrations hang, check the advisory lock table first.",
     ],
   },
   decisions: {
-    description: "Architectural decisions, technology choices, trade-offs, with who decided and why",
-    extractionHint:
-      "Look for: 'decided', 'chose', 'went with', 'instead of', 'because', trade-off discussions, architecture choices, technology selections",
+    description:
+      "Architecture, product, process, and technical decisions with durable rationale.",
     examples: [
-      { content: "Team decided to use JWT for service-to-service auth instead of mTLS", entities: ["auth", "jwt"], confidence: 0.9, importance: 0.85 },
-      { content: "Team chose Qdrant over Pinecone for vector storage due to self-hosting option", entities: ["qdrant", "pinecone"], confidence: 0.95, importance: 0.8 },
+      "Use workspace_id as the access boundary instead of overloading domain.",
+      "Keep telemetry out of normal semantic recall.",
     ],
   },
-  observation: {
-    description: "Errors encountered, quirks, workarounds, debugging findings, gotchas, behavioral patterns",
-    extractionHint:
-      "Look for: error messages, debugging steps, 'turns out', 'the issue was', workarounds, unexpected behavior, gotchas, caveats",
+  product_domain: {
+    description:
+      "Product concepts, business rules, user workflows, domain vocabulary, and market assumptions.",
     examples: [
-      { content: "ClickHouse OPTIMIZE FINAL is slow on large tables — use OPTIMIZE DEDUPLICATE instead", entities: ["clickhouse"], confidence: 0.9, importance: 0.7 },
-      { content: "Node 25 fetch() doesn't support AbortSignal.timeout() in some edge cases", entities: ["node"], confidence: 0.7, importance: 0.5 },
-    ],
-  },
-  preferences: {
-    description: "User/team preferences, working style, conventions, opinions, personal tastes",
-    extractionHint:
-      "Look for: 'prefer', 'like', 'want', 'always use', conventions, style guides, opinions, personal choices, hobbies, interests",
-    examples: [
-      { content: "User prefers dark mode and concise responses under 3 sentences", entities: ["user"], confidence: 0.85, importance: 0.3 },
-      { content: "Code style: kebab-case for file names, camelCase for JS variables", entities: [], confidence: 0.8, importance: 0.4 },
+      "A workstream is the durable continuity unit for long-running tasks.",
+      "Recall quality should be measured by downstream usefulness, not just similarity.",
     ],
   },
   projects: {
-    description: "What's in progress, blocked, completed, project structure, goals, personal endeavors",
-    extractionHint:
-      "Look for: task progress, blockers, completions, branch names, deployment status, milestones, goals, project structure, hobbies, personal projects",
+    description:
+      "Project goals, milestones, current state, open questions, blockers, and active workstreams.",
     examples: [
-      { content: "The memory extraction daemon pipeline is being built", entities: ["bikky", "daemon"], confidence: 0.95, importance: 0.6 },
-      { content: "User is growing tomatoes and herbs in the backyard garden", entities: ["user", "garden"], confidence: 0.85, importance: 0.4 },
+      "The capture-policy RPI is implementing ontology v2 first.",
+      "The UI smoke suite is tracked in bikky-dev/bikky#13.",
     ],
   },
-  team: {
-    description: "People, roles, relationships, organizational structure, contacts",
-    extractionHint:
-      "Look for: names, titles, roles, reporting lines, team membership, expertise areas, contact details, who owns what",
+  people: {
+    description:
+      "Ownership, roles, collaboration patterns, responsibilities, and team preferences.",
     examples: [
-      { content: "Alice is the lead engineer on the platform team", entities: ["alice", "platform"], confidence: 0.95, importance: 0.7 },
-      { content: "Alex handles DevOps and Kubernetes cluster management", entities: ["alex", "devops", "kubernetes"], confidence: 0.9, importance: 0.6 },
+      "Saber prefers concise implementation plans before code changes.",
+      "The platform team owns the deploy workflow.",
     ],
   },
-};
+  preferences: {
+    description:
+      "User, team, or workspace preferences about style, tooling, defaults, and interaction patterns.",
+    examples: [
+      "Prefer Node's built-in test runner for this repo.",
+      "Default new memory captures to software_engineering.",
+    ],
+  },
+  observations: {
+    description:
+      "Validated observations, troubleshooting evidence, behavioral notes, and learned facts that do not fit a narrower category.",
+    examples: [
+      "The current ESLint config is incompatible with ESLint v9.",
+      "The dashboard shows stale facts separately from verified current facts.",
+    ],
+  },
+} as const;
 
-// ─── Domain: life scope ─────────────────────────────────────────────────────
+export type Category = keyof typeof CATEGORIES;
 
-export const DOMAINS: Record<string, AxisDef> = {
-  work: { description: "Engineering, company, professional context" },
-  personal: { description: "Life, hobbies, health, family, personal projects" },
-};
+export const DEFAULT_CATEGORY: Category = "observations";
 
-export const DEFAULT_DOMAIN = "work";
+// ---------------------------------------------------------------------------
+// Domains: activity / knowledge profiles
+// ---------------------------------------------------------------------------
 
-// ─── Kind: epistemic type ───────────────────────────────────────────────────
+export const DOMAINS = {
+  software_engineering: {
+    description:
+      "Coding-agent work: repositories, code changes, architecture, infrastructure, debugging, tests, CI, and developer workflow.",
+    defaultCategories: [
+      "codebase",
+      "infrastructure",
+      "operations",
+      "decisions",
+      "projects",
+      "preferences",
+      "observations",
+    ] as const,
+  },
+  product_strategy: {
+    description:
+      "Product direction, positioning, roadmap tradeoffs, customer problems, metrics, and market learning.",
+    defaultCategories: [
+      "product_domain",
+      "decisions",
+      "projects",
+      "people",
+      "preferences",
+      "observations",
+    ] as const,
+  },
+  business_operations: {
+    description:
+      "Business process, vendors, finance, legal/admin operations, recurring procedures, and ownership.",
+    defaultCategories: [
+      "operations",
+      "decisions",
+      "projects",
+      "people",
+      "preferences",
+      "observations",
+    ] as const,
+  },
+  research: {
+    description:
+      "Research questions, sources, hypotheses, experiment findings, synthesis, and reusable insights.",
+    defaultCategories: [
+      "product_domain",
+      "decisions",
+      "projects",
+      "preferences",
+      "observations",
+    ] as const,
+  },
+  personal_productivity: {
+    description:
+      "Individual productivity, habits, planning preferences, reminders, and personal operating context.",
+    defaultCategories: [
+      "operations",
+      "projects",
+      "people",
+      "preferences",
+      "observations",
+    ] as const,
+  },
+} as const;
 
-export const KINDS: Record<string, AxisDef> = {
-  fact: { description: "Atomic declarative assertion — the default" },
-  summary: { description: "Compressed narrative of a session or time period" },
-  distilled: { description: "Second-order pattern derived from multiple summaries" },
-  relation: { description: "Typed edge between two entities (from → type → to)" },
-};
+export type Domain = keyof typeof DOMAINS;
 
-export const DEFAULT_KIND = "fact";
+export const DEFAULT_DOMAIN: Domain = "software_engineering";
 
-// ─── Source: provenance ─────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Layers: hierarchy placement
+// ---------------------------------------------------------------------------
 
-export const SOURCES: Record<string, AxisDef> = {
-  agent: { description: "Stored by an agent via MCP memory_store tool" },
-  daemon: { description: "Extracted by the background daemon pipeline" },
-  system: { description: "Generated by system processes (distillation, session summaries)" },
-  user: { description: "Explicitly requested by the user (manual corrections, direct input)" },
-  docs: { description: "Indexed from documentation (knowledge base)" },
-};
+export const LAYERS = {
+  workspace: {
+    description: "Ownership, tenancy, access policy, sharing, redaction, retention, and quotas.",
+  },
+  domain: {
+    description: "Semantic profile that controls vocabulary, prompts, categories, ranking, and capture policy.",
+  },
+  surface: {
+    description: "Concrete operating surface such as a repo, project, package, service, branch, or channel.",
+  },
+  workstream: {
+    description: "Primary durable continuity key for a long-running objective or task.",
+  },
+  episode: {
+    description: "Coherent segment of activity within a session or transcript.",
+  },
+  memory_object: {
+    description: "A fact, summary, distilled learning, relation, or telemetry object.",
+  },
+} as const;
 
-export const DEFAULT_SOURCE = "agent";
+export type Layer = keyof typeof LAYERS;
 
-// ─── Decay configuration ────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Kinds and subtypes: object shape
+// ---------------------------------------------------------------------------
 
-const FACT_DECAY: Record<string, number> = {
-  "observation.work": 45,
-  "observation.personal": 180,
-  "infrastructure.work": 60,
-  "infrastructure.personal": 180,
-  "decisions.*": 120,
-  "preferences.*": 365,
-  "projects.work": 90,
-  "projects.personal": 180,
-  "team.*": 365,
-};
+export const KINDS = {
+  fact: {
+    description: "Atomic, durable memory that should be retrievable independently.",
+    examples: [
+      "The daemon stores extracted coding-agent observations in Qdrant.",
+      "The UI package uses Vite and Node's built-in test runner.",
+    ],
+  },
+  summary: {
+    description:
+      "Compressed representation of a session index, coherent episode, or current workstream state.",
+    examples: [
+      "Episode summary of a coherent implementation task.",
+      "Current-state summary for a workstream.",
+    ],
+  },
+  distilled: {
+    description:
+      "Pattern, convention, failure mode, or reusable learning synthesized from multiple memories.",
+    examples: [
+      "Prefer explicit workspace filters for scoped team memory.",
+      "Missing Qdrant payload indexes surface as query failures.",
+    ],
+  },
+  relation: {
+    description: "Typed edge between entities; relation_type carries the edge label.",
+    examples: [
+      "bikky -> uses -> qdrant",
+      "workspace_id -> represents -> access boundary",
+    ],
+  },
+  telemetry: {
+    description:
+      "Memory-use, feedback, or outcome metadata used for product quality and operations; excluded from normal semantic recall.",
+    examples: [
+      "A recall event returned three facts for session abc.",
+      "A user marked a fact useful.",
+    ],
+  },
+} as const;
 
-export const DECAY_DEFAULT_HALF_LIFE = 90;
+export type Kind = keyof typeof KINDS;
 
-export function getDecayHalfLife(opts: { kind?: string; category?: string; domain?: string } = {}): number | null {
-  const { kind, category, domain } = opts;
+export const MEMORY_SUBTYPES = {
+  fact: [
+    "codebase_map",
+    "architecture_decision",
+    "infra_topology",
+    "access_pattern",
+    "deployment_procedure",
+    "operational_procedure",
+    "domain_rule",
+    "troubleshooting_gotcha",
+    "preference",
+    "ownership",
+  ],
+  summary: ["session_index", "episode", "workstream"],
+  distilled: [
+    "runbook_candidate",
+    "failure_mode",
+    "convention",
+    "architecture_pattern",
+    "product_insight",
+  ],
+  relation: [],
+  telemetry: ["recall_event", "feedback_event", "outcome_event", "aggregate_rollup"],
+} as const satisfies Record<Kind, readonly string[]>;
 
-  if (kind === "summary" || kind === "distilled") return null;
-  if (kind === "relation") return 180;
+export type MemorySubtype = (typeof MEMORY_SUBTYPES)[Kind][number];
 
-  const key = `${category ?? "observation"}.${domain ?? DEFAULT_DOMAIN}`;
-  const keyVal = FACT_DECAY[key];
-  if (keyVal !== undefined) return keyVal;
+export const DEFAULT_MEMORY_SUBTYPE_BY_KIND = {
+  fact: "codebase_map",
+  summary: "episode",
+  distilled: "convention",
+  relation: null,
+  telemetry: "recall_event",
+} as const satisfies Record<Kind, MemorySubtype | null>;
 
-  const catKey = `${category ?? "observation"}.*`;
-  const catVal = FACT_DECAY[catKey];
-  if (catVal !== undefined) return catVal;
+export const MEMORY_SUBTYPE_DEFAULT_CATEGORY = {
+  codebase_map: "codebase",
+  architecture_decision: "decisions",
+  infra_topology: "infrastructure",
+  access_pattern: "infrastructure",
+  deployment_procedure: "operations",
+  operational_procedure: "operations",
+  domain_rule: "product_domain",
+  troubleshooting_gotcha: "operations",
+  preference: "preferences",
+  ownership: "people",
+  session_index: "projects",
+  episode: "projects",
+  workstream: "projects",
+  runbook_candidate: "operations",
+  failure_mode: "operations",
+  convention: "observations",
+  architecture_pattern: "decisions",
+  product_insight: "product_domain",
+  recall_event: "observations",
+  feedback_event: "observations",
+  outcome_event: "observations",
+  aggregate_rollup: "observations",
+} as const satisfies Record<MemorySubtype, Category>;
 
-  return DECAY_DEFAULT_HALF_LIFE;
-}
+export const MEMORY_SUBTYPE_DEFAULT_LAYER = {
+  codebase_map: "surface",
+  architecture_decision: "surface",
+  infra_topology: "surface",
+  access_pattern: "surface",
+  deployment_procedure: "surface",
+  operational_procedure: "surface",
+  domain_rule: "domain",
+  troubleshooting_gotcha: "surface",
+  preference: "domain",
+  ownership: "surface",
+  session_index: "episode",
+  episode: "episode",
+  workstream: "workstream",
+  runbook_candidate: "workstream",
+  failure_mode: "workstream",
+  convention: "domain",
+  architecture_pattern: "domain",
+  product_insight: "domain",
+  recall_event: "memory_object",
+  feedback_event: "memory_object",
+  outcome_event: "memory_object",
+  aggregate_rollup: "workspace",
+} as const satisfies Record<MemorySubtype, Layer>;
 
-// Legacy flat map for old code paths
-export const DECAY_HALF_LIFE: Record<string, number | null> = {
-  infrastructure: 60,
-  projects: 90,
-  decisions: 120,
-  observation: 45,
-  personal: 365,
-  preferences: 365,
-  team: 365,
-  relation: 180,
-  session_summary: null,
-  distilled: null,
-};
+// ---------------------------------------------------------------------------
+// Provenance
+// ---------------------------------------------------------------------------
 
-// ─── Staleness ──────────────────────────────────────────────────────────────
+export const SOURCES = {
+  agent: {
+    description: "Captured from an interactive agent tool call.",
+  },
+  daemon: {
+    description: "Captured automatically by the local Bikky daemon.",
+  },
+  system: {
+    description: "Generated by Bikky maintenance, migration, or lifecycle code.",
+  },
+  user: {
+    description: "Created or corrected directly by a user.",
+  },
+  docs: {
+    description: "Imported from documentation or explicit source material.",
+  },
+} as const;
 
+export type Source = keyof typeof SOURCES;
+
+export const DEFAULT_KIND: Kind = "fact";
+export const DEFAULT_SOURCE: Source = "agent";
 export const STALENESS_DAYS = 30;
-
-// ─── Similarity thresholds ──────────────────────────────────────────────────
-
+export const DECAY_DEFAULT_HALF_LIFE = 90;
 export const THRESHOLD_DUPLICATE = 0.92;
-export const THRESHOLD_RELATED = 0.80;
+export const THRESHOLD_RELATED = 0.8;
 
-// ─── Qdrant indexes ────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Decay policy: half-life in days by category + domain profile
+// ---------------------------------------------------------------------------
 
-export const QDRANT_INDEXES: QdrantIndex[] = [
+export const DECAY_HALF_LIFE: Record<string, number> = {
+  // Software-engineering defaults.
+  "codebase.software_engineering": 120,
+  "infrastructure.software_engineering": 60,
+  "operations.software_engineering": 60,
+  "decisions.software_engineering": 180,
+  "product_domain.software_engineering": 120,
+  "projects.software_engineering": 45,
+  "people.software_engineering": 120,
+  "preferences.software_engineering": 180,
+  "observations.software_engineering": 45,
+
+  // Other domain profiles.
+  "product_domain.product_strategy": 120,
+  "decisions.product_strategy": 180,
+  "projects.product_strategy": 60,
+  "people.product_strategy": 120,
+  "preferences.product_strategy": 180,
+  "observations.product_strategy": 60,
+  "operations.business_operations": 120,
+  "decisions.business_operations": 180,
+  "projects.business_operations": 60,
+  "people.business_operations": 180,
+  "preferences.business_operations": 180,
+  "observations.business_operations": 90,
+  "product_domain.research": 120,
+  "decisions.research": 180,
+  "projects.research": 60,
+  "preferences.research": 180,
+  "observations.research": 90,
+  "operations.personal_productivity": 90,
+  "projects.personal_productivity": 45,
+  "people.personal_productivity": 180,
+  "preferences.personal_productivity": 180,
+  "observations.personal_productivity": 45,
+
+};
+
+// ---------------------------------------------------------------------------
+// Qdrant payload indexes
+// ---------------------------------------------------------------------------
+
+export const QDRANT_INDEXES: Array<{ field_name: string; field_schema: string }> = [
   { field_name: "category", field_schema: "keyword" },
   { field_name: "domain", field_schema: "keyword" },
   { field_name: "kind", field_schema: "keyword" },
+  { field_name: "memory_subtype", field_schema: "keyword" },
   { field_name: "source", field_schema: "keyword" },
-  { field_name: "entities", field_schema: "keyword" },
-  { field_name: "content_hash", field_schema: "keyword" },
-  { field_name: "from_entity", field_schema: "keyword" },
-  { field_name: "to_entity", field_schema: "keyword" },
-  { field_name: "relation_type", field_schema: "keyword" },
-  { field_name: "superseded_by", field_schema: "keyword" },
+  { field_name: "workspace_id", field_schema: "keyword" },
+  { field_name: "actor_id", field_schema: "keyword" },
+  { field_name: "review_status", field_schema: "keyword" },
+  { field_name: "created_at", field_schema: "datetime" },
+  { field_name: "updated_at", field_schema: "datetime" },
+  { field_name: "last_seen_at", field_schema: "datetime" },
+  { field_name: "stale_after", field_schema: "datetime" },
   { field_name: "session_id", field_schema: "keyword" },
-  { field_name: "last_reinforced_at", field_schema: "datetime" },
-  { field_name: "last_verified_at", field_schema: "datetime" },
+  { field_name: "episode_id", field_schema: "keyword" },
+  { field_name: "workstream_key", field_schema: "keyword" },
+  { field_name: "task_key", field_schema: "keyword" },
+  { field_name: "repo", field_schema: "keyword" },
+  { field_name: "branch", field_schema: "keyword" },
+  { field_name: "reviewed", field_schema: "bool" },
+  { field_name: "verified", field_schema: "bool" },
+  { field_name: "superseded", field_schema: "bool" },
+  { field_name: "useful_feedback_count", field_schema: "integer" },
+  { field_name: "not_useful_feedback_count", field_schema: "integer" },
+  { field_name: "recall_count", field_schema: "integer" },
+  { field_name: "last_recalled_at", field_schema: "datetime" },
 ];
 
-// ─── Source value migration (old → new) ─────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Normalization helpers
+// ---------------------------------------------------------------------------
 
-export const SOURCE_MIGRATION: Record<string, string> = {
-  conversation: "agent",
-  task: "agent",
-  observation: "agent",
-  manual: "user",
-  cortex: "daemon",
-};
+type NonEmptyStringArray = [string, ...string[]];
 
-// ─── Normalization helpers ──────────────────────────────────────────────────
-
-export function normalizeCategory(cat: string): string {
-  const lower = String(cat).toLowerCase().trim();
-  if (lower in CATEGORIES) return lower;
-  if (lower === "personal") return "preferences";
-  if (lower === "session_summary") return "projects";
-  if (lower === "distilled") return "observation";
-  if (lower === "relation") return "team";
-  if (lower.includes("infra")) return "infrastructure";
-  if (lower.includes("decision")) return "decisions";
-  if (lower.includes("observ") || lower.includes("error")) return "observation";
-  if (lower.includes("prefer")) return "preferences";
-  if (lower.includes("project")) return "projects";
-  if (lower.includes("team") || lower.includes("people")) return "team";
-  return "observation";
+function normalizeToken(value: string | null | undefined): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 }
 
-export function normalizeDomain(d: string | undefined): string {
-  if (!d) return DEFAULT_DOMAIN;
-  const lower = String(d).toLowerCase().trim();
-  if (lower in DOMAINS) return lower;
-  if (lower.includes("personal") || lower.includes("life") || lower.includes("home")) return "personal";
+export function normalizeText(text: string): string {
+  return text.trim().replace(/\s+/g, " ");
+}
+
+export function normalizeCategory(category: string | null | undefined): Category {
+  const normalized = normalizeToken(category);
+  if (normalized in CATEGORIES) {
+    return normalized as Category;
+  }
+  if (normalized.includes("infra")) return "infrastructure";
+  if (normalized.includes("decision")) return "decisions";
+  if (normalized.includes("operation") || normalized.includes("runbook")) return "operations";
+  if (normalized.includes("owner") || normalized.includes("people")) return "people";
+  if (normalized.includes("product") || normalized.includes("domain")) return "product_domain";
+  if (normalized.includes("repo") || normalized.includes("code")) return "codebase";
+  return DEFAULT_CATEGORY;
+}
+
+export function normalizeDomain(domain: string | null | undefined): Domain {
+  const normalized = normalizeToken(domain);
+  if (normalized in DOMAINS) {
+    return normalized as Domain;
+  }
   return DEFAULT_DOMAIN;
 }
 
-export function normalizeKind(k: string | undefined): string {
-  if (!k) return DEFAULT_KIND;
-  const lower = String(k).toLowerCase().trim();
-  if (lower in KINDS) return lower;
-  if (lower.includes("summar")) return "summary";
-  if (lower.includes("distil")) return "distilled";
-  if (lower.includes("relat") || lower.includes("edge")) return "relation";
-  return DEFAULT_KIND;
+export function normalizeKind(kind: string | null | undefined): Kind {
+  const normalized = normalizeToken(kind);
+  if (normalized in KINDS) {
+    return normalized as Kind;
+  }
+  if (normalized.includes("summar")) return "summary";
+  if (normalized.includes("distill")) return "distilled";
+  if (normalized.includes("relation") || normalized.includes("edge")) return "relation";
+  if (normalized.includes("telemetry") || normalized.includes("feedback_event")) return "telemetry";
+  return "fact";
 }
 
-export function normalizeSource(s: string | undefined): string {
-  if (!s) return DEFAULT_SOURCE;
-  const lower = String(s).toLowerCase().trim();
-  if (lower in SOURCES) return lower;
-  const migrated = SOURCE_MIGRATION[lower];
-  if (migrated) return migrated;
+export function normalizeSource(source: string | null | undefined): Source {
+  const normalized = normalizeToken(source);
+  if (normalized in SOURCES) {
+    return normalized as Source;
+  }
   return DEFAULT_SOURCE;
 }
 
-// ─── Value arrays for z.enum consumption ────────────────────────────────────
+export function normalizeLayer(layer: string | null | undefined): Layer | null {
+  const normalized = normalizeToken(layer);
+  if (normalized in LAYERS) {
+    return normalized as Layer;
+  }
+  return null;
+}
 
-export const categoryValues = (): [string, ...string[]] =>
-  Object.keys(CATEGORIES) as [string, ...string[]];
+export function normalizeMemorySubtype(
+  kind: string | null | undefined,
+  subtype: string | null | undefined,
+): MemorySubtype | null {
+  const normalizedKind = normalizeKind(kind);
+  const normalizedSubtype = normalizeToken(subtype);
+  if (!normalizedSubtype) return null;
 
-export const domainValues = (): [string, ...string[]] =>
-  Object.keys(DOMAINS) as [string, ...string[]];
+  const allowed = MEMORY_SUBTYPES[normalizedKind] as readonly string[];
+  if (allowed.includes(normalizedSubtype)) {
+    return normalizedSubtype as MemorySubtype;
+  }
+  return null;
+}
 
-export const kindValues = (): [string, ...string[]] =>
-  Object.keys(KINDS) as [string, ...string[]];
+export function validateMemorySubtype(
+  kind: string | null | undefined,
+  subtype: string | null | undefined,
+): MemorySubtype | null {
+  if (!subtype) return null;
+  const normalized = normalizeMemorySubtype(kind, subtype);
+  if (normalized) return normalized;
 
-export const sourceValues = (): [string, ...string[]] =>
-  Object.keys(SOURCES) as [string, ...string[]];
+  const normalizedKind = normalizeKind(kind);
+  const allowed = MEMORY_SUBTYPES[normalizedKind];
+  const allowedText = allowed.length > 0 ? allowed.join(", ") : "none";
+  throw new Error(
+    `Invalid memory_subtype "${subtype}" for kind "${normalizedKind}". Allowed subtypes: ${allowedText}.`,
+  );
+}
+
+export function defaultMemorySubtypeForKind(kind: string | null | undefined): MemorySubtype | null {
+  return DEFAULT_MEMORY_SUBTYPE_BY_KIND[normalizeKind(kind)];
+}
+
+export function categoryForMemorySubtype(subtype: string | null | undefined): Category | null {
+  const normalized = normalizeToken(subtype);
+  if (normalized in MEMORY_SUBTYPE_DEFAULT_CATEGORY) {
+    return MEMORY_SUBTYPE_DEFAULT_CATEGORY[normalized as MemorySubtype];
+  }
+  return null;
+}
+
+export function layerForMemorySubtype(subtype: string | null | undefined): Layer | null {
+  const normalized = normalizeToken(subtype);
+  if (normalized in MEMORY_SUBTYPE_DEFAULT_LAYER) {
+    return MEMORY_SUBTYPE_DEFAULT_LAYER[normalized as MemorySubtype];
+  }
+  return null;
+}
+
+export function normalizeEntities(entities: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const entity of entities) {
+    const normalized = entity.trim().toLowerCase();
+    if (normalized && !seen.has(normalized)) {
+      seen.add(normalized);
+      result.push(normalized);
+    }
+  }
+
+  return result;
+}
+
+export function inferEntities(content: string): string[] {
+  const entities: string[] = [];
+
+  // Backtick code refs
+  const codeRefs = content.match(/`([^`]+)`/g);
+  if (codeRefs) {
+    for (const ref of codeRefs) {
+      entities.push(ref.slice(1, -1));
+    }
+  }
+
+  // Package-like names: qdrant, postgres, react, etc.
+  const techTerms = content.match(
+    /\b(qdrant|postgres|postgresql|redis|docker|kubernetes|k8s|react|typescript|node|python|aws|gcp|azure|github|gitlab|notion|slack)\b/gi,
+  );
+  if (techTerms) {
+    entities.push(...techTerms);
+  }
+
+  return normalizeEntities(entities).slice(0, 10);
+}
+
+export function getDecayHalfLife(input: {
+  category?: string | null;
+  domain?: string | null;
+  kind?: string | null;
+}): number | null {
+  const kind = normalizeKind(input.kind);
+  if (kind === "relation" || kind === "telemetry") return null;
+
+  const rawCategory = normalizeToken(input.category);
+  const rawDomain = normalizeToken(input.domain);
+  const categoryWasProvided = rawCategory.length > 0;
+  const categoryIsKnown =
+    rawCategory in CATEGORIES ||
+    rawCategory.includes("infra") ||
+    rawCategory.includes("decision") ||
+    rawCategory.includes("operation") ||
+    rawCategory.includes("runbook") ||
+    rawCategory.includes("owner") ||
+    rawCategory.includes("people") ||
+    rawCategory.includes("product") ||
+    rawCategory.includes("domain") ||
+    rawCategory.includes("repo") ||
+    rawCategory.includes("code");
+  if (categoryWasProvided && !categoryIsKnown) {
+    return DECAY_DEFAULT_HALF_LIFE;
+  }
+
+  const canonicalCategory = normalizeCategory(input.category);
+  const canonicalDomain = normalizeDomain(input.domain);
+
+  return (
+    DECAY_HALF_LIFE[`${canonicalCategory}.${canonicalDomain}`] ??
+    DECAY_HALF_LIFE[`${canonicalCategory}.${DEFAULT_DOMAIN}`] ??
+    DECAY_DEFAULT_HALF_LIFE
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Validation helpers for tool schemas
+// ---------------------------------------------------------------------------
+
+export function categoryValues(): NonEmptyStringArray {
+  return Object.keys(CATEGORIES) as NonEmptyStringArray;
+}
+
+export function canonicalCategoryValues(): NonEmptyStringArray {
+  return Object.keys(CATEGORIES) as NonEmptyStringArray;
+}
+
+export function domainValues(): NonEmptyStringArray {
+  return Object.keys(DOMAINS) as NonEmptyStringArray;
+}
+
+export function canonicalDomainValues(): NonEmptyStringArray {
+  return Object.keys(DOMAINS) as NonEmptyStringArray;
+}
+
+export function kindValues(): NonEmptyStringArray {
+  return Object.keys(KINDS) as NonEmptyStringArray;
+}
+
+export function layerValues(): NonEmptyStringArray {
+  return Object.keys(LAYERS) as NonEmptyStringArray;
+}
+
+export function memorySubtypeValues(): NonEmptyStringArray {
+  return Object.values(MEMORY_SUBTYPES).flat() as NonEmptyStringArray;
+}
+
+export function memorySubtypeValuesForKind(kind: string | null | undefined): string[] {
+  return [...MEMORY_SUBTYPES[normalizeKind(kind)]];
+}
+
+export function sourceValues(): NonEmptyStringArray {
+  return Object.keys(SOURCES) as NonEmptyStringArray;
+}

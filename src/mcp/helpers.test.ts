@@ -16,6 +16,7 @@ import {
   isStale,
   buildFilter,
   formatFact,
+  MEMORY_RECALL_EXCLUDED_KINDS,
 } from "./helpers.js";
 import type { FactPayload, QdrantPoint } from "./types.js";
 
@@ -417,11 +418,11 @@ describe("buildFilter", () => {
   });
 
   it("adds domain filter", () => {
-    const result = buildFilter({ domain: "personal" });
+    const result = buildFilter({ domain: "software_engineering" });
     assert.ok(result);
     const domFilter = result.must.find((c) => c.key === "domain");
     assert.ok(domFilter);
-    assert.deepStrictEqual(domFilter.match, { value: "personal" });
+    assert.deepStrictEqual(domFilter.match, { value: "software_engineering" });
   });
 
   it("adds kind filter", () => {
@@ -430,6 +431,40 @@ describe("buildFilter", () => {
     const kindFilter = result.must.find((c) => c.key === "kind");
     assert.ok(kindFilter);
     assert.deepStrictEqual(kindFilter.match, { value: "summary" });
+  });
+
+  it("adds workspace filter", () => {
+    const result = buildFilter({ workspace_id: "platform" });
+    assert.ok(result);
+    const workspaceFilter = result.must.find((c) => c.key === "workspace_id");
+    assert.ok(workspaceFilter);
+    assert.deepStrictEqual(workspaceFilter.match, { value: "platform" });
+  });
+
+  it("can include legacy unscoped workspace facts", () => {
+    const result = buildFilter({ workspace_id: "default", includeLegacyWorkspace: true });
+    assert.ok(result);
+    assert.deepStrictEqual(result.should, [
+      { key: "workspace_id", match: { value: "default" } },
+      { is_empty: { key: "workspace_id" } },
+    ]);
+  });
+
+  it("can exclude telemetry from recall filters", () => {
+    const result = buildFilter({ excludeKinds: ["telemetry"] });
+    assert.ok(result);
+    assert.deepStrictEqual(result.must_not, [
+      { key: "kind", match: { value: "telemetry" } },
+    ]);
+  });
+
+  it("keeps telemetry excluded from memory recall even when kind is requested", () => {
+    const result = buildFilter({ kind: "telemetry", excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS });
+    assert.ok(result);
+    assert.ok(result.must.some((condition) => condition.key === "kind" && condition.match?.value === "telemetry"));
+    assert.deepStrictEqual(result.must_not, [
+      { key: "kind", match: { value: "telemetry" } },
+    ]);
   });
 
   it("adds entity filter (lowercased)", () => {
@@ -487,13 +522,14 @@ describe("buildFilter", () => {
       category: "infrastructure",
       domain: "work",
       kind: "fact",
+      workspace_id: "platform",
       entity: "redis",
       since: "2025-01-01T00:00:00Z",
       metadata: { source: "test" },
     });
     assert.ok(result);
-    // superseded (default) + category + domain + kind + entity + since + metadata
-    assert.strictEqual(result.must.length, 7);
+    // superseded (default) + category + domain + kind + workspace + entity + since + metadata
+    assert.strictEqual(result.must.length, 8);
   });
 });
 
@@ -533,16 +569,28 @@ describe("formatFact", () => {
     assert.ok(formatted.includes("rank: 0.723"));
   });
 
-  it("includes domain when not 'work'", () => {
-    const point = makePoint({}, { domain: "personal" });
+  it("includes domain when not the default domain profile", () => {
+    const point = makePoint({}, { domain: "product_strategy" });
     const formatted = formatFact(point);
-    assert.ok(formatted.includes("domain: personal"));
+    assert.ok(formatted.includes("domain: product_strategy"));
   });
 
-  it("does not include domain when 'work'", () => {
-    const point = makePoint({}, { domain: "work" });
+  it("does not include the default domain profile", () => {
+    const point = makePoint({}, { domain: "software_engineering" });
     const formatted = formatFact(point);
     assert.ok(!formatted.includes("domain:"));
+  });
+
+  it("includes ontology routing fields when present", () => {
+    const point = makePoint({}, {
+      memory_subtype: "episode",
+      workstream_key: "task-123",
+      episode_id: "session-1:0-10",
+    });
+    const formatted = formatFact(point);
+    assert.ok(formatted.includes("subtype: episode"));
+    assert.ok(formatted.includes("workstream: task-123"));
+    assert.ok(formatted.includes("episode: session-1:0-10"));
   });
 
   it("includes kind when not 'fact'", () => {
@@ -577,5 +625,26 @@ describe("formatFact", () => {
     const point = makePoint({}, { verification_count: 2 });
     const formatted = formatFact(point);
     assert.ok(formatted.includes("verified: 2x"));
+  });
+
+  it("includes non-default workspace and redaction metadata", () => {
+    const point = makePoint({}, {
+      workspace_id: "platform",
+      redaction: {
+        redacted: true,
+        summary: "email:1",
+        matches: [{ type: "email", count: 1 }],
+      },
+    });
+    const formatted = formatFact(point);
+    assert.ok(formatted.includes("workspace: platform"));
+    assert.ok(formatted.includes("redacted: email:1"));
+  });
+
+  it("includes feedback counts", () => {
+    const point = makePoint({}, { useful_count: 2, not_useful_count: 1 });
+    const formatted = formatFact(point);
+    assert.ok(formatted.includes("useful: 2x"));
+    assert.ok(formatted.includes("not useful: 1x"));
   });
 });
