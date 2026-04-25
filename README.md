@@ -86,13 +86,6 @@ Raw fact accumulation creates noise. bikky keeps the knowledge store clean autom
 - **Distillation** — recurring patterns across sessions consolidate into higher-level insights
 - **Entity graph** — relationships between concepts are inferred for richer recall
 
-### Ranking formula
-
-```
-(vectorScore × 0.55 + freshness × 0.15 + reinforcement × 0.1 + importance × 0.1)
-  × (0.7 + 0.3 × confidenceDecay)
-```
-
 ---
 
 ## Web UI
