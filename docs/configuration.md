@@ -10,6 +10,10 @@ Config lives at `~/.bikky/config.json`. Resolution order: **defaults → config 
 | `qdrant_api_key` | `QDRANT_API_KEY` | *none — must be set* | Qdrant API key from cluster dashboard |
 | `collection` | `BIKKY_COLLECTION` | `bikky` | Collection name. Change only if running multiple instances |
 
+## Ontology scope fields
+
+Bikky's ontology includes optional scope payload fields such as `workspace_id`, `repo`, `branch`, `task_key`, `workstream_key`, and `episode_id`. These fields can be supplied through MCP calls or daemon-generated records where available; task 243 does not add workspace, redaction, or telemetry configuration sections.
+
 ## Embedding & LLM providers
 
 Both `embedding.provider` and `llm.provider` accept exactly one of three values:
@@ -119,14 +123,38 @@ Both `embedding.provider` and `llm.provider` accept exactly one of three values:
 
 ## Daemon settings
 
+The daemon owns memory lifecycle work: it extracts ontology-v2 facts, writes lightweight session indexes, captures coherent episode summaries, and distills longer-lived patterns when consolidation is enabled.
+
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `daemon.tick_interval_sec` | `5` | Seconds between daemon loop ticks |
 | `daemon.extract_every_sec` | `300` | Seconds between extraction runs |
-| `daemon.extract_min_events` | `5` | Minimum session events before triggering extraction |
-| `daemon.consolidation_enabled` | `true` | Auto-distill session summaries into patterns |
+| `daemon.extract_min_events` | `10` | Minimum session events before triggering extraction |
+| `daemon.consolidation_enabled` | `true` | Auto-distill daemon-generated session summaries into patterns |
 | `daemon.relation_inference_enabled` | `true` | Infer entity relationships via LLM |
 | `daemon.staleness_threshold_days` | `30` | Days before a fact is flagged as stale |
+
+## Memory ontology
+
+New daemon captures use ontology v2:
+
+```text
+workspace -> domain -> repo/project/surface -> workstream -> episode -> memory objects
+```
+
+`domain` is an activity/knowledge profile, not a work/personal flag. The initial canonical domains are:
+
+| Domain | Purpose |
+|--------|---------|
+| `software_engineering` | Default for coding-agent captures: repos, code, infrastructure, releases, incidents |
+| `product_strategy` | Roadmap, positioning, experiments, customer insight, product decisions |
+| `business_operations` | Company processes, vendors, compliance, obligations, recurring workflows |
+| `research` | Source-backed investigation, hypotheses, contradictions, synthesis |
+| `personal_productivity` | Individual goals, routines, preferences, projects, habits |
+
+For `software_engineering`, canonical categories are `codebase`, `infrastructure`, `operations`, `decisions`, `product_domain`, `projects`, `people`, `preferences`, and `observations`.
+
+`kind` stays small (`fact`, `summary`, `distilled`, `relation`, `telemetry`). More specific shape lives in `memory_subtype`, such as `codebase_map`, `architecture_decision`, `episode`, `workstream`, or `failure_mode`.
 
 ## Watcher settings
 
@@ -136,3 +164,7 @@ Both `embedding.provider` and `llm.provider` accept exactly one of three values:
 | `watchers.copilot.path` | `~/.copilot/session-state` | Path to Copilot session directory |
 | `watchers.claude.enabled` | `false` | Watch Claude Code project logs |
 | `watchers.claude.path` | `~/.claude/projects` | Path to Claude Code projects directory |
+
+## Agent integration templates
+
+Run `bikky templates` to print all MCP client snippets, or `bikky templates cursor` / `bikky templates codex` for one target. See [docs/integrations.md](integrations.md).
