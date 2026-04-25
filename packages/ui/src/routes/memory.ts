@@ -53,7 +53,7 @@ memoryRoutes.get("/search", async (c) => {
   if (!q) return c.json({ error: "Missing query parameter 'q'" }, 400);
 
   if (!isEmbeddingAvailable()) {
-    return c.json({ error: "Semantic search unavailable — embedding provider is bedrock. Configure Ollama or OpenAI." }, 501);
+    return c.json({ error: "Semantic search unavailable — the configured embedding provider is not browser-compatible. Configure ollama, openai, or portkey." }, 501);
   }
 
   const qdrant = createQdrantClient();
@@ -174,7 +174,7 @@ memoryRoutes.post("/facts", async (c) => {
   }
 
   if (!isEmbeddingAvailable()) {
-    return c.json({ error: "Creating facts requires an embedding provider (Ollama or OpenAI)." }, 501);
+    return c.json({ error: "Creating facts requires a browser-compatible embedding provider (ollama, openai, or portkey)." }, 501);
   }
 
   const qdrant = createQdrantClient();

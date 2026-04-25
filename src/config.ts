@@ -24,19 +24,26 @@ export const PID_PATH = path.join(STATE_DIR, "daemon.pid");
 // ---------------------------------------------------------------------------
 
 export interface EmbeddingConfig {
-  provider: "ollama" | "openai" | "bedrock";
+  /** Provider name as registered in the embedding registry. */
+  provider: string;
   model: string;
   dimensions: number;
   base_url: string;
   api_key: string | null;
+  /** Provider-specific extras (e.g. portkey virtual_key, bedrock region). */
+  extra?: Record<string, string>;
 }
 
 export interface LLMConfig {
-  provider: "ollama" | "openai" | "bedrock";
+  /** Provider name as registered in the inference registry. */
+  provider: string;
   model: string;
   base_url: string;
   api_key: string | null;
-  bedrock_region: string;
+  /** Optional fallback provider name. */
+  fallback_provider?: string | null;
+  /** Provider-specific extras. */
+  extra?: Record<string, string>;
 }
 
 export interface DaemonConfig {
@@ -87,13 +94,15 @@ const DEFAULTS: BikkyConfig = {
     dimensions: 1024,
     base_url: "http://localhost:11434",
     api_key: null,
+    extra: {},
   },
   llm: {
     provider: "ollama",
     model: "qwen2.5:7b",
     base_url: "http://localhost:11434",
     api_key: null,
-    bedrock_region: "us-east-1",
+    fallback_provider: null,
+    extra: {},
   },
   daemon: {
     tick_interval_sec: 5,
@@ -166,20 +175,41 @@ export function loadConfig(): BikkyConfig {
   if (process.env.BIKKY_COLLECTION) config.collection = process.env.BIKKY_COLLECTION;
 
   // Embedding env overrides
-  if (process.env.EMBEDDING_PROVIDER) config.embedding.provider = process.env.EMBEDDING_PROVIDER as EmbeddingConfig["provider"];
+  if (process.env.EMBEDDING_PROVIDER) config.embedding.provider = process.env.EMBEDDING_PROVIDER;
   if (process.env.EMBEDDING_MODEL) config.embedding.model = process.env.EMBEDDING_MODEL;
   if (process.env.EMBEDDING_BASE_URL) config.embedding.base_url = process.env.EMBEDDING_BASE_URL;
   if (process.env.EMBEDDING_DIMENSIONS) config.embedding.dimensions = parseInt(process.env.EMBEDDING_DIMENSIONS, 10);
   if (process.env.OPENAI_API_KEY) config.embedding.api_key = process.env.OPENAI_API_KEY;
+  // Generic provider-extras: BIKKY_EMBEDDING_EXTRA_<KEY>=value
+  config.embedding.extra = config.embedding.extra ?? {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith("BIKKY_EMBEDDING_EXTRA_") && typeof v === "string") {
+      config.embedding.extra[k.slice("BIKKY_EMBEDDING_EXTRA_".length).toLowerCase()] = v;
+    }
+  }
 
   // LLM env overrides
-  if (process.env.LLM_PROVIDER) config.llm.provider = process.env.LLM_PROVIDER as LLMConfig["provider"];
+  if (process.env.LLM_PROVIDER) config.llm.provider = process.env.LLM_PROVIDER;
   if (process.env.LLM_MODEL) config.llm.model = process.env.LLM_MODEL;
   if (process.env.LLM_BASE_URL) config.llm.base_url = process.env.LLM_BASE_URL;
   if (process.env.OPENAI_API_KEY && !config.llm.api_key) config.llm.api_key = process.env.OPENAI_API_KEY;
-  if (process.env.AWS_BEDROCK_REGION) config.llm.bedrock_region = process.env.AWS_BEDROCK_REGION;
-  if (process.env.AWS_REGION && !process.env.AWS_BEDROCK_REGION) config.llm.bedrock_region = process.env.AWS_REGION;
+  if (process.env.LLM_FALLBACK_PROVIDER) config.llm.fallback_provider = process.env.LLM_FALLBACK_PROVIDER;
   if (process.env.AWS_PROFILE) config.aws_profile = process.env.AWS_PROFILE;
+  // Generic provider-extras: BIKKY_LLM_EXTRA_<KEY>=value
+  config.llm.extra = config.llm.extra ?? {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k.startsWith("BIKKY_LLM_EXTRA_") && typeof v === "string") {
+      config.llm.extra[k.slice("BIKKY_LLM_EXTRA_".length).toLowerCase()] = v;
+    }
+  }
+  // Convenience: forward AWS_BEDROCK_REGION / AWS_REGION into llm.extra.region
+  // and embedding.extra.region so the bedrock providers find them without
+  // requiring users to set BIKKY_LLM_EXTRA_REGION explicitly.
+  const awsRegion = process.env.AWS_BEDROCK_REGION ?? process.env.AWS_REGION;
+  if (awsRegion) {
+    if (!config.llm.extra.region) config.llm.extra.region = awsRegion;
+    if (!config.embedding.extra.region) config.embedding.extra.region = awsRegion;
+  }
 
   // Qdrant client tuning env overrides
   if (process.env.QDRANT_TIMEOUT_MS) {

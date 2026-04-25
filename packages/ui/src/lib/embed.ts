@@ -1,52 +1,48 @@
 /**
  * Lightweight embedding client for @bikky/ui.
- * Supports Ollama and OpenAI via HTTP — no AWS SDK needed.
- * Bedrock users should configure Ollama or OpenAI as the embedding provider.
+ *
+ * Dispatches via the UI provider registry (./embedding/registry). Adding a new
+ * provider is a single file under ./embedding/providers/ — no edits here.
  */
 
 import { loadConfig } from "./config.js";
+import { getUIEmbeddingProvider } from "./embedding/index.js";
+import type { ResolvedUIEmbeddingConfig } from "./embedding/index.js";
 
-interface EmbeddingResponse {
-  data: Array<{ embedding: number[] }>;
+function resolveCfg(): { provider: ReturnType<typeof getUIEmbeddingProvider>; cfg: ResolvedUIEmbeddingConfig } {
+  const cfg = loadConfig();
+  const provider = getUIEmbeddingProvider(cfg.embedding.provider);
+  return {
+    provider,
+    cfg: {
+      provider: cfg.embedding.provider,
+      model: cfg.embedding.model,
+      baseUrl: cfg.embedding.base_url.replace(/\/+$/, ""),
+      apiKey: cfg.embedding.api_key,
+      extra: cfg.embedding.extra ?? {},
+    },
+  };
 }
 
-let _initialized = false;
-
 export function isEmbeddingAvailable(): boolean {
-  const cfg = loadConfig();
-  if (cfg.embedding.provider === "bedrock") return false;
-  return true;
+  const { provider } = resolveCfg();
+  return Boolean(provider?.browserCompatible);
 }
 
 export async function embed(text: string): Promise<number[]> {
-  const cfg = loadConfig();
-
-  if (cfg.embedding.provider === "bedrock") {
+  const { provider, cfg } = resolveCfg();
+  if (!provider) {
     throw new Error(
-      "Bedrock embeddings require AWS SDK. Configure Ollama or OpenAI as embedding provider for the UI.",
+      `Embedding provider "${cfg.provider}" is not available in the UI. ` +
+      `Configure one of the registered UI providers (e.g. ollama, openai, portkey).`,
     );
   }
-
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (cfg.embedding.provider === "openai" && cfg.embedding.api_key) {
-    headers["Authorization"] = `Bearer ${cfg.embedding.api_key}`;
+  if (!provider.browserCompatible) {
+    throw new Error(
+      `Embedding provider "${provider.name}" is not browser-compatible. ` +
+      `Configure ollama, openai, or portkey for the UI.`,
+    );
   }
-
-  const baseUrl = cfg.embedding.base_url.replace(/\/+$/, "");
-  const resp = await fetch(`${baseUrl}/v1/embeddings`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ model: cfg.embedding.model, input: text }),
-  });
-
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => "");
-    throw new Error(`Embedding failed [${cfg.embedding.provider}/${cfg.embedding.model}] (${resp.status}): ${body.slice(0, 200)}`);
-  }
-
-  const data = (await resp.json()) as EmbeddingResponse;
-  const first = data.data[0];
-  if (!first) throw new Error("Embedding response missing data");
-  _initialized = true;
-  return first.embedding;
+  return provider.embed(text, cfg);
 }
+
