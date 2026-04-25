@@ -11,6 +11,16 @@ import { loadConfig } from "../config.js";
 import { embed, initEmbedding, getEmbeddingConfig } from "../llm/index.js";
 import type { InitEmbeddingInput } from "../llm/index.js";
 import { QdrantClient, type QdrantLogLevel } from "../lib/qdrant-client.js";
+import {
+  DEFAULT_DOMAIN,
+  QDRANT_INDEXES,
+  categoryForMemorySubtype,
+  layerForMemorySubtype,
+  normalizeCategory,
+  normalizeDomain,
+  normalizeKind,
+  validateMemorySubtype,
+} from "../mcp/taxonomy.js";
 
 // ---------------------------------------------------------------------------
 // Types (local)
@@ -23,6 +33,10 @@ export interface QdrantPayload {
   category: string;
   domain: string;
   kind: string;
+  layer?: string | null;
+  memory_subtype?: string | null;
+  workspace_id?: string;
+  actor_id?: string;
   entities: string[];
   source: string;
   confidence: number;
@@ -34,7 +48,26 @@ export interface QdrantPayload {
   superseded_at: string | null;
   created_at: string;
   updated_at: string;
-  metadata: Record<string, string>;
+  metadata: Record<string, string | number | boolean | null>;
+  episode_id?: string | null;
+  workstream_key?: string | null;
+  task_key?: string | null;
+  repo?: string | null;
+  branch?: string | null;
+  surface?: string | null;
+  issue_id?: string | null;
+  pr_id?: string | null;
+  source_event_ids?: string[];
+  source_fact_ids?: string[];
+  source_episode_ids?: string[];
+  prompt_version?: string | null;
+  capture_policy_version?: string | null;
+  review_status?: string | null;
+  volatility?: string | null;
+  valid_from?: string | null;
+  expires_at?: string | null;
+  quality_score?: number | null;
+  confidence_reason?: string | null;
   from_entity?: string;
   relation_type?: string;
   to_entity?: string;
@@ -45,12 +78,35 @@ export interface StoreFact {
   category: string;
   domain?: string;
   kind?: string;
+  layer?: string | null;
+  memory_subtype?: string | null;
   entities: string[];
   source?: string;
   confidence?: number;
   importance?: number;
   content_hash: string;
-  metadata?: Record<string, string>;
+  workspace_id?: string;
+  actor_id?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  episode_id?: string | null;
+  workstream_key?: string | null;
+  task_key?: string | null;
+  repo?: string | null;
+  branch?: string | null;
+  surface?: string | null;
+  issue_id?: string | null;
+  pr_id?: string | null;
+  source_event_ids?: string[];
+  source_fact_ids?: string[];
+  source_episode_ids?: string[];
+  prompt_version?: string | null;
+  capture_policy_version?: string | null;
+  review_status?: string | null;
+  volatility?: string | null;
+  valid_from?: string | null;
+  expires_at?: string | null;
+  quality_score?: number | null;
+  confidence_reason?: string | null;
   relation?: { from: string; type: string; to: string } | null;
 }
 
@@ -81,6 +137,7 @@ export interface QdrantSearchFilters {
   since?: string;
   domain?: string;
   source?: string;
+  workspaceId?: string;
 }
 
 export interface QdrantScrollFilters {
@@ -163,6 +220,16 @@ const init = (): boolean => {
 
 const isReady = (): boolean => !!(qdrantUrl && qdrantApiKey && client);
 
+const ensureCollection = async (): Promise<void> => {
+  if (!client) {
+    throw new Error("Qdrant client not initialized — call init() first");
+  }
+  const embCfg = getEmbeddingConfig();
+  await client.ensureCollection(embCfg.dimensions, QDRANT_INDEXES);
+  logFn("INFO", `Qdrant collection '${collection}' ready (${QDRANT_INDEXES.length} indexes)`);
+};
+
+
 // ---------------------------------------------------------------------------
 // HTTP requests
 // ---------------------------------------------------------------------------
@@ -205,6 +272,9 @@ const searchFacts = async (
   }
   if (filters.source) {
     must.push({ key: "source", match: { value: filters.source } });
+  }
+  if (filters.workspaceId) {
+    must.push({ key: "workspace_id", match: { value: filters.workspaceId } });
   }
 
   const result = await qdrantRequest("POST", `/collections/${collection}/points/search`, {
@@ -251,7 +321,6 @@ const scrollFacts = async (
   if (filters.domain) {
     must.push({ key: "domain", match: { value: filters.domain } });
   }
-
   const result = await qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
     filter: { must },
     limit,
@@ -274,16 +343,26 @@ const scrollFacts = async (
 // ---------------------------------------------------------------------------
 
 const storeFact = async (fact: StoreFact): Promise<string> => {
+  const normalizedKind = normalizeKind(fact.kind);
+  const normalizedSubtype = validateMemorySubtype(normalizedKind, fact.memory_subtype);
+  const normalizedCategory = normalizedSubtype
+    ? categoryForMemorySubtype(normalizedSubtype) ?? normalizeCategory(fact.category)
+    : normalizeCategory(fact.category);
+  const normalizedDomain = normalizeDomain(fact.domain ?? DEFAULT_DOMAIN);
+  const normalizedLayer = fact.layer ?? (normalizedSubtype ? layerForMemorySubtype(normalizedSubtype) : null);
   const vector = await embed(fact.content);
   const now = new Date().toISOString();
   const id = randomUUID();
-
   const payload: QdrantPayload = {
     content: fact.content,
-    category: fact.category,
-    domain: fact.domain || "work",
-    kind: fact.kind || "fact",
-    entities: fact.entities || [],
+    category: normalizedCategory,
+    domain: normalizedDomain,
+    kind: normalizedKind,
+    ...(normalizedLayer ? { layer: normalizedLayer } : {}),
+    ...(normalizedSubtype ? { memory_subtype: normalizedSubtype } : {}),
+    ...(fact.workspace_id ? { workspace_id: fact.workspace_id } : {}),
+    ...(fact.actor_id ? { actor_id: fact.actor_id } : {}),
+    entities: (fact.entities || []).map((entity) => entity.toLowerCase()),
     source: fact.source || "daemon",
     confidence: fact.confidence ?? 0.7,
     importance: fact.importance ?? 0.5,
@@ -295,8 +374,26 @@ const storeFact = async (fact: StoreFact): Promise<string> => {
     created_at: now,
     updated_at: now,
     metadata: fact.metadata || {},
+    ...(fact.episode_id ? { episode_id: fact.episode_id } : {}),
+    ...(fact.workstream_key ? { workstream_key: fact.workstream_key } : {}),
+    ...(fact.task_key ? { task_key: fact.task_key } : {}),
+    ...(fact.repo ? { repo: fact.repo } : {}),
+    ...(fact.branch ? { branch: fact.branch } : {}),
+    ...(fact.surface ? { surface: fact.surface } : {}),
+    ...(fact.issue_id ? { issue_id: fact.issue_id } : {}),
+    ...(fact.pr_id ? { pr_id: fact.pr_id } : {}),
+    ...(fact.source_event_ids ? { source_event_ids: fact.source_event_ids } : {}),
+    ...(fact.source_fact_ids ? { source_fact_ids: fact.source_fact_ids } : {}),
+    ...(fact.source_episode_ids ? { source_episode_ids: fact.source_episode_ids } : {}),
+    ...(fact.prompt_version ? { prompt_version: fact.prompt_version } : {}),
+    ...(fact.capture_policy_version ? { capture_policy_version: fact.capture_policy_version } : {}),
+    ...(fact.review_status ? { review_status: fact.review_status } : {}),
+    ...(fact.volatility ? { volatility: fact.volatility } : {}),
+    ...(fact.valid_from ? { valid_from: fact.valid_from } : {}),
+    ...(fact.expires_at ? { expires_at: fact.expires_at } : {}),
+    ...(fact.quality_score != null ? { quality_score: fact.quality_score } : {}),
+    ...(fact.confidence_reason ? { confidence_reason: fact.confidence_reason } : {}),
   };
-
   // Add relation fields if present
   if (fact.relation) {
     payload.from_entity = fact.relation.from;
@@ -308,7 +405,7 @@ const storeFact = async (fact: StoreFact): Promise<string> => {
     points: [{ id, vector, payload }],
   });
 
-  logFn("DEBUG", `Qdrant: stored fact ${id} [${fact.category}] ${fact.content.slice(0, 60)}`);
+  logFn("DEBUG", `Qdrant: stored fact ${id} [${normalizedCategory}] ${fact.content.slice(0, 60)}`);
   return id;
 };
 
@@ -342,16 +439,17 @@ const dedupCheck = async (
   content: string,
   contentHashVal: string,
   { exactThreshold = 0.92, supersedeThreshold = 0.80 }: DedupThresholds = {},
+  workspaceId?: string,
 ): Promise<DedupResult> => {
   // First: hash-based exact check (fast, no embedding)
   try {
+    const must: Record<string, unknown>[] = [
+      { key: "content_hash", match: { value: contentHashVal } },
+      { is_null: { key: "superseded_by" } },
+    ];
+    if (workspaceId) must.push({ key: "workspace_id", match: { value: workspaceId } });
     const hashResult = await qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
-      filter: {
-        must: [
-          { key: "content_hash", match: { value: contentHashVal } },
-          { is_null: { key: "superseded_by" } },
-        ],
-      },
+      filter: { must },
       limit: 1,
       with_payload: true,
     }) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
@@ -373,11 +471,11 @@ const dedupCheck = async (
   // Second: vector similarity check
   try {
     const vector = await embed(content);
+    const must: Record<string, unknown>[] = [{ is_null: { key: "superseded_by" } }];
+    if (workspaceId) must.push({ key: "workspace_id", match: { value: workspaceId } });
     const searchResult = await qdrantRequest("POST", `/collections/${collection}/points/search`, {
       vector,
-      filter: {
-        must: [{ is_null: { key: "superseded_by" } }],
-      },
+      filter: { must },
       limit: 1,
       with_payload: true,
     }) as { result?: Array<{ id: string; score: number; payload?: Partial<QdrantPayload> }> };
@@ -418,6 +516,7 @@ const dedupCheck = async (
 export {
   init,
   isReady,
+  ensureCollection,
   setLogger,
   setEmbeddingConfig,
   qdrantRequest,

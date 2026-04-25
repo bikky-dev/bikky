@@ -18,13 +18,7 @@ export interface McpToolResult {
 
 export interface CategoryDef {
   description: string;
-  extractionHint: string;
-  examples: Array<{
-    content: string;
-    entities: string[];
-    confidence: number;
-    importance: number;
-  }>;
+  examples: string[];
 }
 
 export interface AxisDef {
@@ -45,6 +39,7 @@ export interface QdrantFilterCondition {
   match?: { value?: string | number; any?: string[] };
   range?: { gte?: string; lte?: string };
   is_null?: { key: string };
+  is_empty?: { key: string };
 }
 
 export interface QdrantFilter {
@@ -84,6 +79,10 @@ export interface FactPayload {
   category: string;
   domain?: string;
   kind?: string;
+  layer?: string | null;
+  memory_subtype?: string | null;
+  workspace_id?: string;
+  actor_id?: string;
   entities: string[];
   source?: string;
   confidence: number;
@@ -93,11 +92,43 @@ export interface FactPayload {
   last_reinforced_at: string;
   last_verified_at?: string;
   verification_count?: number;
+  useful_count?: number;
+  not_useful_count?: number;
+  last_used_at?: string;
+  last_feedback_at?: string;
   superseded_by: string | null;
   superseded_at: string | null;
   created_at: string;
   updated_at: string;
-  metadata?: Record<string, string>;
+  metadata?: Record<string, string | number | boolean | null>;
+  episode_id?: string | null;
+  workstream_key?: string | null;
+  task_key?: string | null;
+  repo?: string | null;
+  branch?: string | null;
+  surface?: string | null;
+  issue_id?: string | null;
+  pr_id?: string | null;
+  source_event_ids?: string[];
+  source_fact_ids?: string[];
+  source_episode_ids?: string[];
+  prompt_version?: string | null;
+  capture_policy_version?: string | null;
+  review_status?: string | null;
+  volatility?: string | null;
+  valid_from?: string | null;
+  expires_at?: string | null;
+  quality_score?: number | null;
+  confidence_reason?: string | null;
+  owner_scope?: string | null;
+  visibility?: string | null;
+  audience?: string | null;
+  sensitivity?: string | null;
+  redaction?: {
+    redacted: boolean;
+    summary: string;
+    matches: Array<{ type: string; count: number }>;
+  };
 
   // Relation fields
   from_entity?: string;
@@ -114,6 +145,15 @@ export interface FactPayload {
   distilled_period_start?: string;
   distilled_period_end?: string;
   summary_count?: number;
+
+  // Telemetry fields
+  telemetry_type?: string;
+  event_session_id?: string;
+  recall_query?: string;
+  returned_fact_ids?: string[];
+  feedback_note?: string;
+  outcome?: string;
+  outcome_summary?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,10 +164,22 @@ export interface FilterParams {
   category?: string;
   domain?: string;
   kind?: string;
+  memory_subtype?: string;
+  workspace_id?: string;
+  includeLegacyWorkspace?: boolean;
+  actor_id?: string;
   entity?: string;
+  session_id?: string;
+  episode_id?: string;
+  workstream_key?: string;
+  task_key?: string;
+  repo?: string;
+  branch?: string;
+  review_status?: string;
   since?: string;
   until?: string;
   excludeSuperseded?: boolean;
+  excludeKinds?: string[];
   metadata?: Record<string, string>;
 }
 

@@ -1,5 +1,5 @@
 /**
- * MCP tool definitions — all 12 memory tools.
+ * MCP tool definitions for memory.
  */
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -14,10 +14,18 @@ import {
   categoryValues,
   domainValues,
   kindValues,
+  memorySubtypeValues,
   sourceValues,
+  DEFAULT_CATEGORY,
   DEFAULT_DOMAIN,
   DEFAULT_KIND,
   DEFAULT_SOURCE,
+  categoryForMemorySubtype,
+  layerForMemorySubtype,
+  normalizeCategory,
+  normalizeDomain,
+  normalizeKind,
+  validateMemorySubtype,
 } from "./taxonomy.js";
 import {
   contentHash,
@@ -26,6 +34,7 @@ import {
   computeCombinedScore,
   buildFilter,
   formatFact,
+  MEMORY_RECALL_EXCLUDED_KINDS,
 } from "./helpers.js";
 import {
   ready,
@@ -38,7 +47,6 @@ import {
   log,
   embed,
   getEmbeddingConfig,
-  chatComplete,
   qdrantReq,
   ensureCollection,
   qdrantUpsert,
@@ -67,6 +75,66 @@ function nowISO(): string {
 
 function newId(): string {
   return crypto.randomUUID();
+}
+
+interface WorkspaceScope {
+  workspaceId?: string;
+  actorId?: string;
+  includeLegacy: boolean;
+}
+
+interface RedactionResult {
+  text: string;
+  redacted: boolean;
+  summary: string;
+  matches: Array<{ type: string; count: number }>;
+}
+
+type RedactionSummary = Omit<RedactionResult, "text">;
+
+function redactionOptions(): { enabled: boolean; redactPii: boolean } {
+  return { enabled: false, redactPii: false };
+}
+
+function redactStorageText(text: string): RedactionResult {
+  return { text, redacted: false, summary: "none", matches: [] };
+}
+
+function combineRedactions(_items: RedactionResult[]): RedactionSummary {
+  return { redacted: false, summary: "none", matches: [] };
+}
+
+function resolveScope(workspaceId?: string, includeLegacyWorkspace = false): WorkspaceScope {
+  return {
+    workspaceId: workspaceId?.trim() || undefined,
+    includeLegacy: includeLegacyWorkspace,
+  };
+}
+
+function scopedFilter(scope: WorkspaceScope, extra: Parameters<typeof buildFilter>[0] = {}): QdrantFilter | undefined {
+  return buildFilter({
+    ...extra,
+    workspace_id: scope.workspaceId,
+    includeLegacyWorkspace: scope.includeLegacy,
+  });
+}
+
+function addWorkspacePayload(payload: Record<string, unknown>, scope: WorkspaceScope): void {
+  if (scope.workspaceId) payload["workspace_id"] = scope.workspaceId;
+  if (scope.actorId) payload["actor_id"] = scope.actorId;
+}
+
+function addRedactionPayload(_payload: Record<string, unknown>, _summary: RedactionSummary): void {
+  // Task 243 keeps storage pass-through; redaction policy is out of scope for this branch.
+}
+
+async function getPointForWorkspaceWrite(factId: string, _scope: WorkspaceScope): Promise<{ point?: QdrantPoint; error?: Record<string, unknown> }> {
+  const existing = await qdrantGetPoints([factId]);
+  const point = existing.result?.[0];
+  if (!point) {
+    return { error: { status: "not_found", fact_id: factId } };
+  }
+  return { point };
 }
 
 function requireReady(): McpToolResult | null {
@@ -106,7 +174,7 @@ function buildMemoryNudge(): string | null {
 /**
  * Entity-graph traversal for memory_recall.
  */
-async function graphTraversal(primaryResults: QdrantPoint[], limit: number): Promise<string[]> {
+async function graphTraversal(primaryResults: QdrantPoint[], limit: number, scope: WorkspaceScope): Promise<string[]> {
   try {
     const primaryEntities = new Set<string>();
     const primaryIds = new Set<string>();
@@ -121,23 +189,17 @@ async function graphTraversal(primaryResults: QdrantPoint[], limit: number): Pro
 
     const relatedEntities = new Set<string>();
     for (const entity of primaryEntities) {
-      const outgoing = await qdrantScroll({
-        must: [
-          { key: "from_entity", match: { value: entity } },
-          { is_null: { key: "superseded_by" } },
-        ],
-      }, 10).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
+      const outgoingFilter: QdrantFilter = scopedFilter(scope, { excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS }) ?? { must: [] };
+      outgoingFilter.must.push({ key: "from_entity", match: { value: entity } });
+      const outgoing = await qdrantScroll(outgoingFilter, 10).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
 
       for (const pt of (outgoing.result?.points ?? [])) {
         if (pt.payload.to_entity) relatedEntities.add(pt.payload.to_entity);
       }
 
-      const incoming = await qdrantScroll({
-        must: [
-          { key: "to_entity", match: { value: entity } },
-          { is_null: { key: "superseded_by" } },
-        ],
-      }, 10).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
+      const incomingFilter: QdrantFilter = scopedFilter(scope, { excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS }) ?? { must: [] };
+      incomingFilter.must.push({ key: "to_entity", match: { value: entity } });
+      const incoming = await qdrantScroll(incomingFilter, 10).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
 
       for (const pt of (incoming.result?.points ?? [])) {
         if (pt.payload.from_entity) relatedEntities.add(pt.payload.from_entity);
@@ -150,12 +212,9 @@ async function graphTraversal(primaryResults: QdrantPoint[], limit: number): Pro
     const relatedFacts: QdrantPoint[] = [];
     const maxPerEntity = Math.max(2, Math.floor(limit / relatedEntities.size));
     for (const entity of relatedEntities) {
-      const result = await qdrantScroll({
-        must: [
-          { key: "entities", match: { value: entity } },
-          { is_null: { key: "superseded_by" } },
-        ],
-      }, maxPerEntity).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
+      const filter: QdrantFilter = scopedFilter(scope, { excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS }) ?? { must: [] };
+      filter.must.push({ key: "entities", match: { value: entity } });
+      const result = await qdrantScroll(filter, maxPerEntity).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
 
       for (const pt of (result.result?.points ?? [])) {
         if (!primaryIds.has(pt.id)) {
@@ -330,12 +389,23 @@ export function registerTools(mcp: McpServer): void {
     {
       content: z.string().describe("The fact to store (atomic, single piece of knowledge)"),
       category: z.enum(categoryValues())
-        .describe("Topic: infrastructure, decisions, observation, preferences, projects, team"),
+        .describe("Subject matter: codebase, infrastructure, operations, decisions, product_domain, projects, people, preferences, observations"),
       entities: z.array(z.string()).describe("Related entities (lowercase, e.g. ['qdrant', 'platform'])"),
       domain: z.enum(domainValues()).default(DEFAULT_DOMAIN)
-        .describe("Life scope — work or personal"),
+        .describe("Activity profile — e.g. software_engineering, product_strategy, business_operations, research, personal_productivity"),
       kind: z.enum(kindValues()).default(DEFAULT_KIND)
         .describe("Knowledge form — fact, summary, distilled, relation"),
+      memory_subtype: z.enum(memorySubtypeValues()).optional()
+        .describe("Optional subtype within kind, such as codebase_map, episode, workstream, convention, or recall_event"),
+      workspace_id: z.string().optional()
+        .describe("Optional workspace namespace for team memory."),
+      episode_id: z.string().optional().describe("Optional coherent episode identifier"),
+      workstream_key: z.string().optional().describe("Optional durable workstream key"),
+      task_key: z.string().optional().describe("Optional task or issue key"),
+      repo: z.string().optional().describe("Optional repository or project surface"),
+      branch: z.string().optional().describe("Optional branch or working surface"),
+      review_status: z.enum(["candidate", "reviewed", "approved", "rejected"]).optional()
+        .describe("Optional review lifecycle status"),
       source: z.enum(sourceValues()).default(DEFAULT_SOURCE)
         .describe("Creator — agent, daemon, system, user"),
       confidence: z.number().min(0).max(1).default(0.9).describe("How certain (0.0-1.0)"),
@@ -349,23 +419,73 @@ export function registerTools(mcp: McpServer): void {
       metadata: z.record(z.string(), z.string()).optional()
         .describe("Optional key-value metadata. Stored with the fact and filterable via memory_recall."),
     },
-    async ({ content, category, entities, domain, kind, source, confidence, importance, supersedes, relation, metadata }): Promise<McpToolResult> => {
+    async ({
+      content,
+      category,
+      entities,
+      domain,
+      kind,
+      memory_subtype,
+      workspace_id,
+      episode_id,
+      workstream_key,
+      task_key,
+      repo,
+      branch,
+      review_status,
+      source,
+      confidence,
+      importance,
+      supersedes,
+      relation,
+      metadata,
+    }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       lastStoreTime = Date.now();
       const now = nowISO();
-      const hash = contentHash(category, content);
-      const normalizedEntities = entities.map((e) => e.toLowerCase());
+      const scope = resolveScope(workspace_id);
+      const normalizedKind = normalizeKind(kind);
+      let normalizedSubtype: string | null = null;
+      try {
+        normalizedSubtype = validateMemorySubtype(normalizedKind, memory_subtype);
+      } catch (e) {
+        return {
+          content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
+          isError: true,
+        };
+      }
+      const normalizedCategory = normalizedSubtype
+        ? categoryForMemorySubtype(normalizedSubtype) ?? normalizeCategory(category)
+        : normalizeCategory(category);
+      const normalizedDomain = normalizeDomain(domain);
+      const normalizedLayer = normalizedSubtype ? layerForMemorySubtype(normalizedSubtype) : null;
+      const redactedContent = redactStorageText(content);
+      const redactedEntities = entities.map((entity) => redactStorageText(entity));
+      const sanitizedEntities = redactedEntities.map((entity) => entity.text);
+      const redactedRelation = relation ? {
+        from: redactStorageText(relation.from),
+        type: redactStorageText(relation.type),
+        to: redactStorageText(relation.to),
+      } : null;
+      const redactionSummary = combineRedactions([
+        redactedContent,
+        ...redactedEntities,
+        ...(redactedRelation ? [redactedRelation.from, redactedRelation.type, redactedRelation.to] : []),
+      ]);
+      const hash = contentHash(normalizedCategory, redactedContent.text);
+      const normalizedEntities = sanitizedEntities.map((e) => e.toLowerCase());
+      const sanitizedRelation = redactedRelation ? {
+        from: redactedRelation.from.text,
+        type: redactedRelation.type.text,
+        to: redactedRelation.to.text,
+      } : null;
 
       // 1. Exact dedup via content hash
       try {
-        const existing = await qdrantScroll(
-          { must: [
-            { key: "content_hash", match: { value: hash } },
-            { is_null: { key: "superseded_by" } },
-          ] },
-          1,
-        );
+        const hashFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+        hashFilter.must.push({ key: "content_hash", match: { value: hash } });
+        const existing = await qdrantScroll(hashFilter, 1);
         const existingPoint = existing.result?.points?.[0];
         if (existingPoint) {
           const point = existingPoint;
@@ -389,19 +509,18 @@ export function registerTools(mcp: McpServer): void {
       }
 
       // 2. Generate embedding
-      const vector = await embed(content);
+      const vector = await embed(redactedContent.text);
 
       // 3. Semantic dedup
       let similarFacts: Array<{ id: string; content: string; score: number }> = [];
       let potentialConflicts: Array<{ id: string; content: string; category: string; similarity: number; shared_entities: string[] }> = [];
       try {
-        const filter = { must: [] as Array<Record<string, unknown>> };
+        const filter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
         if (normalizedEntities.length > 0) {
           filter.must.push({ key: "entities", match: { any: normalizedEntities } });
         }
-        filter.must.push({ is_null: { key: "superseded_by" } });
 
-        const results = await qdrantSearch(vector, filter.must.length > 0 ? filter as unknown as QdrantFilter : undefined, 3);
+        const results = await qdrantSearch(vector, filter, 3);
         const firstResult = results.result?.[0];
         if (results.result?.length > 0 && firstResult) {
           const topScore = firstResult.score ?? 0;
@@ -461,6 +580,10 @@ export function registerTools(mcp: McpServer): void {
       // 5. Supersede old fact if requested
       if (supersedes) {
         try {
+          const existing = await getPointForWorkspaceWrite(supersedes, scope);
+          if (existing.error) {
+            return { content: [{ type: "text", text: JSON.stringify(existing.error, null, 2) }], isError: true };
+          }
           await qdrantSetPayload([supersedes], {
             superseded_by: factId,
             superseded_at: now,
@@ -472,10 +595,10 @@ export function registerTools(mcp: McpServer): void {
 
       // 6. Insert new fact
       const payload: Record<string, unknown> = {
-        content,
-        category,
-        domain,
-        kind,
+        content: redactedContent.text,
+        category: normalizedCategory,
+        domain: normalizedDomain,
+        kind: normalizedKind,
         entities: normalizedEntities,
         source,
         confidence,
@@ -488,6 +611,20 @@ export function registerTools(mcp: McpServer): void {
         created_at: now,
         updated_at: now,
       };
+      if (normalizedSubtype) {
+        payload["memory_subtype"] = normalizedSubtype;
+      }
+      if (normalizedLayer) {
+        payload["layer"] = normalizedLayer;
+      }
+      if (episode_id) payload["episode_id"] = episode_id;
+      if (workstream_key) payload["workstream_key"] = workstream_key;
+      if (task_key) payload["task_key"] = task_key;
+      if (repo) payload["repo"] = repo;
+      if (branch) payload["branch"] = branch;
+      if (review_status) payload["review_status"] = review_status;
+      addWorkspacePayload(payload, scope);
+      addRedactionPayload(payload, redactionSummary);
       if (metadata && Object.keys(metadata).length > 0) {
         payload["metadata"] = metadata;
       }
@@ -495,16 +632,17 @@ export function registerTools(mcp: McpServer): void {
 
       // 7. Insert relation point if provided
       let relationId: string | null = null;
-      if (relation) {
+      if (sanitizedRelation) {
         relationId = newId();
-        const relContent = `${relation.from} ${relation.type} ${relation.to}`;
+        const relContent = `${sanitizedRelation.from} ${sanitizedRelation.type} ${sanitizedRelation.to}`;
         const relVector = await embed(relContent);
         const relPayload: Record<string, unknown> = {
           content: relContent,
-          category,
-          domain,
+          category: normalizedCategory,
+          domain: normalizedDomain,
           kind: "relation",
-          entities: [relation.from.toLowerCase(), relation.to.toLowerCase()],
+          layer: "memory_object",
+          entities: [sanitizedRelation.from.toLowerCase(), sanitizedRelation.to.toLowerCase()],
           source,
           confidence,
           content_hash: contentHash("relation", relContent),
@@ -514,18 +652,22 @@ export function registerTools(mcp: McpServer): void {
           superseded_at: null,
           created_at: now,
           updated_at: now,
-          from_entity: relation.from.toLowerCase(),
-          relation_type: relation.type.toLowerCase(),
-          to_entity: relation.to.toLowerCase(),
+          from_entity: sanitizedRelation.from.toLowerCase(),
+          relation_type: sanitizedRelation.type.toLowerCase(),
+          to_entity: sanitizedRelation.to.toLowerCase(),
         };
+        addWorkspacePayload(relPayload, scope);
+        addRedactionPayload(relPayload, redactionSummary);
         await qdrantUpsert(relationId, relVector, relPayload);
       }
 
       const result: Record<string, unknown> = {
         action: "inserted",
         fact_id: factId,
+        workspace_id: scope.workspaceId,
       };
       if (relationId) result["relation_id"] = relationId;
+      if (redactionSummary.redacted) result["redaction"] = redactionSummary;
       if (similarFacts.length > 0) result["similar_facts"] = similarFacts;
       if (potentialConflicts.length > 0) {
         result["potential_conflicts"] = potentialConflicts;
@@ -547,9 +689,19 @@ export function registerTools(mcp: McpServer): void {
     {
       query: z.string().describe("What to search for (natural language)"),
       category: z.string().optional().describe("Filter by category"),
-      domain: z.string().optional().describe("Filter by domain (work or personal)"),
+      domain: z.string().optional().describe("Filter by domain activity profile"),
       kind: z.string().optional().describe("Filter by kind (fact, summary, distilled, relation)"),
+      memory_subtype: z.string().optional().describe("Filter by memory subtype"),
+      workspace_id: z.string().optional().describe("Filter by optional workspace namespace."),
+      include_legacy_workspace: z.boolean().optional()
+        .describe("Include legacy facts without workspace_id in this workspace query."),
       entity: z.string().optional().describe("Filter by entity name"),
+      episode_id: z.string().optional().describe("Filter by coherent episode ID"),
+      workstream_key: z.string().optional().describe("Filter by durable workstream key"),
+      task_key: z.string().optional().describe("Filter by task or issue key"),
+      repo: z.string().optional().describe("Filter by repository or project surface"),
+      branch: z.string().optional().describe("Filter by branch or working surface"),
+      review_status: z.string().optional().describe("Filter by review lifecycle status"),
       since: z.string().optional().describe("Only facts created after this ISO date"),
       until: z.string().optional().describe("Only facts created before this ISO date"),
       limit: z.number().optional().default(10).describe("Max results (default 10)"),
@@ -557,12 +709,62 @@ export function registerTools(mcp: McpServer): void {
       metadata_filter: z.record(z.string(), z.string()).optional()
         .describe("Filter by metadata key-value pairs. All pairs must match."),
     },
-    async ({ query, category, domain, kind, entity, since, until, limit, graph_depth, metadata_filter }): Promise<McpToolResult> => {
+    async ({
+      query,
+      category,
+      domain,
+      kind,
+      memory_subtype,
+      workspace_id,
+      include_legacy_workspace,
+      entity,
+      episode_id,
+      workstream_key,
+      task_key,
+      repo,
+      branch,
+      review_status,
+      since,
+      until,
+      limit,
+      graph_depth,
+      metadata_filter,
+    }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const requestedLimit = limit ?? 10;
-      const vector = await embed(query);
-      const filter = buildFilter({ category, domain, kind, entity, since, until, metadata: metadata_filter });
+      const scope = resolveScope(workspace_id, include_legacy_workspace);
+      const redactedQuery = redactStorageText(query);
+      const vector = await embed(redactedQuery.text);
+      const normalizedKind = kind ? normalizeKind(kind) : undefined;
+      let normalizedSubtype: string | undefined;
+      if (memory_subtype) {
+        try {
+          normalizedSubtype = validateMemorySubtype(normalizedKind, memory_subtype) ?? undefined;
+        } catch (e) {
+          return {
+            content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }],
+            isError: true,
+          };
+        }
+      }
+      const filter = scopedFilter(scope, {
+        category: category ? normalizeCategory(category) : undefined,
+        domain: domain ? normalizeDomain(domain) : undefined,
+        kind: normalizedKind,
+        memory_subtype: normalizedSubtype,
+        entity,
+        episode_id,
+        workstream_key,
+        task_key,
+        repo,
+        branch,
+        review_status,
+        since,
+        until,
+        metadata: metadata_filter,
+        excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS,
+      });
       const results = await qdrantSearch(vector, filter, requestedLimit * 2);
 
       if (!results.result?.length) {
@@ -579,7 +781,7 @@ export function registerTools(mcp: McpServer): void {
       const lines = ranked.map((r) => formatFact(r));
 
       if ((graph_depth ?? 0) >= 1) {
-        const relatedLines = await graphTraversal(ranked, requestedLimit);
+        const relatedLines = await graphTraversal(ranked, requestedLimit, scope);
         if (relatedLines.length > 0) {
           lines.push("", "── Related (1-hop) ──");
           lines.push(...relatedLines);
@@ -600,36 +802,27 @@ export function registerTools(mcp: McpServer): void {
     {
       name: z.string().describe("Entity name (e.g. 'qdrant', 'platform')"),
       limit: z.number().optional().default(20).describe("Max facts to return"),
+      workspace_id: z.string().optional().describe("Filter by optional workspace namespace."),
+      include_legacy_workspace: z.boolean().optional()
+        .describe("Include legacy facts without workspace_id in this workspace query."),
     },
-    async ({ name, limit }): Promise<McpToolResult> => {
+    async ({ name, limit, workspace_id, include_legacy_workspace }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const entityName = name.toLowerCase();
+      const scope = resolveScope(workspace_id, include_legacy_workspace);
 
-      const facts = await qdrantScroll(
-        {
-          must: [
-            { key: "entities", match: { value: entityName } },
-            { is_null: { key: "superseded_by" } },
-          ],
-        },
-        limit ?? 20,
-      );
+      const factsFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+      factsFilter.must.push({ key: "entities", match: { value: entityName } });
+      const facts = await qdrantScroll(factsFilter, limit ?? 20);
 
-      const relationsFrom = await qdrantScroll(
-        { must: [
-          { key: "from_entity", match: { value: entityName } },
-          { is_null: { key: "superseded_by" } },
-        ] },
-        50,
-      );
-      const relationsTo = await qdrantScroll(
-        { must: [
-          { key: "to_entity", match: { value: entityName } },
-          { is_null: { key: "superseded_by" } },
-        ] },
-        50,
-      );
+      const fromFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+      fromFilter.must.push({ key: "from_entity", match: { value: entityName } });
+      const relationsFrom = await qdrantScroll(fromFilter, 50);
+
+      const toFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+      toFilter.must.push({ key: "to_entity", match: { value: entityName } });
+      const relationsTo = await qdrantScroll(toFilter, 50);
 
       const output: string[] = [];
 
@@ -680,18 +873,20 @@ export function registerTools(mcp: McpServer): void {
       relation_type: z.string().optional().describe("Filter by relation type (e.g. 'owns', 'uses', 'decided')"),
       direction: z.enum(["from", "to", "both"]).optional().default("both")
         .describe("Direction: 'from' (entity as source), 'to' (entity as target), 'both'"),
+      workspace_id: z.string().optional().describe("Filter by optional workspace namespace."),
+      include_legacy_workspace: z.boolean().optional()
+        .describe("Include legacy facts without workspace_id in this workspace query."),
     },
-    async ({ entity, relation_type, direction }): Promise<McpToolResult> => {
+    async ({ entity, relation_type, direction, workspace_id, include_legacy_workspace }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const entityName = entity.toLowerCase();
+      const scope = resolveScope(workspace_id, include_legacy_workspace);
       const results: QdrantPoint[] = [];
 
       if (direction === "from" || direction === "both") {
-        const filter = { must: [
-          { key: "from_entity", match: { value: entityName } },
-          { is_null: { key: "superseded_by" } },
-        ] as QdrantFilter["must"] };
+        const filter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+        filter.must.push({ key: "from_entity", match: { value: entityName } });
         if (relation_type) {
           filter.must.push({ key: "relation_type", match: { value: relation_type.toLowerCase() } });
         }
@@ -700,10 +895,8 @@ export function registerTools(mcp: McpServer): void {
       }
 
       if (direction === "to" || direction === "both") {
-        const filter = { must: [
-          { key: "to_entity", match: { value: entityName } },
-          { is_null: { key: "superseded_by" } },
-        ] as QdrantFilter["must"] };
+        const filter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+        filter.must.push({ key: "to_entity", match: { value: entityName } });
         if (relation_type) {
           filter.must.push({ key: "relation_type", match: { value: relation_type.toLowerCase() } });
         }
@@ -738,18 +931,30 @@ export function registerTools(mcp: McpServer): void {
     {
       fact_id: z.string().describe("ID of the fact to forget"),
       reason: z.string().describe("Why this fact is being superseded"),
+      workspace_id: z.string().optional().describe("Optional workspace namespace."),
     },
-    async ({ fact_id, reason }): Promise<McpToolResult> => {
+    async ({ fact_id, reason, workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const now = nowISO();
       try {
+        const scope = resolveScope(workspace_id);
+        const existing = await getPointForWorkspaceWrite(fact_id, scope);
+        if (existing.error) {
+          return { content: [{ type: "text", text: JSON.stringify(existing.error, null, 2) }], isError: true };
+        }
+        const redactedReason = redactStorageText(reason);
         await qdrantSetPayload([fact_id], {
-          superseded_by: `forgotten:${reason}`,
+          superseded_by: `forgotten:${redactedReason.text}`,
           superseded_at: now,
           updated_at: now,
         });
-        return { content: [{ type: "text", text: JSON.stringify({ status: "forgotten", fact_id, reason }) }] };
+        return { content: [{ type: "text", text: JSON.stringify({
+          status: "forgotten",
+          fact_id,
+          reason: redactedReason.text,
+          ...(redactedReason.redacted ? { redaction: redactedReason } : {}),
+        }) }] };
       } catch (e) {
         return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : String(e)}` }] };
       }
@@ -763,15 +968,20 @@ export function registerTools(mcp: McpServer): void {
     "Confirm a fact is still accurate. Resets the staleness clock and bumps verification count.",
     {
       fact_id: z.string().describe("ID of the fact to verify"),
+      workspace_id: z.string().optional().describe("Optional workspace namespace."),
     },
-    async ({ fact_id }): Promise<McpToolResult> => {
+    async ({ fact_id, workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const now = nowISO();
       try {
-        const existing = await qdrantGetPoints([fact_id]).catch(() => null);
+        const scope = resolveScope(workspace_id);
+        const writable = await getPointForWorkspaceWrite(fact_id, scope);
+        if (writable.error) {
+          return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
+        }
         let currentCount = 0;
-        const existingPt = existing?.result?.[0];
+        const existingPt = writable.point;
         if (existingPt) {
           currentCount = existingPt.payload.verification_count ?? 0;
         }
@@ -808,18 +1018,19 @@ export function registerTools(mcp: McpServer): void {
       fact_id: z.string().optional().describe("Fact ID (required for approve/reject/correct)"),
       reason: z.string().optional().describe("Reason for rejection"),
       corrected_content: z.string().optional().describe("Corrected fact text (for correct action)"),
+      workspace_id: z.string().optional().describe("Filter by optional workspace namespace."),
+      include_legacy_workspace: z.boolean().optional()
+        .describe("Include legacy facts without workspace_id in this workspace query."),
     },
-    async ({ limit, action, fact_id, reason, corrected_content }): Promise<McpToolResult> => {
+    async ({ limit, action, fact_id, reason, corrected_content, workspace_id, include_legacy_workspace }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
+      const scope = resolveScope(workspace_id, include_legacy_workspace);
 
       if (action === "list") {
-        const result = await qdrantScroll({
-          must: [
-            { key: "source", match: { value: "daemon" } },
-            { is_null: { key: "superseded_by" } },
-          ],
-        }, (limit ?? 10) * 2);
+        const filter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+        filter.must.push({ key: "source", match: { value: "daemon" } });
+        const result = await qdrantScroll(filter, (limit ?? 10) * 2);
 
         const points = (result.result?.points ?? [])
           .sort((a, b) => (b.payload.created_at ?? "").localeCompare(a.payload.created_at ?? ""))
@@ -843,9 +1054,12 @@ export function registerTools(mcp: McpServer): void {
       const now = nowISO();
 
       if (action === "approve") {
-        const existing = await qdrantGetPoints([fact_id]).catch(() => null);
+        const writable = await getPointForWorkspaceWrite(fact_id, scope);
+        if (writable.error) {
+          return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
+        }
         let currentCount = 0;
-        const approvePt = existing?.result?.[0];
+        const approvePt = writable.point;
         if (approvePt) {
           currentCount = approvePt.payload.verification_count ?? 0;
         }
@@ -861,30 +1075,54 @@ export function registerTools(mcp: McpServer): void {
         if (!reason) {
           return { content: [{ type: "text", text: "Error: reason is required for reject action." }] };
         }
+        const writable = await getPointForWorkspaceWrite(fact_id, scope);
+        if (writable.error) {
+          return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
+        }
+        const redactedReason = redactStorageText(reason);
         await qdrantSetPayload([fact_id], {
-          superseded_by: `rejected:${reason}`,
+          superseded_by: `rejected:${redactedReason.text}`,
           superseded_at: now,
           updated_at: now,
         });
-        return { content: [{ type: "text", text: JSON.stringify({ status: "rejected", fact_id, reason }) }] };
+        return { content: [{ type: "text", text: JSON.stringify({
+          status: "rejected",
+          fact_id,
+          reason: redactedReason.text,
+          ...(redactedReason.redacted ? { redaction: redactedReason } : {}),
+        }) }] };
       }
 
       if (action === "correct") {
         if (!corrected_content) {
           return { content: [{ type: "text", text: "Error: corrected_content is required for correct action." }] };
         }
-        const original = await qdrantGetPoints([fact_id]).catch(() => null);
-        const origPayload = original?.result?.[0]?.payload;
+        const writable = await getPointForWorkspaceWrite(fact_id, scope);
+        if (writable.error) {
+          return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
+        }
+        const origPayload = writable.point?.payload;
+        const redactedCorrected = redactStorageText(corrected_content);
+        const correctionScope = origPayload?.workspace_id
+          ? resolveScope(origPayload.workspace_id, false)
+          : scope;
 
-        const vector = await embed(corrected_content);
+        const vector = await embed(redactedCorrected.text);
         const correctedId = crypto.randomUUID();
-        const origCategory = origPayload?.category ?? "observation";
-        const hash = contentHash(origCategory, corrected_content);
-        await qdrantUpsert(correctedId, vector, {
-          content: corrected_content,
+        const origCategory = normalizeCategory(origPayload?.category ?? DEFAULT_CATEGORY);
+        const hash = contentHash(origCategory, redactedCorrected.text);
+        const correctedPayload: Record<string, unknown> = {
+          content: redactedCorrected.text,
           category: origCategory,
-          domain: origPayload?.domain ?? "work",
-          kind: origPayload?.kind ?? "fact",
+          domain: normalizeDomain(origPayload?.domain ?? DEFAULT_DOMAIN),
+          kind: normalizeKind(origPayload?.kind ?? "fact"),
+          ...(origPayload?.memory_subtype ? { memory_subtype: origPayload.memory_subtype } : {}),
+          ...(origPayload?.layer ? { layer: origPayload.layer } : {}),
+          ...(origPayload?.episode_id ? { episode_id: origPayload.episode_id } : {}),
+          ...(origPayload?.workstream_key ? { workstream_key: origPayload.workstream_key } : {}),
+          ...(origPayload?.task_key ? { task_key: origPayload.task_key } : {}),
+          ...(origPayload?.repo ? { repo: origPayload.repo } : {}),
+          ...(origPayload?.branch ? { branch: origPayload.branch } : {}),
           entities: origPayload?.entities ?? [],
           source: "user",
           confidence: 0.95,
@@ -897,7 +1135,10 @@ export function registerTools(mcp: McpServer): void {
           created_at: now,
           updated_at: now,
           metadata: { ...(origPayload?.metadata ?? {}), corrected_from: fact_id },
-        });
+        };
+        addWorkspacePayload(correctedPayload, correctionScope);
+        addRedactionPayload(correctedPayload, redactedCorrected);
+        await qdrantUpsert(correctedId, vector, correctedPayload);
 
         await qdrantSetPayload([fact_id], {
           superseded_by: correctedId,
@@ -909,201 +1150,6 @@ export function registerTools(mcp: McpServer): void {
       }
 
       return { content: [{ type: "text", text: `Unknown action: ${String(action)}` }] };
-    },
-  );
-
-  // ── memory_session_summary ──────────────────────────────────────────────
-
-  mcp.tool(
-    "memory_session_summary",
-    "Store a compressed summary of the current session. Call before a session ends or when a major task completes. " +
-    "Future sessions receive this via memory_recall('session briefing'). Idempotent per session_id.",
-    {
-      session_id: z.string().describe("Session UUID"),
-      summary: z.string().describe("2-5 sentence compressed summary of what happened this session"),
-      tasks_completed: z.array(z.string()).optional().default([]).describe("Task slugs completed"),
-      decisions_made: z.array(z.string()).optional().default([]).describe("Key decisions"),
-      entities_touched: z.array(z.string()).optional().default([]).describe("Entities involved (lowercase)"),
-    },
-    async ({ session_id, summary, tasks_completed, decisions_made, entities_touched }): Promise<McpToolResult> => {
-      const guard = requireReady();
-      if (guard) return guard;
-      const now = nowISO();
-      const normalizedEntities = entities_touched.map((e) => e.toLowerCase());
-
-      // Check for existing summary for this session
-      try {
-        const existing = await qdrantScroll(
-          { must: [
-            { key: "session_id", match: { value: session_id } },
-            { key: "kind", match: { value: "summary" } },
-            { is_null: { key: "superseded_by" } },
-          ] },
-          1,
-        );
-        const summaryPoint = existing.result?.points?.[0];
-        if (summaryPoint) {
-          const point = summaryPoint;
-          const vector = await embed(summary);
-          await qdrantUpsert(point.id, vector, {
-            ...point.payload,
-            content: summary,
-            kind: "summary",
-            domain: "work",
-            source: "system",
-            tasks_completed,
-            decisions_made,
-            entities: normalizedEntities,
-            content_hash: contentHash("observation", summary),
-            updated_at: now,
-          });
-          return {
-            content: [{ type: "text", text: JSON.stringify({
-              action: "updated", fact_id: point.id, session_id,
-            }) }],
-          };
-        }
-      } catch (e) {
-        log("WARN", `Session summary lookup failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
-
-      // Insert new summary
-      const vector = await embed(summary);
-      const factId = newId();
-      await qdrantUpsert(factId, vector, {
-        content: summary,
-        category: "observation",
-        domain: "work",
-        kind: "summary",
-        entities: normalizedEntities,
-        source: "system",
-        confidence: 1.0,
-        content_hash: contentHash("observation", summary),
-        reinforcement_count: 1,
-        last_reinforced_at: now,
-        superseded_by: null,
-        superseded_at: null,
-        created_at: now,
-        updated_at: now,
-        session_id,
-        tasks_completed,
-        decisions_made,
-      });
-
-      return {
-        content: [{ type: "text", text: JSON.stringify({
-          action: "stored", fact_id: factId, session_id,
-        }) }],
-      };
-    },
-  );
-
-  // ── memory_distill ──────────────────────────────────────────────────────
-
-  mcp.tool(
-    "memory_distill",
-    "Consolidate recent session summaries into distilled patterns. Call when 5+ session summaries exist. " +
-    "Uses LLM to extract recurring patterns and key learnings, then supersedes the source summaries.",
-    {
-      days: z.number().optional().default(14).describe("Look-back period in days (default 14)"),
-      max_summaries: z.number().optional().default(20).describe("Max summaries to consolidate"),
-    },
-    async ({ days, max_summaries }): Promise<McpToolResult> => {
-      const guard = requireReady();
-      if (guard) return guard;
-      const now = nowISO();
-      const daysVal = days ?? 14;
-      const maxVal = max_summaries ?? 20;
-      const since = new Date(Date.now() - daysVal * 86400000).toISOString();
-
-      const summaryResults = await qdrantScroll(
-        { must: [
-          { key: "kind", match: { value: "summary" } },
-          { key: "created_at", range: { gte: since } },
-          { is_null: { key: "superseded_by" } },
-        ] },
-        maxVal,
-      );
-
-      const summaries = summaryResults.result?.points ?? [];
-
-      if (summaries.length < 3) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({
-            action: "skipped",
-            reason: `Only ${summaries.length} session summaries in the last ${daysVal} days. Need at least 3.`,
-          }) }],
-        };
-      }
-
-      const summaryTexts = summaries.map((s, i) => {
-        const p = s.payload;
-        const parts = [`Session ${i + 1} (${p.created_at}):\n${p.content}`];
-        if (p.tasks_completed?.length) parts.push(`Tasks: ${p.tasks_completed.join(", ")}`);
-        if (p.decisions_made?.length) parts.push(`Decisions: ${p.decisions_made.join("; ")}`);
-        return parts.join("\n");
-      }).join("\n\n---\n\n");
-
-      const systemPrompt =
-        "You are a memory consolidation system. Given session summaries from an engineering agent, " +
-        "extract recurring patterns, consolidated learnings, and key facts. Output:\n" +
-        "1. Recurring patterns (things that keep coming up)\n" +
-        "2. Key infrastructure/project facts learned\n" +
-        "3. Decisions made and their rationale\n" +
-        "4. Open issues or recurring problems\n" +
-        "Be concise — one line per point. Omit ephemeral details.";
-
-      let distilledContent: string;
-      try {
-        distilledContent = await chatComplete(systemPrompt, summaryTexts);
-      } catch (e) {
-        return { content: [{ type: "text", text: `Distillation failed: ${e instanceof Error ? e.message : String(e)}` }] };
-      }
-
-      const allEntities = [...new Set(summaries.flatMap((s) => s.payload.entities ?? []))];
-      const vector = await embed(distilledContent);
-      const factId = newId();
-      const sourceIds = summaries.map((s) => s.id);
-      await qdrantUpsert(factId, vector, {
-        content: distilledContent,
-        category: "observation",
-        domain: "work",
-        kind: "distilled",
-        entities: allEntities,
-        source: "system",
-        confidence: 0.9,
-        content_hash: contentHash("observation", distilledContent),
-        reinforcement_count: 1,
-        last_reinforced_at: now,
-        superseded_by: null,
-        superseded_at: null,
-        created_at: now,
-        updated_at: now,
-        distilled_from: sourceIds,
-        distilled_period_start: since,
-        distilled_period_end: now,
-        summary_count: summaries.length,
-      });
-
-      try {
-        await qdrantSetPayload(sourceIds, {
-          superseded_by: factId,
-          superseded_at: now,
-        });
-      } catch (e) {
-        log("WARN", `Failed to supersede some source summaries: ${e instanceof Error ? e.message : String(e)}`);
-      }
-
-      return {
-        content: [{ type: "text", text: JSON.stringify({
-          action: "distilled",
-          fact_id: factId,
-          summaries_consolidated: summaries.length,
-          period: { start: since, end: now },
-          entities: allEntities,
-          preview: distilledContent.substring(0, 300) + (distilledContent.length > 300 ? "..." : ""),
-        }, null, 2) }],
-      };
     },
   );
 
@@ -1123,18 +1169,18 @@ export function registerTools(mcp: McpServer): void {
       if (heartbeatCount % 3 === 0 && ready) {
         try {
           const staleThreshold = new Date(Date.now() - STALENESS_DAYS * 86400000).toISOString();
+          const scope = resolveScope();
+          const staleFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+          staleFilter.must.push({ key: "category", match: { any: ["infrastructure", "projects", "decisions"] } });
+          staleFilter.should = [
+            { key: "last_reinforced_at", range: { lte: staleThreshold } },
+            { is_null: { key: "last_reinforced_at" } },
+          ];
+          staleFilter.must_not = [
+            { key: "last_verified_at", range: { gte: staleThreshold } },
+          ];
           const staleResults = await qdrantScroll(
-            { must: [
-              { key: "category", match: { any: ["infrastructure", "projects", "decisions"] } },
-              { is_null: { key: "superseded_by" } },
-            ],
-            should: [
-              { key: "last_reinforced_at", range: { lte: staleThreshold } },
-              { is_null: { key: "last_reinforced_at" } },
-            ],
-            must_not: [
-              { key: "last_verified_at", range: { gte: staleThreshold } },
-            ] },
+            staleFilter,
             3,
           );
           const staleFacts = staleResults.result?.points ?? [];

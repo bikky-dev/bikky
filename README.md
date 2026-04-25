@@ -1,8 +1,12 @@
-# bikky
+<p align="center">
+  <img src="assets/bikky-tp.png" alt="bikky logo" width="180" />
+</p>
 
-**Shared persistent memory for AI coding agents.**
+<h1 align="center">bikky</h1>
 
-bikky gives your team's AI agents (GitHub Copilot, Claude Code) long-term memory that persists across sessions and is shared across team members. What one engineer's agent learns today, every agent on the team knows tomorrow.
+<p align="center"><b>Shared persistent memory for AI coding agents.</b></p>
+
+bikky gives your team's AI agents (GitHub Copilot, Claude Code, Cursor, Codex, and other MCP clients) long-term memory that persists across sessions and is shared across team members. It helps software factories become queryable organizations: what one engineer's agent learns today, every agent on the team knows tomorrow through a closed-loop memory system.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/team-memory.svg" alt="Team memory — facts flow from individual sessions into a shared, self-curating knowledge store" width="720" />
@@ -49,7 +53,7 @@ echo '{ "qdrant_url": "https://…:6333", "qdrant_api_key": "…" }' > ~/.bikky/
 export QDRANT_URL="https://…:6333" QDRANT_API_KEY="…"
 ```
 
-Restart your editor — 12 memory tools appear automatically.
+Restart your editor — memory tools appear automatically.
 
 > 📖 Full configuration reference (providers, models, daemon settings): **[docs/configuration.md](docs/configuration.md)**
 >
@@ -65,9 +69,9 @@ Restart your editor — 12 memory tools appear automatically.
 
 **MCP Server** — tools your agent calls directly:
 
-`memory_store` · `memory_recall` · `memory_entity` · `memory_relations` · `memory_forget` · `memory_verify` · `memory_session_summary` · `memory_distill` · `memory_heartbeat` · `memory_review` · `configure_credentials` · `verify_connection`
+`memory_store` · `memory_recall` · `memory_entity` · `memory_relations` · `memory_forget` · `memory_verify` · `memory_heartbeat` · `memory_review` · `configure_credentials` · `verify_connection`
 
-**Daemon** — background process that passively watches session logs, extracts facts via LLM, infers entity relationships, and runs the consolidation pipeline (distillation, contradiction detection, staleness scanning).
+**Daemon** — background process that passively watches session logs, extracts ontology-v2 facts, writes lightweight session indexes, captures coherent episode summaries, updates current-state workstream summaries, infers entity relationships, and runs the consolidation pipeline. Lifecycle memory is daemon-owned so agents do not need to remember summary/distillation tool calls.
 
 ---
 
@@ -76,6 +80,7 @@ Restart your editor — 12 memory tools appear automatically.
 Raw fact accumulation creates noise. bikky keeps the knowledge store clean automatically:
 
 - **Deduplication** — content hash + vector similarity merges near-identical facts
+- **Ontology scope fields** — optional `workspace_id`, repo, workstream, and episode metadata make recall more precise
 - **Confidence decay** — old facts lose weight and surface for review
 - **Contradiction detection** — conflicting facts are resolved, not silently stacked
 - **Distillation** — recurring patterns across sessions consolidate into higher-level insights
@@ -92,7 +97,7 @@ Raw fact accumulation creates noise. bikky keeps the knowledge store clean autom
 
 ## Web UI
 
-[`bikky-ui`](packages/ui) is a local dashboard for browsing and managing your team's memory — facts, entities, and the relationship graph.
+[`bikky-ui`](packages/ui) is a local dashboard for browsing and managing your team's memory — facts, entities, quality metrics, aggregate impact insights, and the relationship graph.
 
 ```bash
 npx bikky-ui          # one-shot — no install needed
@@ -125,7 +130,10 @@ bikky mcp       # start MCP server (stdio) — used by editors
 bikky setup     # interactive setup wizard
 bikky status    # check memory system health
 bikky install   # write MCP config for Copilot + Claude Code
+bikky templates # print config snippets for Copilot, Claude Code, Cursor, and Codex
 ```
+
+See **[docs/integrations.md](docs/integrations.md)** for copy-paste MCP templates.
 
 ## License
 
