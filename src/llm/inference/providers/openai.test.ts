@@ -11,6 +11,9 @@ const cfg: ResolvedInferenceConfig = {
   apiKey: "sk-test",
   fallback: null,
   extra: {},
+  timeoutMs: 5_000,
+  retries: 0,
+  retryBaseDelayMs: 10,
 };
 
 const log = () => {};

@@ -19,6 +19,12 @@ export interface ResolvedInferenceConfig {
   fallback: string | null;
   /** Provider-specific extras (e.g. bedrock region, portkey virtual-key). */
   extra: Record<string, string | undefined>;
+  /** Per-request timeout in milliseconds (HTTP providers). Defaults set by initLLM. */
+  timeoutMs: number;
+  /** Max retries on transient/rate-limit/timeout failures. */
+  retries: number;
+  /** Base backoff delay in milliseconds (full-jitter exponential). */
+  retryBaseDelayMs: number;
 }
 
 export interface ChatMessage {
@@ -73,4 +79,10 @@ export interface InitLLMInput {
   /** Provider name to fall back to when primary returns null. */
   fallback?: string | null;
   extra?: Record<string, string | undefined>;
+  /** Per-request HTTP timeout. Defaults to 30s. */
+  timeoutMs?: number;
+  /** Max retries on transient/rate-limit/timeout failures. Defaults to 2. */
+  retries?: number;
+  /** Base backoff delay (ms) for retries. Defaults to 250ms. */
+  retryBaseDelayMs?: number;
 }

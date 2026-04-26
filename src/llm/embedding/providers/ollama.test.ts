@@ -11,6 +11,9 @@ const cfg: ResolvedEmbeddingConfig = {
   baseUrl: "http://localhost:11434",
   apiKey: null,
   extra: {},
+  timeoutMs: 5_000,
+  retries: 0,
+  retryBaseDelayMs: 10,
 };
 
 describe("ollama embedding provider", () => {

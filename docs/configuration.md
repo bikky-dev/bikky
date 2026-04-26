@@ -24,7 +24,7 @@ Both `embedding.provider` and `llm.provider` accept exactly one of three values:
 | `openai` | OpenAI-compatible API | `api_key` or `OPENAI_API_KEY` | ✅ default `https://api.openai.com/v1` |
 | `bedrock` | AWS Bedrock | AWS credentials (env or IAM role) | ❌ uses AWS SDK |
 
-> **⚠️ Only these three values are valid.** Any other value will cause a silent fallback to Ollama.
+> **⚠️ Only these three values are valid.** Any other value is rejected at boot — the MCP server starts up but `requireReady` returns `setup_required` with a `setup_error` message until you fix the config.
 
 ### Embedding config
 
@@ -73,6 +73,47 @@ Both `embedding.provider` and `llm.provider` accept exactly one of three values:
 | `ollama` | Nothing — just have Ollama running locally (`ollama serve`) |
 | `openai` | `OPENAI_API_KEY` env var **or** `"api_key": "sk-..."` in the embedding/llm config block |
 | `bedrock` | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` env vars, or an IAM instance role |
+
+### Resilience knobs (timeouts & retries)
+
+Both `embedding` and `llm` accept three optional fields that control how HTTP
+calls to providers behave when things go wrong (network blips, 5xx, 429s).
+These also work for the OpenAI-compatible `portkey` provider.
+
+| Setting | Env var | Default |
+|---------|---------|---------|
+| `embedding.timeout_ms` | `BIKKY_EMBEDDING_TIMEOUT_MS` | `30000` |
+| `embedding.retries` | `BIKKY_EMBEDDING_RETRIES` | `2` |
+| `embedding.retry_base_delay_ms` | `BIKKY_EMBEDDING_RETRY_BASE_DELAY_MS` | `250` |
+| `llm.timeout_ms` | `BIKKY_LLM_TIMEOUT_MS` | `30000` |
+| `llm.retries` | `BIKKY_LLM_RETRIES` | `2` |
+| `llm.retry_base_delay_ms` | `BIKKY_LLM_RETRY_BASE_DELAY_MS` | `250` |
+
+Behaviour:
+
+- `timeout_ms` is per-attempt (each retry gets its own clock).
+- Retries use full-jitter exponential backoff capped at 5s, and honour
+  `Retry-After` response headers (capped at 60s).
+- Only `transient` (5xx, 408), `rate_limit` (429), and `timeout` errors are
+  retried. `auth` (401/403) and `bad_request` (400/404/422) fail fast — they
+  won't get better with retries.
+
+### Setup errors and `requireReady`
+
+If embedding init or Qdrant init fails at boot (bad provider name, missing
+collection, unreachable host, etc.), the MCP server still starts. Tools that
+need ready storage call `requireReady`, which returns a `setup_required`
+payload that now includes a human-readable `setup_error` field:
+
+```json
+{
+  "setup_required": true,
+  "missing": ["qdrant-url"],
+  "setup_error": "embedding init failed: [openai] (401): invalid api key"
+}
+```
+
+`get_setup_status` exposes the same info for diagnostics.
 
 ## Copy-paste examples
 

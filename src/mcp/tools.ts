@@ -40,6 +40,7 @@ import {
   ready,
   qdrantUrl,
   qdrantApiKey,
+  setupError,
   setQdrantUrl,
   setQdrantApiKey,
   setReady,
@@ -141,7 +142,6 @@ function requireReady(): McpToolResult | null {
   if (!ready) {
     const missing: string[] = [];
     if (!qdrantUrl) missing.push("qdrant-url");
-    if (!qdrantApiKey) missing.push("qdrant-api-key");
     return {
       content: [{
         type: "text",
@@ -149,6 +149,10 @@ function requireReady(): McpToolResult | null {
           status: "setup_required",
           ready: false,
           missing,
+          // Surface the underlying init failure (embedding / Qdrant) when
+          // present so users see an actionable reason instead of a generic
+          // "setup required" message.
+          ...(setupError ? { setup_error: setupError } : {}),
           setup_instructions:
             "Memory is not configured. Run `bikky setup` or call configure_credentials:\n" +
             "1. Go to cloud.qdrant.io → sign up (free tier: 1GB, no credit card)\n" +
@@ -262,6 +266,7 @@ export function registerTools(mcp: McpServer): void {
         embedding_provider: getEmbeddingConfig().provider,
         embedding_model: getEmbeddingConfig().model,
         embedding_dimensions: getEmbeddingConfig().dimensions,
+        ...(setupError ? { setup_error: setupError } : {}),
       };
       const missing = status["missing"] as string[];
       if (!qdrantUrl) missing.push("qdrant-url");

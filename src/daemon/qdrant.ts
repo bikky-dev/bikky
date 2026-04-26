@@ -200,6 +200,10 @@ const init = (): boolean => {
     model: cfg.embedding.model,
     dimensions: cfg.embedding.dimensions,
     apiKey: cfg.embedding.api_key,
+    extra: cfg.embedding.extra ?? {},
+    timeoutMs: cfg.embedding.timeout_ms,
+    retries: cfg.embedding.retries,
+    retryBaseDelayMs: cfg.embedding.retry_base_delay_ms,
   });
   logFn("INFO", `Embedding provider: ${embCfg.provider}/${embCfg.model} (${embCfg.dimensions}d) @ ${embCfg.baseUrl}`);
 
@@ -221,7 +225,7 @@ const init = (): boolean => {
   return ready;
 };
 
-const isReady = (): boolean => !!(qdrantUrl && qdrantApiKey && client);
+const isReady = (): boolean => !!(qdrantUrl && client);
 
 const ensureCollection = async (): Promise<void> => {
   if (!client) {
