@@ -33,7 +33,7 @@ describe("normalizeExtractedFact", () => {
 
     assert.ok(fact);
     assert.strictEqual(fact.category, "people");
-    assert.strictEqual(fact.memory_subtype, "ownership");
+    assert.strictEqual(fact.memory_subtype, "preference");
     assert.deepStrictEqual(fact.entities, ["node", "npm-test"]);
   });
 

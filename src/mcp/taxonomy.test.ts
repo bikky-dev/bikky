@@ -130,9 +130,13 @@ describe("memory subtypes", () => {
     assert.ok(MEMORY_SUBTYPES.summary.includes("session_index"));
     assert.ok(MEMORY_SUBTYPES.summary.includes("episode"));
     assert.ok(MEMORY_SUBTYPES.summary.includes("workstream"));
-    assert.ok(MEMORY_SUBTYPES.distilled.includes("failure_mode"));
+    assert.deepStrictEqual(MEMORY_SUBTYPES.distilled, ["convention"]);
     assert.deepStrictEqual(MEMORY_SUBTYPES.relation, []);
     assert.ok(MEMORY_SUBTYPES.telemetry.includes("recall_event"));
+    // Removed in taxonomy-slim cleanup:
+    assert.ok(!MEMORY_SUBTYPES.fact.includes("deployment_procedure" as never));
+    assert.ok(!MEMORY_SUBTYPES.fact.includes("ownership" as never));
+    assert.ok(!MEMORY_SUBTYPES.distilled.includes("failure_mode" as never));
   });
 
   it("validates subtype and kind combinations", () => {
@@ -147,11 +151,12 @@ describe("memory subtypes", () => {
     assert.strictEqual(defaultMemorySubtypeForKind("fact"), "codebase_map");
     assert.strictEqual(defaultMemorySubtypeForKind("relation"), null);
     assert.strictEqual(categoryForMemorySubtype("architecture_decision"), "decisions");
-    assert.strictEqual(categoryForMemorySubtype("ownership"), "people");
+    assert.strictEqual(categoryForMemorySubtype("preference"), "preferences");
     assert.strictEqual(layerForMemorySubtype("workstream"), "workstream");
     assert.strictEqual(layerForMemorySubtype("episode"), "episode");
-    assert.ok(memorySubtypeValues().includes("product_insight"));
+    assert.ok(memorySubtypeValues().includes("convention"));
     assert.deepStrictEqual(memorySubtypeValuesForKind("summary"), ["session_index", "episode", "workstream"]);
+    assert.deepStrictEqual(memorySubtypeValuesForKind("distilled"), ["convention"]);
   });
 });
 
