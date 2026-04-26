@@ -1,5 +1,5 @@
 /**
- * bikky MCP Server — episodic memory via Qdrant Cloud.
+ * bikky MCP Server — episodic memory via Qdrant (Cloud, Docker, or self-hosted).
  *
  * Provides persistent memory across AI coding sessions. All facts, relations,
  * and entity context live as Qdrant points with vector embeddings + structured
@@ -44,19 +44,16 @@ export async function startMcpServer(): Promise<void> {
   });
   log("INFO", `Embedding: ${embCfg.provider}/${embCfg.model} (${embCfg.dimensions}d) @ ${embCfg.baseUrl || "(sdk)"}`);
 
-  if (qUrl && qKey) {
+  if (qUrl) {
     try {
       await ensureCollection(QDRANT_INDEXES);
       setReady(true);
-      log("INFO", "Memory system ready ✓");
+      log("INFO", `Memory system ready ✓ (Qdrant ${qKey ? "with" : "without"} api-key auth)`);
     } catch (e) {
       log("ERROR", `Failed to initialize collection: ${e instanceof Error ? e.message : String(e)}`);
     }
   } else {
-    const missing: string[] = [];
-    if (!qUrl) missing.push("qdrant-url");
-    if (!qKey) missing.push("qdrant-api-key");
-    log("INFO", `Memory not configured — missing: ${missing.join(", ")}. Use get_setup_status + configure_credentials.`);
+    log("INFO", "Memory not configured — missing: qdrant-url. Use get_setup_status + configure_credentials.");
   }
 
   const mcp = new McpServer({
