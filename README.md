@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/bikky-tp.png" alt="bikky logo" width="180" />
-</p>
-
 <h1 align="center">bikky</h1>
 
 <p align="center"><b>Persistent memory for AI coding agents — for solo power users and teams.</b></p>
