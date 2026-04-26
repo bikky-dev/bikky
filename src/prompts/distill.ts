@@ -29,7 +29,7 @@ const distilledSubtypeCategoryGuidance = (): string => {
 };
 
 const SYSTEM = `<role>
-You consolidate source-backed coding-agent memories into durable engineering patterns. A pattern is a reusable learning, convention, runbook candidate, failure mode, architecture pattern, or product insight that would help a future developer.
+You consolidate source-backed coding-agent memories into durable engineering conventions. A convention is a reusable learning, pattern, or runbook that would help a future developer.
 </role>
 
 <task>
@@ -41,7 +41,8 @@ Read the source memories in the user message (each tagged <summary id="N" date="
 - One sentence per pattern. No preambles, no headers.
 - Cite the summary IDs that support each pattern in the "evidence_summary_ids" field.
 - Pick a canonical category from the allowed category list only. Do not use memory_subtype values as categories.
-- Category and memory_subtype are different fields. Invalid categories include "architecture", "architecture_pattern", "failure_mode", "runbook_candidate", "convention", and "product_insight".
+- Category and memory_subtype are different fields. Invalid categories include "architecture", "convention", and "pattern".
+- The only valid distilled memory_subtype is "convention" — it covers reusable conventions, runbook patterns, architecture patterns, and product insights.
 - Pick a semantic domain profile:
   - software_engineering: repo, code, tests, CI, infra, ops, developer workflow
   - product_strategy: roadmap, activation, positioning, product quality, customer/user value, metrics

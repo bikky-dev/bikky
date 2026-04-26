@@ -92,21 +92,13 @@ export const CAPTURE_KIND_SUBTYPES = {
     "architecture_decision",
     "infra_topology",
     "access_pattern",
-    "deployment_procedure",
     "operational_procedure",
     "domain_rule",
     "troubleshooting_gotcha",
     "preference",
-    "ownership",
   ],
   summary: ["session_index", "episode", "workstream"],
-  distilled: [
-    "runbook_candidate",
-    "failure_mode",
-    "convention",
-    "architecture_pattern",
-    "product_insight",
-  ],
+  distilled: ["convention"],
 } as const satisfies Partial<Record<Kind, readonly MemorySubtype[]>>;
 
 export const FACT_CATEGORY_TO_SUBTYPE: Record<Category, MemorySubtype> = {
@@ -116,7 +108,7 @@ export const FACT_CATEGORY_TO_SUBTYPE: Record<Category, MemorySubtype> = {
   decisions: "architecture_decision",
   product_domain: "domain_rule",
   projects: "codebase_map",
-  people: "ownership",
+  people: "preference",
   preferences: "preference",
   observations: "troubleshooting_gotcha",
 };
@@ -132,13 +124,7 @@ export function promptVersionForSubtype(subtype: MemorySubtype): string {
   if (subtype === "session_index") return PROMPT_VERSIONS.sessionIndex;
   if (subtype === "episode") return PROMPT_VERSIONS.episodeSummary;
   if (subtype === "workstream") return PROMPT_VERSIONS.workstreamSummary;
-  if (
-    subtype === "runbook_candidate" ||
-    subtype === "failure_mode" ||
-    subtype === "convention" ||
-    subtype === "architecture_pattern" ||
-    subtype === "product_insight"
-  ) {
+  if (subtype === "convention") {
     return PROMPT_VERSIONS.distillation;
   }
   return PROMPT_VERSIONS.factExtraction;
