@@ -9,8 +9,8 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { BikkyConfig } from "../config.js";
 import { chatCompletion } from "../llm/index.js";
+import { workstreamSummaryPrompt } from "../prompts/index.js";
 import {
-  CAPTURE_BUDGETS,
   CAPTURE_POLICY_VERSION,
   CAPTURE_TRIGGERS,
   DEFAULT_CAPTURE_CONTEXT,
@@ -19,6 +19,8 @@ import {
 import type { EpisodeSummaryWriteResult } from "./episode-summary.js";
 import * as qdrant from "./qdrant.js";
 import type { QdrantPayload } from "./qdrant.js";
+
+export { buildWorkstreamSummaryMessages } from "../prompts/index.js";
 
 export interface WorkspaceScope {
   workspaceId?: string;
@@ -92,42 +94,6 @@ export const groupEpisodeResultsByWorkstream = (
   }
   return grouped;
 };
-
-export const buildWorkstreamSummaryMessages = (input: {
-  workstreamKey: string;
-  existingSummary?: string | null;
-  episodeSummaries: string[];
-}): Array<{ role: "system" | "user"; content: string }> => [
-  {
-    role: "system",
-    content:
-      "You are Bikky's background memory daemon. Maintain one current-state workstream summary. " +
-      "Do not append a diary or timeline; synthesize the latest durable state, decisions, blockers, and next steps. " +
-      "If an episode is unrelated or ambiguous, ignore it. Output only valid JSON.",
-  },
-  {
-    role: "user",
-    content: `Update the current-state summary for workstream "${input.workstreamKey}".
-
-## Existing workstream summary
-${input.existingSummary?.trim() || "(none)"}
-
-## New episode summaries
-${input.episodeSummaries.map((summary, index) => `${index + 1}. ${summary}`).join("\n\n")}
-
-## Output JSON shape
-{
-  "content": "${CAPTURE_BUDGETS.workstreamSummary.targetWords[0]}-${CAPTURE_BUDGETS.workstreamSummary.targetWords[1]} words, current state only",
-  "current_decisions": ["durable decisions and rationale"],
-  "next_steps": ["specific next actions"],
-  "blockers": ["active blockers or risks"],
-  "entities": ["lowercase key repos/services/files/tools"],
-  "importance": 0.8
-}
-
-Return only the JSON object.`,
-  },
-];
 
 export const parseWorkstreamSummaryDraft = (raw: string): WorkstreamSummaryDraft => {
   const parsed = JSON.parse(stripJsonFence(raw)) as Record<string, unknown>;
@@ -289,12 +255,7 @@ const summarizeWorkstream = async (input: {
   existingSummary?: string | null;
   episodeSummaries: string[];
 }): Promise<WorkstreamSummaryDraft> => {
-  const result = await chatCompletion({
-    messages: buildWorkstreamSummaryMessages(input),
-    temperature: 0.2,
-    max_tokens: 1800,
-    response_format: { type: "json_object" },
-  });
+  const result = await chatCompletion(workstreamSummaryPrompt(input));
   if (!result) throw new Error("Workstream summary LLM returned null");
   return parseWorkstreamSummaryDraft(result);
 };

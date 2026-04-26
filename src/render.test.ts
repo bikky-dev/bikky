@@ -60,10 +60,18 @@ test("parseRenderArgs: --input requires a value", () => {
 
 // ── listPrompts ─────────────────────────────────────────────────────────────
 
-test("listPrompts returns all 5 prompts", () => {
+test("listPrompts returns all prompts", () => {
   const list = listPrompts();
   const names = list.map((p) => p.name).sort();
-  assert.deepEqual(names, ["brief", "contradiction", "distill", "extraction", "relations"]);
+  assert.deepEqual(names, [
+    "brief",
+    "contradiction",
+    "distill",
+    "episode-summary",
+    "extraction",
+    "relations",
+    "workstream-summary",
+  ]);
   for (const p of list) {
     assert.ok(p.id, `${p.name} has no id`);
     assert.ok(p.version, `${p.name} has no version`);
@@ -78,6 +86,8 @@ test("PROMPT_REGISTRY ids match descriptors", () => {
   assert.equal(PROMPT_REGISTRY.contradiction.id, "contradiction");
   assert.equal(PROMPT_REGISTRY.relations.id, "relations");
   assert.equal(PROMPT_REGISTRY.brief.id, "brief");
+  assert.equal(PROMPT_REGISTRY["episode-summary"].id, "episode-summary");
+  assert.equal(PROMPT_REGISTRY["workstream-summary"].id, "workstream-summary");
 });
 
 // ── renderPrompt ────────────────────────────────────────────────────────────
@@ -107,8 +117,8 @@ test("renderPrompt: distill renders with summaries", () => {
 
 test("renderPrompt: contradiction renders", () => {
   const out = renderPrompt("contradiction", {
-    newFact: { content: "user lives in Berlin", category: "team" },
-    candidates: [{ id: "f1", content: "user lives in Paris", category: "team", score: 0.91 }],
+    newFact: { content: "user lives in Berlin", category: "people" },
+    candidates: [{ id: "f1", content: "user lives in Paris", category: "people", score: 0.91 }],
   });
   assert.match(out.promptName, /^contradiction@/);
   assert.ok(out.messages[1].content.includes("Berlin"));
@@ -133,6 +143,27 @@ test("renderPrompt: brief renders", () => {
   });
   assert.match(out.promptName, /^brief@/);
   assert.ok(out.messages[1].content.includes("thread one"));
+});
+
+test("renderPrompt: episode-summary renders", () => {
+  const out = renderPrompt("episode-summary", {
+    transcript: "[USER] Implement episode summaries in src/daemon/episode-summary.ts.",
+  });
+  assert.match(out.promptName, /^episode-summary@/);
+  assert.ok(out.messages[1].content.includes("src/daemon/episode-summary.ts"));
+  assert.deepEqual(out.response_format, { type: "json_object" });
+});
+
+test("renderPrompt: workstream-summary renders", () => {
+  const out = renderPrompt("workstream-summary", {
+    workstreamKey: "231-bikky-evals-deepeval",
+    existingSummary: "Eval harness has ontology-v2 coverage.",
+    episodeSummaries: ["Added episode-summary eval cases.", "Added workstream-summary eval cases."],
+  });
+  assert.match(out.promptName, /^workstream-summary@/);
+  assert.ok(out.messages[1].content.includes("231-bikky-evals-deepeval"));
+  assert.ok(out.messages[1].content.includes("episode-summary eval cases"));
+  assert.deepEqual(out.response_format, { type: "json_object" });
 });
 
 test("renderPrompt: unknown name throws with helpful message", () => {
@@ -178,8 +209,10 @@ test("runRenderCli: --list prints JSON list of prompts", async () => {
   const result = await captureStdout(() => runRenderCli(["--list"]));
   assert.equal(result.code, 0);
   const parsed = JSON.parse(result.stdout) as Array<{ name: string }>;
-  assert.equal(parsed.length, 5);
+  assert.equal(parsed.length, 7);
   assert.ok(parsed.find((p) => p.name === "extraction"));
+  assert.ok(parsed.find((p) => p.name === "episode-summary"));
+  assert.ok(parsed.find((p) => p.name === "workstream-summary"));
 });
 
 test("runRenderCli: --help exits 0", async () => {

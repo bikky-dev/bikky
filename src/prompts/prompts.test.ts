@@ -87,7 +87,7 @@ describe("extractionPrompt", () => {
 
   it("emits the schema fields the daemon expects", () => {
     const text = messages(rendered);
-    for (const field of ["content", "category", "domain", "kind", "entities", "confidence", "importance"]) {
+    for (const field of ["content", "category", "domain", "kind", "memory_subtype", "entities", "confidence", "importance"]) {
       assert.ok(text.includes(field), `extraction prompt missing field hint: ${field}`);
     }
   });

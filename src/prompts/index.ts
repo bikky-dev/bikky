@@ -110,3 +110,13 @@ export { distillPrompt, DISTILL_PROMPT_DESCRIPTOR } from "./distill.js";
 export { contradictionPrompt, CONTRADICTION_PROMPT_DESCRIPTOR } from "./contradiction.js";
 export { relationsPrompt, RELATIONS_PROMPT_DESCRIPTOR } from "./relations.js";
 export { briefPrompt, BRIEF_PROMPT_DESCRIPTOR, ALLOWED_BRIEF_HEADINGS } from "./brief.js";
+export {
+  episodeSummaryPrompt,
+  buildEpisodeSummaryMessages,
+  EPISODE_SUMMARY_PROMPT_DESCRIPTOR,
+} from "./episode-summary.js";
+export {
+  workstreamSummaryPrompt,
+  buildWorkstreamSummaryMessages,
+  WORKSTREAM_SUMMARY_PROMPT_DESCRIPTOR,
+} from "./workstream-summary.js";
