@@ -21,7 +21,7 @@ bikky gives AI coding agents (GitHub Copilot, Claude Code, Cursor, and other MCP
 
 ### The problem
 
-The most valuable things you and your agents learn — why a config value exists, which deploy step matters, what broke last quarter, the convention you settled on yesterday — happen *during* sessions. And then they vanish when the session closes. Across a team, the same problem amplifies: knowledge lives in heads, chat threads, and closed PRs, and every new engineer's agent has to learn it from scratch. Solo power devs hit the same wall in miniature, running dozens of agentic sessions a day across multiple tools, none of which remember each other. Hand-written docs drift the moment they're published.
+The most valuable things you and your agents learn — why a config value exists, which deploy step matters, what broke last quarter, the convention you settled on yesterday — happen *during* sessions. And then they vanish when the session closes. Whether you're a team — where knowledge lives in heads, chat threads, and closed PRs, and every new engineer's agent has to learn it from scratch — or a solo power dev juggling dozens of agentic sessions a day across multiple tools that don't remember each other, it's the same wall. Hand-written docs drift the moment they're published.
 
 ### How bikky solves it
 
@@ -36,37 +36,73 @@ The most valuable things you and your agents learn — why a config value exists
 
 ## Quick start
 
+The fastest way to try bikky: **100% local, free, no accounts** — Qdrant in Docker, embeddings via Ollama.
+
 ```bash
+# 1. Pull and run Qdrant (vector store)
+docker run -d --name qdrant -p 6333:6333 -v qdrant_storage:/qdrant/storage qdrant/qdrant
+
+# 2. Install Ollama (https://ollama.com) and pull the default embedding model
+ollama pull qwen3-embedding:0.6b
+
+# 3. Install and start bikky
 npm install -g bikky
+echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
 bikky setup            # writes MCP config for Copilot + Claude Code, then starts the daemon
 ```
 
-**Prerequisites:** A Qdrant instance + an embedding provider.
-
-- **Qdrant** — pick one:
-  - [Qdrant Cloud](https://cloud.qdrant.io) (free tier, 1 GB, no credit card) — needs URL + API key.
-  - **Local Docker:** `docker run -p 6333:6333 qdrant/qdrant` — URL `http://localhost:6333`, no API key.
-  - **Self-hosted:** any reachable Qdrant; API key only required if you set `QDRANT__SERVICE__API_KEY` on the server.
-- **Embeddings** — [Ollama](https://ollama.com) runs locally for free, or use OpenAI / AWS Bedrock / [Portkey](https://portkey.ai) gateway.
-
-Then configure credentials — pick one:
+Restart your editor — the memory tools (`memory_store`, `memory_recall`, …) appear automatically.
 
 ```bash
-# Option A: let your agent do it
-> "Call configure_credentials with my Qdrant URL (and API key if needed)"
-
-# Option B: config file
-echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
-# (add "qdrant_api_key" only if your Qdrant requires auth)
-
-# Option C: env vars
-export QDRANT_URL="http://localhost:6333"
-# export QDRANT_API_KEY="…"   # optional; required only for Qdrant Cloud / authenticated self-hosted
+bikky status           # sanity-check that Qdrant + embeddings are reachable
 ```
 
-Restart your editor — memory tools appear automatically.
+That's the whole thing. From here you can swap any piece (hosted Qdrant, OpenAI / Bedrock embeddings, a hosted LLM for richer daemon distillation) — see **Setup** below.
 
-> 📖 Full configuration reference (providers, models, daemon settings): **[docs/configuration.md](docs/configuration.md)**
+---
+
+## Setup
+
+### Prerequisites
+
+| | Required | Options |
+|---|---|---|
+| **Node.js** | ≥ 20 | `nvm install 20` or your package manager |
+| **Vector store** | Qdrant | **Local Docker** (free, recommended for dev) · **[Qdrant Cloud](https://cloud.qdrant.io)** (free tier, 1 GB) · **Self-hosted** anywhere reachable |
+| **Embeddings** | One provider | **[Ollama](https://ollama.com)** local (free, default) · **OpenAI** · **AWS Bedrock** · **[Portkey](https://portkey.ai)** gateway |
+| **LLM** *(optional)* | Used by the daemon for distillation & extraction | Same provider list as embeddings — leave on Ollama for a fully-local stack |
+| **Docker** *(optional)* | Only if you run Qdrant locally | Docker Desktop, OrbStack, colima, etc. |
+
+### Install
+
+```bash
+npm install -g bikky          # CLI + MCP server + daemon
+npm install -g bikky-ui       # optional web dashboard
+```
+
+### Pick your stack
+
+- **Fully local & free** — Qdrant in Docker + Ollama. Best for solo dev, no data leaves your machine. (See Quick start.)
+- **Hosted Qdrant + local Ollama** — Qdrant Cloud free tier for shared/team memory; embeddings still local.
+- **Fully hosted** — Qdrant Cloud + OpenAI / Bedrock / Portkey for embeddings and LLM. Best for teams that want a single shared memory across many machines.
+
+### Configure
+
+Three ways to provide credentials, pick one:
+
+```bash
+# A) Let your agent do it
+> "Call configure_credentials with my Qdrant URL (and API key if needed)"
+
+# B) Config file (~/.bikky/config.json)
+echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
+
+# C) Environment variables
+export QDRANT_URL="http://localhost:6333"
+# export QDRANT_API_KEY="…"   # only for Qdrant Cloud / authenticated self-hosted
+```
+
+> 📖 **Full configuration reference** — providers, models, daemon settings, env vars, copy-paste examples for every stack: **[docs/configuration.md](docs/configuration.md)**
 >
 > 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md](CONTRIBUTING.md)** — it's a single-file change.
 
