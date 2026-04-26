@@ -2,13 +2,13 @@
 
 <p align="center"><b>Persistent memory for AI coding agents — for solo power users and teams.</b></p>
 
-bikky gives AI coding agents (GitHub Copilot, Claude Code, Cursor, Codex, and other MCP clients) long-term memory that persists across sessions, across tools, and — when you want it — across your whole team. Whether you're a solo power dev running a dozen agentic sessions a day, or a team that wants every engineer's agent to start from the same knowledge base, bikky captures what's learned *during* sessions so future sessions start smarter.
+bikky gives AI coding agents (GitHub Copilot, Claude Code, Cursor, and other MCP clients) long-term memory that persists across sessions, across tools, and — when you want it — across your whole team. Whether you're a solo power dev running a dozen agentic sessions a day, or a team that wants every engineer's agent to start from the same knowledge base, bikky captures what's learned *during* sessions so future sessions start smarter.
 
 ### Who it's for
 
 | | |
 |---|---|
-| 🧑‍💻 **Solo AI power devs** | You run multiple Cursor / Claude Code / Copilot / Codex sessions every day and you're tired of re-explaining the codebase, the conventions, and last week's decisions to each new agent. bikky remembers across every session and every tool. |
+| 🧑‍💻 **Solo AI power devs** | You run multiple Cursor / Claude Code / Copilot sessions every day and you're tired of re-explaining the codebase, the conventions, and last week's decisions to each new agent. bikky remembers across every session and every tool. |
 | 👥 **Teams & software factories** | What one engineer's agent learns today, every agent on the team can recall tomorrow. Shared memory turns institutional knowledge into something queryable instead of tribal. |
 
 <p align="center">
@@ -38,7 +38,7 @@ The most valuable things you and your agents learn — why a config value exists
 
 ```bash
 npm install -g bikky
-bikky install          # writes MCP config for Copilot + Claude Code
+bikky setup            # writes MCP config for Copilot + Claude Code, then starts the daemon
 ```
 
 **Prerequisites:** A Qdrant instance + an embedding provider.
@@ -155,14 +155,14 @@ The UI reads from your existing `~/.bikky/config.json` — no extra configuratio
 
 ```bash
 bikky mcp       # start MCP server (stdio) — used by editors
-bikky setup     # interactive setup wizard
+bikky setup     # install MCP configs for Copilot + Claude Code, then start the daemon
+bikky start     # alias for setup
+bikky stop      # stop the background daemon
+bikky daemon    # run the daemon in the foreground
 bikky status    # check memory system health
-bikky install   # write MCP config for Copilot + Claude Code
-bikky templates # print config snippets for Copilot, Claude Code, Cursor, and Codex
+bikky ui        # launch the local web dashboard
 bikky render    # render a prompt to JSON (for eval harnesses & debugging)
 ```
-
-See **[docs/integrations.md](docs/integrations.md)** for copy-paste MCP templates.
 
 ### `bikky render` — inspect prompts
 

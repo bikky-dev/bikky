@@ -12,7 +12,7 @@ Config lives at `~/.bikky/config.json`. Resolution order: **defaults → config 
 
 ## Ontology scope fields
 
-Bikky's ontology includes optional scope payload fields such as `workspace_id`, `repo`, `branch`, `task_key`, `workstream_key`, and `episode_id`. These fields can be supplied through MCP calls or daemon-generated records where available; task 243 does not add workspace, redaction, or telemetry configuration sections.
+Bikky's ontology includes optional scope payload fields such as `workspace_id`, `repo`, `branch`, `task_key`, `workstream_key`, and `episode_id`. These fields can be supplied through MCP calls or filled in by the daemon when it has enough context.
 
 ## Embedding & LLM providers
 
@@ -240,7 +240,3 @@ Stdout/stderr are reserved for the MCP stdio transport — bikky never logs to t
 | `watchers.copilot.path` | `~/.copilot/session-state` | Path to Copilot session directory |
 | `watchers.claude.enabled` | `true` | Watch Claude Code project logs |
 | `watchers.claude.path` | `~/.claude/projects` | Path to Claude Code projects directory |
-
-## Agent integration templates
-
-Run `bikky templates` to print all MCP client snippets, or `bikky templates cursor` for one target.
