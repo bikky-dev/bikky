@@ -1,27 +1,27 @@
 <h1 align="center">bikky</h1>
 
-<p align="center"><b>Persistent memory for AI coding agents — for solo power users and teams.</b></p>
+<p align="center"><b>Persistent memory for AI coding agents — for teams, and for solo power users.</b></p>
 
-bikky gives AI coding agents (GitHub Copilot, Claude Code, Cursor, and other MCP clients) long-term memory that persists across sessions, across tools, and — when you want it — across your whole team. Whether you're a solo power dev running a dozen agentic sessions a day, or a team that wants every engineer's agent to start from the same knowledge base, bikky captures what's learned *during* sessions so future sessions start smarter.
+bikky gives AI coding agents (GitHub Copilot, Claude Code, Cursor, and other MCP clients) long-term memory that persists across sessions, across tools, and across your whole team. Whether you're a team that wants every engineer's agent to start from the same knowledge base, or a solo power dev running a dozen agentic sessions a day, bikky captures what's learned *during* sessions so future sessions start smarter.
 
 ### Who it's for
 
 | | |
 |---|---|
+| 👥 **Teams & software factories** | What one engineer's agent learns today, every agent on the team can recall tomorrow. Shared memory turns institutional knowledge into something queryable instead of tribal — onboarding accelerates, conventions stop drifting, and the same lesson never gets re-learned twice. |
 | 🧑‍💻 **Solo AI power devs** | You run multiple Cursor / Claude Code / Copilot sessions every day and you're tired of re-explaining the codebase, the conventions, and last week's decisions to each new agent. bikky remembers across every session and every tool. |
-| 👥 **Teams & software factories** | What one engineer's agent learns today, every agent on the team can recall tomorrow. Shared memory turns institutional knowledge into something queryable instead of tribal. |
 
 <p align="center">
-  <img src="docs/diagrams/team-memory.svg" alt="Memory — facts flow from individual sessions into a self-curating knowledge store, shared with your team or kept just for you" width="720" />
+  <img src="docs/diagrams/team-memory.svg" alt="Memory — facts flow from individual sessions into a self-curating knowledge store, shared across your team (or kept just for you)" width="720" />
 </p>
 
-<p align="center"><i>Knowledge flows from every session into a store that curates itself over time — deduplicating, distilling, and decaying stale facts — so every future session starts smarter. Use it solo, or share the workspace across a team.</i></p>
+<p align="center"><i>Knowledge flows from every session into a store that curates itself over time — deduplicating, distilling, and decaying stale facts — so every future session starts smarter. Share the workspace across a team, or keep it solo.</i></p>
 
 ---
 
 ### The problem
 
-The most valuable things you and your agents learn — why a config value exists, which deploy step matters, what broke last quarter, the convention you settled on yesterday — happen *during* sessions. And then they vanish when the session closes. Today's power devs run dozens of agentic sessions a day across multiple tools, and none of them remember each other; teams amplify the same problem at scale, with knowledge living in heads, chat threads, and closed PRs. Hand-written docs drift the moment they're published.
+The most valuable things you and your agents learn — why a config value exists, which deploy step matters, what broke last quarter, the convention you settled on yesterday — happen *during* sessions. And then they vanish when the session closes. Across a team, the same problem amplifies: knowledge lives in heads, chat threads, and closed PRs, and every new engineer's agent has to learn it from scratch. Solo power devs hit the same wall in miniature, running dozens of agentic sessions a day across multiple tools, none of which remember each other. Hand-written docs drift the moment they're published.
 
 ### How bikky solves it
 
