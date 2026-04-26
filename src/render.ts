@@ -22,11 +22,15 @@ import {
   contradictionPrompt,
   relationsPrompt,
   briefPrompt,
+  episodeSummaryPrompt,
+  workstreamSummaryPrompt,
   EXTRACTION_PROMPT_DESCRIPTOR,
   DISTILL_PROMPT_DESCRIPTOR,
   CONTRADICTION_PROMPT_DESCRIPTOR,
   RELATIONS_PROMPT_DESCRIPTOR,
   BRIEF_PROMPT_DESCRIPTOR,
+  EPISODE_SUMMARY_PROMPT_DESCRIPTOR,
+  WORKSTREAM_SUMMARY_PROMPT_DESCRIPTOR,
   type RenderedPrompt,
 } from "./prompts/index.js";
 
@@ -67,6 +71,18 @@ export const PROMPT_REGISTRY: Record<string, PromptEntry> = {
     version: BRIEF_PROMPT_DESCRIPTOR.version,
     describe: 'Generate a session briefing from grouped fact sections. Input: { generatedAt: ISO date, sections: { <heading>: string[] } }',
     build: (input) => briefPrompt(input as Parameters<typeof briefPrompt>[0]),
+  },
+  "episode-summary": {
+    id: EPISODE_SUMMARY_PROMPT_DESCRIPTOR.id,
+    version: EPISODE_SUMMARY_PROMPT_DESCRIPTOR.version,
+    describe: 'Summarize one coherent work episode. Input: { transcript: string }',
+    build: (input) => episodeSummaryPrompt(input as Parameters<typeof episodeSummaryPrompt>[0]),
+  },
+  "workstream-summary": {
+    id: WORKSTREAM_SUMMARY_PROMPT_DESCRIPTOR.id,
+    version: WORKSTREAM_SUMMARY_PROMPT_DESCRIPTOR.version,
+    describe: 'Maintain a current-state workstream summary. Input: { workstreamKey, existingSummary?, episodeSummaries: string[] }',
+    build: (input) => workstreamSummaryPrompt(input as Parameters<typeof workstreamSummaryPrompt>[0]),
   },
 };
 

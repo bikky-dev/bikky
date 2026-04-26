@@ -8,10 +8,10 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type { BikkyConfig } from "../config.js";
-import { chatCompletion } from "../llm/index.js";
 import { normalizeEntities } from "../mcp/taxonomy.js";
+import { chatCompletion } from "../llm/index.js";
+import { episodeSummaryPrompt } from "../prompts/index.js";
 import {
-  CAPTURE_BUDGETS,
   CAPTURE_POLICY_VERSION,
   CAPTURE_TRIGGERS,
   DEFAULT_CAPTURE_CONTEXT,
@@ -19,6 +19,8 @@ import {
 } from "./capture-policy.js";
 import * as qdrant from "./qdrant.js";
 import type { QdrantPayload } from "./qdrant.js";
+
+export { buildEpisodeSummaryMessages } from "../prompts/index.js";
 
 export interface WorkspaceScope {
   workspaceId?: string;
@@ -136,38 +138,6 @@ export const segmentTranscriptIntoEpisodes = (input: {
     }));
 };
 
-export const buildEpisodeSummaryMessages = (input: {
-  transcript: string;
-}): Array<{ role: "system" | "user"; content: string }> => [
-  {
-    role: "system",
-    content:
-      "You are Bikky's background memory daemon. Summarize one coherent work episode, not the whole session. " +
-      "Preserve durable current state: task goal, files/surfaces touched, important commands, decisions, failures, validation, and open follow-ups. " +
-      "Do not include chat narration. Output only valid JSON.",
-  },
-  {
-    role: "user",
-    content: `Summarize this episode as durable memory for a future coding agent.
-
-## Episode transcript
-${input.transcript}
-
-## Output JSON shape
-{
-  "content": "${CAPTURE_BUDGETS.episodeSummary.targetWords[0]}-${CAPTURE_BUDGETS.episodeSummary.targetWords[1]} words, self-contained current-state summary",
-  "tasks_completed": ["short task or milestone labels"],
-  "decisions_made": ["decision with rationale if present"],
-  "open_questions": ["blockers or follow-ups if present"],
-  "entities": ["lowercase key repos/services/files/tools"],
-  "workstream_key": "stable task/project key when explicit, otherwise null",
-  "importance": 0.75
-}
-
-Return only the JSON object.`,
-  },
-];
-
 export const parseEpisodeSummaryDraft = (raw: string): EpisodeSummaryDraft => {
   const parsed = JSON.parse(stripJsonFence(raw)) as Record<string, unknown>;
   const contentValue = parsed.content ?? parsed.summary;
@@ -277,12 +247,7 @@ export const buildEpisodeSummaryPayload = (input: {
 };
 
 const summarizeEpisodeTranscript = async (transcript: string): Promise<EpisodeSummaryDraft> => {
-  const result = await chatCompletion({
-    messages: buildEpisodeSummaryMessages({ transcript }),
-    temperature: 0.2,
-    max_tokens: 1500,
-    response_format: { type: "json_object" },
-  });
+  const result = await chatCompletion(episodeSummaryPrompt({ transcript }));
   if (!result) throw new Error("Episode summary LLM returned null");
   return parseEpisodeSummaryDraft(result);
 };
