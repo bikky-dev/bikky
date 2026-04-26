@@ -36,7 +36,7 @@ describe("daemon/workstream-summary", () => {
     const messages = buildWorkstreamSummaryMessages({
       workstreamKey: "task-a",
       existingSummary: "Old state",
-      episodeSummaries: ["Implemented ontology v2.", "Added tests."],
+      episodeSummaries: ["Implemented the memory ontology.", "Added tests."],
     });
 
     assert.match(messages[0].content, /current-state workstream summary/);
@@ -47,7 +47,7 @@ describe("daemon/workstream-summary", () => {
   it("parses workstream summary drafts", () => {
     const draft = parseWorkstreamSummaryDraft(`\`\`\`json
 {
-  "content": "Ontology v2 is implemented and extraction is being hardened.",
+  "content": "The memory ontology is implemented and extraction is being hardened.",
   "current_decisions": ["Use domain for activity profile"],
   "next_steps": ["Run full validation"],
   "blockers": ["None"],
@@ -56,7 +56,7 @@ describe("daemon/workstream-summary", () => {
 }
 \`\`\``);
 
-    assert.equal(draft.content, "Ontology v2 is implemented and extraction is being hardened.");
+    assert.equal(draft.content, "The memory ontology is implemented and extraction is being hardened.");
     assert.deepEqual(draft.current_decisions, ["Use domain for activity profile"]);
     assert.deepEqual(draft.entities, ["bikky", "qdrant"]);
   });
@@ -89,7 +89,7 @@ describe("daemon/workstream-summary", () => {
   it("builds one current-state payload per workstream", () => {
     const { payload } = buildWorkstreamSummaryPayload({
       draft: {
-        content: "Ontology v2 implementation is in validation.",
+        content: "Memory ontology implementation is in validation.",
         current_decisions: ["Use software_engineering as the default domain"],
         next_steps: ["Run npm test"],
         blockers: [],

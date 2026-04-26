@@ -1,5 +1,5 @@
 /**
- * Daemon-owned capture policy for ontology v2.
+ * Daemon-owned capture policy for the memory ontology.
  *
  * These constants define when Bikky should capture memory, how large each
  * generated object should be, and which prompt/capture versions are stored on

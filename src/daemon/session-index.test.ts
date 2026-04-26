@@ -45,7 +45,7 @@ describe("daemon/session-index", () => {
     ), false);
   });
 
-  it("builds ontology-v2 session index payloads", () => {
+  it("builds memory ontology session index payloads", () => {
     const draft = buildSessionIndexDraft({
       sessionId: "uuid:test-session",
       eventCount: 12,

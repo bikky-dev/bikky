@@ -10,7 +10,7 @@ import {
 } from "./extraction.js";
 
 describe("daemon/extraction prompt", () => {
-  it("describes ontology v2 fields and avoids legacy domain wording", () => {
+  it("describes memory ontology fields and avoids legacy domain wording", () => {
     assert.ok(DEFAULT_EXTRACTION_PROMPT.includes("software_engineering"));
     assert.ok(DEFAULT_EXTRACTION_PROMPT.includes("memory_subtype"));
     assert.ok(DEFAULT_EXTRACTION_PROMPT.includes("codebase_map"));

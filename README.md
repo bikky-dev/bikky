@@ -118,17 +118,28 @@ export QDRANT_URL="http://localhost:6333"
 
 `memory_store` · `memory_recall` · `memory_entity` · `memory_relations` · `memory_forget` · `memory_verify` · `memory_heartbeat` · `memory_review` · `configure_credentials` · `verify_connection`
 
-**Daemon** — background process that passively watches session logs, extracts ontology-v2 facts, writes lightweight session indexes, captures coherent episode summaries, updates current-state workstream summaries, infers entity relationships, and runs the consolidation pipeline. Lifecycle memory is daemon-owned so agents do not need to remember summary/distillation tool calls.
+**Daemon** — background process that passively watches session logs, extracts structured facts, writes lightweight session indexes, captures coherent episode summaries, updates current-state workstream summaries, infers entity relationships, and runs the consolidation pipeline. Lifecycle memory is daemon-owned so agents do not need to remember summary/distillation tool calls.
 
 ---
 
 ## Memory ontology
 
-New daemon captures use ontology v2:
+New daemon captures use a layered memory ontology. At a high level, bikky structures memory like this:
 
 ```text
-workspace -> domain -> repo/project/surface -> workstream -> episode -> memory objects
+Workspace
+  Domain
+    Project / repo / surface
+      Workstream
+        Episodes
+          Facts, decisions, preferences, operational notes
+        Current-state summaries
+          What matters now, open questions, blockers
+    Cross-cutting memory
+      Durable patterns, entity relationships, telemetry
 ```
+
+This gives each memory enough context to be recalled precisely without forcing every note into a rigid project hierarchy.
 
 `domain` is an activity/knowledge profile. The initial canonical domains are:
 
