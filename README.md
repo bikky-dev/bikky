@@ -12,7 +12,7 @@ bikky gives AI coding agents (GitHub Copilot, Claude Code, Cursor, and other MCP
 | 🧑‍💻 **Solo AI power devs** | You run multiple Cursor / Claude Code / Copilot sessions every day and you're tired of re-explaining the codebase, the conventions, and last week's decisions to each new agent. bikky remembers across every session and every tool. |
 
 <p align="center">
-  <img src="docs/diagrams/team-memory.svg" alt="Memory — facts flow from individual sessions into a self-curating knowledge store, shared across your team (or kept just for you)" width="720" />
+  <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/diagrams/team-memory.svg" alt="Memory — facts flow from individual sessions into a self-curating knowledge store, shared across your team (or kept just for you)" width="720" />
 </p>
 
 <p align="center"><i>Knowledge flows from every session into a store that curates itself over time — deduplicating, distilling, and decaying stale facts — so every future session starts smarter. Share the workspace across a team, or keep it solo.</i></p>
@@ -111,7 +111,7 @@ export QDRANT_URL="http://localhost:6333"
 ## How it works
 
 <p align="center">
-  <img src="docs/diagrams/architecture.svg" alt="Architecture" width="600" />
+  <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/diagrams/architecture.svg" alt="Architecture" width="600" />
 </p>
 
 **MCP Server** — tools your agent calls directly:
@@ -171,17 +171,17 @@ bikky-ui              # opens http://localhost:1422
 ```
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Dashboard — overview stats, category breakdown, recent facts" width="720" />
+  <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/screenshots/dashboard.png" alt="Dashboard — overview stats, category breakdown, recent facts" width="720" />
 </p>
 <p align="center"><i>Dashboard — memory stats, category breakdown, and recent facts at a glance</i></p>
 
 <p align="center">
-  <img src="docs/screenshots/memory.png" alt="Memory browser — search, filter, and browse all stored facts" width="720" />
+  <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/screenshots/memory.png" alt="Memory browser — search, filter, and browse all stored facts" width="720" />
 </p>
 <p align="center"><i>Memory browser — search, filter by category/kind/source, and browse all stored facts</i></p>
 
 <p align="center">
-  <img src="docs/screenshots/graph.png" alt="Entity graph — interactive visualization of entity relationships" width="720" />
+  <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/screenshots/graph.png" alt="Entity graph — interactive visualization of entity relationships" width="720" />
 </p>
 <p align="center"><i>Entity graph — interactive visualization of how concepts, people, and services relate</i></p>
 

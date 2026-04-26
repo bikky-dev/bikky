@@ -1,6 +1,6 @@
 {
   "name": "bikky",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Shared memory for AI coding sessions — MCP server + background daemon",
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -16,7 +16,9 @@
   },
   "files": [
     "dist/",
-    "bin/"
+    "bin/",
+    "docs/diagrams/",
+    "docs/screenshots/"
   ],
   "scripts": {
     "build": "tsc",
