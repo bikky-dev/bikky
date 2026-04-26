@@ -160,6 +160,10 @@ describe("mcp/tools handlers", () => {
       "memory_verify",
       "memory_review",
       "memory_heartbeat",
+      "memory_mark_useful",
+      "memory_report_outcome",
+      "memory_session_summary",
+      "memory_distill",
     ]) {
       assert.ok(handlers.has(name), `expected handler '${name}' to be registered`);
     }
@@ -556,6 +560,237 @@ describe("mcp/tools handlers", () => {
       const result = await invoke("memory_forget", { fact_id: "x", reason: "y" });
       const text = textOf(result);
       assert.match(text, /^Error: /);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // memory_mark_useful
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe("memory_mark_useful", () => {
+    it("bumps useful_count and writes a feedback_event telemetry row", async () => {
+      const setPayloadCalls: Array<Record<string, unknown>> = [];
+      let upsertedPayload: Record<string, unknown> | null = null;
+
+      on(/\/points$/, (call) => {
+        const b = call.body as { ids?: unknown; points?: unknown };
+        if (call.method === "POST" && b.ids) {
+          return { result: [{ id: "fact-1", payload: { content: "x", useful_count: 2 } }] };
+        }
+        if (call.method === "PUT" && b.points) {
+          upsertedPayload = (b.points as Array<{ payload: Record<string, unknown> }>)[0].payload;
+          return { status: "ok" };
+        }
+        return { status: "ok" };
+      });
+      on("/points/payload", (call) => {
+        setPayloadCalls.push(call.body as Record<string, unknown>);
+        return { status: "ok" };
+      });
+
+      const result = await invoke("memory_mark_useful", { fact_id: "fact-1", note: "saved a re-debug" });
+      const parsed = JSON.parse(textOf(result));
+
+      assert.equal(parsed.status, "marked_useful");
+      assert.equal(parsed.fact_id, "fact-1");
+      assert.equal(parsed.useful_count, 3);
+      assert.ok(parsed.event_id);
+
+      // Counter bump on the original fact.
+      const counterBump = setPayloadCalls.find((b) => (b as { payload: Record<string, unknown> }).payload.useful_count !== undefined);
+      assert.ok(counterBump, "expected a useful_count payload update");
+      const bumpPayload = (counterBump as { payload: Record<string, unknown> }).payload;
+      assert.equal(bumpPayload.useful_count, 3);
+      assert.ok(bumpPayload.last_useful_at);
+
+      // Telemetry row written.
+      assert.ok(upsertedPayload, "expected a telemetry feedback_event upsert");
+      const tp = upsertedPayload as Record<string, unknown>;
+      assert.equal(tp.kind, "telemetry");
+      assert.equal(tp.memory_subtype, "feedback_event");
+      assert.equal(tp.target_fact_id, "fact-1");
+      assert.equal(tp.feedback_kind, "useful");
+      assert.match(String(tp.content), /saved a re-debug/);
+    });
+
+    it("returns not_found when the fact does not exist", async () => {
+      on(/\/points$/, (call) => {
+        const b = call.body as { ids?: unknown };
+        if (call.method === "POST" && b.ids) return { result: [] };
+        return { status: "ok" };
+      });
+      const result = await invoke("memory_mark_useful", { fact_id: "missing" });
+      const parsed = JSON.parse(textOf(result));
+      assert.equal(parsed.status, "not_found");
+      assert.equal(parsed.fact_id, "missing");
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // memory_report_outcome
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe("memory_report_outcome", () => {
+    it("writes an outcome_event telemetry row carrying the outcome value", async () => {
+      let upsertedPayload: Record<string, unknown> | null = null;
+
+      on(/\/points$/, (call) => {
+        const b = call.body as { ids?: unknown; points?: unknown };
+        if (call.method === "POST" && b.ids) {
+          return { result: [{ id: "fact-2", payload: { content: "y" } }] };
+        }
+        if (call.method === "PUT" && b.points) {
+          upsertedPayload = (b.points as Array<{ payload: Record<string, unknown> }>)[0].payload;
+          return { status: "ok" };
+        }
+        return { status: "ok" };
+      });
+
+      const result = await invoke("memory_report_outcome", {
+        fact_id: "fact-2",
+        outcome: "misleading",
+        notes: "API moved in v2",
+      });
+      const parsed = JSON.parse(textOf(result));
+
+      assert.equal(parsed.status, "outcome_recorded");
+      assert.equal(parsed.outcome, "misleading");
+      assert.ok(parsed.event_id);
+
+      assert.ok(upsertedPayload);
+      const tp = upsertedPayload as Record<string, unknown>;
+      assert.equal(tp.kind, "telemetry");
+      assert.equal(tp.memory_subtype, "outcome_event");
+      assert.equal(tp.target_fact_id, "fact-2");
+      assert.equal(tp.outcome, "misleading");
+      // Negative outcomes are higher importance.
+      assert.equal(tp.importance, 0.6);
+      assert.match(String(tp.content), /API moved in v2/);
+    });
+
+    it("uses lower importance for non-negative outcomes", async () => {
+      let upsertedPayload: Record<string, unknown> | null = null;
+      on(/\/points$/, (call) => {
+        const b = call.body as { ids?: unknown; points?: unknown };
+        if (call.method === "POST" && b.ids) {
+          return { result: [{ id: "fact-3", payload: { content: "z" } }] };
+        }
+        if (call.method === "PUT" && b.points) {
+          upsertedPayload = (b.points as Array<{ payload: Record<string, unknown> }>)[0].payload;
+          return { status: "ok" };
+        }
+        return { status: "ok" };
+      });
+
+      await invoke("memory_report_outcome", { fact_id: "fact-3", outcome: "useful" });
+      const tp = upsertedPayload as unknown as Record<string, unknown>;
+      assert.equal(tp.outcome, "useful");
+      assert.equal(tp.importance, 0.3);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // memory_session_summary
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe("memory_session_summary", () => {
+    it("inserts a summary point pinned to kind=summary, memory_subtype=session_index", async () => {
+      let upsertedPayload: Record<string, unknown> | null = null;
+      on(/\/points$/, (call) => {
+        const b = call.body as { points?: unknown };
+        if (call.method === "PUT" && b.points) {
+          upsertedPayload = (b.points as Array<{ payload: Record<string, unknown> }>)[0].payload;
+          return { status: "ok" };
+        }
+        return { status: "ok" };
+      });
+
+      const result = await invoke("memory_session_summary", {
+        content: "Built taxonomy slim and added 4 feedback tools.",
+        entities: ["Bikky", "Taxonomy"],
+        episode_id: "ep-1",
+        workstream_key: "ws-bikky",
+        repo: "bikky-dev/bikky",
+      });
+      const parsed = JSON.parse(textOf(result));
+      assert.equal(parsed.status, "summary_stored");
+      assert.ok(parsed.summary_id);
+
+      assert.ok(upsertedPayload);
+      const p = upsertedPayload as Record<string, unknown>;
+      assert.equal(p.kind, "summary");
+      assert.equal(p.memory_subtype, "session_index");
+      assert.equal(p.source, "agent");
+      assert.equal(p.episode_id, "ep-1");
+      assert.equal(p.workstream_key, "ws-bikky");
+      assert.equal(p.repo, "bikky-dev/bikky");
+      assert.deepEqual(p.entities, ["bikky", "taxonomy"]);
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // memory_distill
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe("memory_distill", () => {
+    it("inserts a distilled point pinned to kind=distilled, memory_subtype=convention", async () => {
+      let upsertedPayload: Record<string, unknown> | null = null;
+      on(/\/points$/, (call) => {
+        const b = call.body as { points?: unknown };
+        if (call.method === "PUT" && b.points) {
+          upsertedPayload = (b.points as Array<{ payload: Record<string, unknown> }>)[0].payload;
+          return { status: "ok" };
+        }
+        return { status: "ok" };
+      });
+
+      const result = await invoke("memory_distill", {
+        content: "Always create the relevant Qdrant payload index before adding a new filter.",
+        entities: ["Qdrant", "filter"],
+      });
+      const parsed = JSON.parse(textOf(result));
+      assert.equal(parsed.status, "distilled_stored");
+      assert.ok(parsed.distilled_id);
+
+      assert.ok(upsertedPayload);
+      const p = upsertedPayload as Record<string, unknown>;
+      assert.equal(p.kind, "distilled");
+      assert.equal(p.memory_subtype, "convention");
+      assert.equal(p.source, "agent");
+      assert.deepEqual(p.entities, ["qdrant", "filter"]);
+    });
+
+    it("supersedes a prior distilled fact when supersedes is provided", async () => {
+      const setPayloadCalls: Array<Record<string, unknown>> = [];
+      on(/\/points$/, (call) => {
+        const b = call.body as { ids?: unknown; points?: unknown };
+        if (call.method === "POST" && b.ids) {
+          return { result: [{ id: "old-1", payload: { content: "old convention" } }] };
+        }
+        return { status: "ok" };
+      });
+      on("/points/payload", (call) => {
+        setPayloadCalls.push(call.body as Record<string, unknown>);
+        return { status: "ok" };
+      });
+
+      const result = await invoke("memory_distill", {
+        content: "Refined convention.",
+        entities: ["x"],
+        supersedes: "old-1",
+      });
+      const parsed = JSON.parse(textOf(result));
+      assert.equal(parsed.status, "distilled_stored");
+      assert.equal(parsed.supersedes, "old-1");
+
+      const supersedeCall = setPayloadCalls.find((b) => {
+        const points = (b as { points?: unknown }).points as string[] | undefined;
+        return Array.isArray(points) && points.includes("old-1");
+      });
+      assert.ok(supersedeCall, "expected a supersede payload update on old-1");
+      const sp = (supersedeCall as { payload: Record<string, unknown> }).payload;
+      assert.equal(sp.superseded_by, parsed.distilled_id);
+      assert.ok(sp.superseded_at);
     });
   });
 });
