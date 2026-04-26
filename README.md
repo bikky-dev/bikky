@@ -86,6 +86,30 @@ Restart your editor — memory tools appear automatically.
 
 ---
 
+## Memory ontology
+
+New daemon captures use ontology v2:
+
+```text
+workspace -> domain -> repo/project/surface -> workstream -> episode -> memory objects
+```
+
+`domain` is an activity/knowledge profile. The initial canonical domains are:
+
+| Domain | Purpose |
+|--------|---------|
+| `software_engineering` | Default for coding-agent captures: repos, code, infrastructure, releases, incidents |
+| `product_strategy` | Roadmap, positioning, experiments, customer insight, product decisions |
+| `business_operations` | Company processes, vendors, compliance, obligations, recurring workflows |
+| `research` | Source-backed investigation, hypotheses, contradictions, synthesis |
+| `personal_productivity` | Individual goals, routines, preferences, projects, habits |
+
+For `software_engineering`, canonical categories are `codebase`, `infrastructure`, `operations`, `decisions`, `product_domain`, `projects`, `people`, `preferences`, and `observations`.
+
+`kind` stays small (`fact`, `summary`, `distilled`, `relation`, `telemetry`). More specific shape lives in `memory_subtype`, such as `codebase_map`, `architecture_decision`, `episode`, `workstream`, or `failure_mode`.
+
+---
+
 ## Self-curation
 
 Raw fact accumulation creates noise. bikky keeps the knowledge store clean automatically:
