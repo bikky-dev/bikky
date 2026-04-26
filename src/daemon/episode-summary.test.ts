@@ -18,7 +18,7 @@ const defaultScope: WorkspaceScope = {
 
 describe("daemon/episode-summary", () => {
   it("segments two unrelated user tasks in one session into two episodes", () => {
-    const transcript = `[USER] Implement ontology v2 in src/mcp/taxonomy.ts and add tests.
+    const transcript = `[USER] Implement the memory ontology in src/mcp/taxonomy.ts and add tests.
 
 [ASSISTANT] Updated src/mcp/taxonomy.ts with software_engineering domains and memory_subtype validation. Ran npm test for taxonomy.
 
@@ -34,7 +34,7 @@ describe("daemon/episode-summary", () => {
 
     assert.equal(segments.length, 2);
     assert.match(segments[0].episode_id, /^uuid:test-session:episode:/);
-    assert.match(segments[0].transcript, /ontology v2/);
+    assert.match(segments[0].transcript, /memory ontology/);
     assert.match(segments[1].transcript, /UI smoke tests/);
   });
 
@@ -58,7 +58,7 @@ describe("daemon/episode-summary", () => {
   it("parses episode summary drafts", () => {
     const draft = parseEpisodeSummaryDraft(`\`\`\`json
 {
-  "content": "Implemented ontology v2 extraction for src/daemon/extraction.ts.",
+  "content": "Implemented memory ontology extraction for src/daemon/extraction.ts.",
   "tasks_completed": ["ontology extraction"],
   "decisions_made": ["Use memory_subtype on daemon facts"],
   "open_questions": ["wire workstream summaries"],
@@ -68,7 +68,7 @@ describe("daemon/episode-summary", () => {
 }
 \`\`\``);
 
-    assert.equal(draft.content, "Implemented ontology v2 extraction for src/daemon/extraction.ts.");
+    assert.equal(draft.content, "Implemented memory ontology extraction for src/daemon/extraction.ts.");
     assert.deepEqual(draft.entities, ["bikky", "src/daemon/extraction.ts"]);
     assert.equal(draft.workstream_key, "243-bikky-data-capture-policy");
   });
@@ -92,7 +92,7 @@ describe("daemon/episode-summary", () => {
     ), false);
   });
 
-  it("builds ontology-v2 episode payloads", () => {
+  it("builds memory ontology episode payloads", () => {
     const { payload } = buildEpisodeSummaryPayload({
       draft: {
         content: "Implemented daemon episode summaries for src/daemon/episode-summary.ts.",

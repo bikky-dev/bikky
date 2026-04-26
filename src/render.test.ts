@@ -157,7 +157,7 @@ test("renderPrompt: episode-summary renders", () => {
 test("renderPrompt: workstream-summary renders", () => {
   const out = renderPrompt("workstream-summary", {
     workstreamKey: "231-bikky-evals-deepeval",
-    existingSummary: "Eval harness has ontology-v2 coverage.",
+    existingSummary: "Eval harness has memory ontology coverage.",
     episodeSummaries: ["Added episode-summary eval cases.", "Added workstream-summary eval cases."],
   });
   assert.match(out.promptName, /^workstream-summary@/);

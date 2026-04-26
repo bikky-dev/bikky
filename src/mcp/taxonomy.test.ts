@@ -57,7 +57,7 @@ describe("ontology values", () => {
     ]);
   });
 
-  it("exposes only canonical ontology v2 categories", () => {
+  it("exposes only canonical memory ontology categories", () => {
     assert.deepStrictEqual(categoryValues(), canonicalCategoryValues());
     assert.ok(!categoryValues().includes("observation"));
     assert.ok(!categoryValues().includes("team"));
@@ -208,7 +208,7 @@ describe("decay policy", () => {
 });
 
 describe("QDRANT_INDEXES", () => {
-  it("includes ontology v2 query-critical payload indexes", () => {
+  it("includes memory ontology query-critical payload indexes", () => {
     const indexes = new Map(QDRANT_INDEXES.map((idx) => [idx.field_name, idx.field_schema]));
     assert.strictEqual(indexes.get("category"), "keyword");
     assert.strictEqual(indexes.get("domain"), "keyword");
