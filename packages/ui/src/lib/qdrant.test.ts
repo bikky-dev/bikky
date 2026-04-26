@@ -198,6 +198,25 @@ describe("ui/lib/qdrant", () => {
       const c = createQdrantClient();
       assert.ok(c instanceof QdrantClient);
     });
+
+    it("returns true with URL alone (local / self-hosted Qdrant, no API key)", () => {
+      process.env.QDRANT_URL = "http://localhost:6333";
+
+      assert.equal(isQdrantConfigured(), true);
+      const c = createQdrantClient();
+      assert.ok(c instanceof QdrantClient);
+    });
+  });
+
+  describe("auth header (no api key)", () => {
+    it("omits the api-key header when none is configured", async () => {
+      const client = new QdrantClient("https://q.test:6333", null, "col");
+      const calls = installMock(() => new Response(JSON.stringify({ result: [] }), { status: 200 }));
+      await client.search([0.1]);
+      const headers = calls[0]!.init.headers as Record<string, string>;
+      assert.equal(headers["api-key"], undefined);
+      assert.equal(headers["Content-Type"], "application/json");
+    });
   });
 
   it("QdrantNotConfiguredError carries a helpful message", () => {

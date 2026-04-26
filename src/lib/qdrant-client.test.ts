@@ -234,11 +234,32 @@ describe("QdrantClient", () => {
     it("rejects empty url", () => {
       assert.throws(() => new QdrantClient({ ...baseOpts, url: "" }), /url is required/);
     });
-    it("rejects empty apiKey", () => {
-      assert.throws(() => new QdrantClient({ ...baseOpts, apiKey: "" }), /apiKey is required/);
+    it("accepts missing apiKey (local / self-hosted Qdrant)", () => {
+      assert.doesNotThrow(() => new QdrantClient({ ...baseOpts, apiKey: "" }));
+      assert.doesNotThrow(() => new QdrantClient({ ...baseOpts, apiKey: null }));
+      assert.doesNotThrow(() => new QdrantClient({ ...baseOpts, apiKey: undefined }));
     });
     it("rejects empty collection", () => {
       assert.throws(() => new QdrantClient({ ...baseOpts, collection: "" }), /collection is required/);
+    });
+  });
+
+  describe("auth header", () => {
+    it("omits api-key header when no apiKey is configured", async () => {
+      mock = installFetchMock([{ status: 200, body: "{}" }]);
+      const client = new QdrantClient({ ...baseOpts, apiKey: null });
+      await client.request("GET", "/collections");
+      const headers = mock.calls[0].init?.headers as Record<string, string>;
+      assert.equal(headers["api-key"], undefined);
+      assert.equal(headers["Content-Type"], "application/json");
+    });
+
+    it("omits api-key header when apiKey is empty string", async () => {
+      mock = installFetchMock([{ status: 200, body: "{}" }]);
+      const client = new QdrantClient({ ...baseOpts, apiKey: "" });
+      await client.request("GET", "/collections");
+      const headers = mock.calls[0].init?.headers as Record<string, string>;
+      assert.equal(headers["api-key"], undefined);
     });
   });
 });

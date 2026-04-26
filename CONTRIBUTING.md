@@ -87,10 +87,10 @@ Good references for new tests:
 
 ### Integration tests (opt-in, real Qdrant)
 
-The default `npm test` mocks every external call. We also ship one **opt-in** end-to-end smoke test that talks to a real Qdrant Cloud instance and a real embedding provider — it's the only thing that catches filter-shape rejections, payload-index mismatches, vector-dimension drift, and whether the dedup similarity thresholds (`THRESHOLD_DUPLICATE`, `THRESHOLD_RELATED`) actually correspond to near-duplicates against your embedding model.
+The default `npm test` mocks every external call. We also ship one **opt-in** end-to-end smoke test that talks to a real Qdrant instance (Cloud, local Docker, or self-hosted) and a real embedding provider — it's the only thing that catches filter-shape rejections, payload-index mismatches, vector-dimension drift, and whether the dedup similarity thresholds (`THRESHOLD_DUPLICATE`, `THRESHOLD_RELATED`) actually correspond to near-duplicates against your embedding model.
 
 ```bash
-# Uses your existing ~/.bikky/config.json + QDRANT_URL/QDRANT_API_KEY env.
+# Uses your existing ~/.bikky/config.json + QDRANT_URL (and QDRANT_API_KEY if your Qdrant requires it).
 BIKKY_INTEGRATION=1 npm run test:integration
 ```
 

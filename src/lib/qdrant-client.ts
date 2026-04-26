@@ -18,7 +18,12 @@ export type QdrantLogFn = (level: QdrantLogLevel, msg: string) => void;
 
 export interface QdrantClientOptions {
   url: string;
-  apiKey: string;
+  /**
+   * Qdrant API key. Optional — leave empty/null/undefined for unauthenticated
+   * local or self-hosted instances (e.g. `docker run qdrant/qdrant`). Required
+   * for Qdrant Cloud.
+   */
+  apiKey?: string | null;
   collection: string;
   /** Per-request timeout in ms (default 10_000). */
   timeoutMs?: number;
@@ -150,7 +155,7 @@ const classifyStatus = (
 
 export class QdrantClient {
   private readonly url: string;
-  private readonly apiKey: string;
+  private readonly apiKey: string | null;
   readonly collection: string;
   private readonly timeoutMs: number;
   private readonly retries: number;
@@ -159,10 +164,9 @@ export class QdrantClient {
 
   constructor(opts: QdrantClientOptions) {
     if (!opts.url) throw new Error("QdrantClient: url is required");
-    if (!opts.apiKey) throw new Error("QdrantClient: apiKey is required");
     if (!opts.collection) throw new Error("QdrantClient: collection is required");
     this.url = opts.url.replace(/\/+$/, "");
-    this.apiKey = opts.apiKey;
+    this.apiKey = opts.apiKey || null;
     this.collection = opts.collection;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.retries = opts.retries ?? DEFAULT_RETRIES;
@@ -221,8 +225,8 @@ export class QdrantClient {
     const url = `${this.url}${path}`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "api-key": this.apiKey,
     };
+    if (this.apiKey) headers["api-key"] = this.apiKey;
     const init: RequestInit = { method, headers };
     if (body !== undefined) init.body = JSON.stringify(body);
 
