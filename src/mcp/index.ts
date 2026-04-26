@@ -83,7 +83,14 @@ export async function startMcpServer(): Promise<void> {
     name: "bikky",
     version: "0.1.0",
   }, {
-    instructions: "Shared memory tools for AI coding sessions. Store and recall facts, entities, and relationships across sessions.",
+    instructions: [
+      "Bikky provides persistent memory across AI coding sessions. Use it as a working loop, not a database:",
+      "  • STORE when you learn something durable (a service detail, a decision, a workaround, a user preference). Call memory_store with one atomic fact per call — dedup is automatic, so don't pre-check.",
+      "  • RECALL before acting. At session start, call memory_recall with a broad briefing query. For each new user prompt about an unfamiliar topic, recall again with a focused query. Recall before storing too, to surface conflicts.",
+      "  • VERIFY when stale. memory_heartbeat surfaces stale fact IDs every ~3 calls; confirm them with memory_verify, retire them with memory_forget, or replace them with memory_store(supersedes: <id>).",
+      "  • ENTITY-FIRST queries. When the user asks 'tell me about X', prefer memory_entity over memory_recall.",
+      "If the system is not configured, call get_setup_status for guidance.",
+    ].join("\n"),
   });
 
   registerTools(mcp);
