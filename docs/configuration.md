@@ -175,6 +175,32 @@ The daemon owns memory lifecycle work: it extracts ontology-v2 facts, writes lig
 | `daemon.relation_inference_enabled` | `true` | Infer entity relationships via LLM |
 | `daemon.staleness_threshold_days` | `30` | Days before a fact is flagged as stale |
 
+## Logs
+
+Bikky writes logs to `~/.bikky/logs/` (the same directory as the config file).
+
+| File | Written by |
+|------|-----------|
+| `mcp.log` | The MCP server (`bikky mcp`) |
+| `daemon.log` | The background daemon (`bikky daemon` / `bikky start`) |
+
+Logs are **structured JSON lines** produced by [pino](https://github.com/pinojs/pino). Each line has at minimum `{level, time, name, msg}`; provider failures, telemetry events, and Qdrant operations attach extra fields (e.g. `provider`, `kind`, `status`). Files rotate in-process at 2MB, keeping 3 generations (`mcp.log` + `mcp.log.1` + `mcp.log.2`).
+
+Pretty-print with [`pino-pretty`](https://github.com/pinojs/pino-pretty) when tailing:
+
+```bash
+tail -f ~/.bikky/logs/daemon.log | npx pino-pretty
+```
+
+Or grep structured fields with `jq`:
+
+```bash
+jq 'select(.level=="error")' ~/.bikky/logs/daemon.log
+jq 'select(.provider=="openai" and .kind=="auth")' ~/.bikky/logs/mcp.log
+```
+
+Stdout/stderr are reserved for the MCP stdio transport — bikky never logs to the terminal from the MCP process.
+
 ## Memory ontology
 
 New daemon captures use ontology v2:
