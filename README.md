@@ -4,28 +4,35 @@
 
 <h1 align="center">bikky</h1>
 
-<p align="center"><b>Shared persistent memory for AI coding agents.</b></p>
+<p align="center"><b>Persistent memory for AI coding agents — for solo power users and teams.</b></p>
 
-bikky gives your team's AI agents (GitHub Copilot, Claude Code, Cursor, Codex, and other MCP clients) long-term memory that persists across sessions and is shared across team members. It helps software factories become queryable organizations: what one engineer's agent learns today, every agent on the team knows tomorrow through a closed-loop memory system.
+bikky gives AI coding agents (GitHub Copilot, Claude Code, Cursor, Codex, and other MCP clients) long-term memory that persists across sessions, across tools, and — when you want it — across your whole team. Whether you're a solo power dev running a dozen agentic sessions a day, or a team that wants every engineer's agent to start from the same knowledge base, bikky captures what's learned *during* sessions so future sessions start smarter.
+
+### Who it's for
+
+| | |
+|---|---|
+| 🧑‍💻 **Solo AI power devs** | You run multiple Cursor / Claude Code / Copilot / Codex sessions every day and you're tired of re-explaining the codebase, the conventions, and last week's decisions to each new agent. bikky remembers across every session and every tool. |
+| 👥 **Teams & software factories** | What one engineer's agent learns today, every agent on the team can recall tomorrow. Shared memory turns institutional knowledge into something queryable instead of tribal. |
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/team-memory.svg" alt="Team memory — facts flow from individual sessions into a shared, self-curating knowledge store" width="720" />
+  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/team-memory.svg" alt="Memory — facts flow from individual sessions into a self-curating knowledge store, shared with your team or kept just for you" width="720" />
 </p>
 
-<p align="center"><i>Knowledge flows from every team member's sessions into a shared store that curates itself over time — deduplicating, distilling, and decaying stale facts — so every future session starts smarter.</i></p>
+<p align="center"><i>Knowledge flows from every session into a store that curates itself over time — deduplicating, distilling, and decaying stale facts — so every future session starts smarter. Use it solo, or share the workspace across a team.</i></p>
 
 ---
 
 ### The problem
 
-Every engineering team runs on institutional knowledge — why that config value exists, which deploy steps matter, what broke last quarter. It lives in people's heads, chat threads, and closed PRs. When someone switches projects, it's gone. AI coding agents amplify this: teams generate more decisions and discoveries per day than anyone can track, and hand-written knowledge bases drift the moment they're published. The things learned *during* sessions — the most valuable knowledge — still vanish when the session closes.
+The most valuable things you and your agents learn — why a config value exists, which deploy step matters, what broke last quarter, the convention you settled on yesterday — happen *during* sessions. And then they vanish when the session closes. Today's power devs run dozens of agentic sessions a day across multiple tools, and none of them remember each other; teams amplify the same problem at scale, with knowledge living in heads, chat threads, and closed PRs. Hand-written docs drift the moment they're published.
 
 ### How bikky solves it
 
 | | |
 |---|---|
 | **Capture** | Facts are extracted automatically from session transcripts — no manual docs to write |
-| **Share** | Every team member's agent recalls from the same knowledge store via semantic search |
+| **Recall** | Every new session — yours or a teammate's — recalls from the same store via semantic search |
 | **Curate** | Deduplication, confidence decay, contradiction detection, and distillation run autonomously |
 | **Compound** | Session 50 is dramatically better than session 1 — accumulated memory, not better prompts |
 
