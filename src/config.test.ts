@@ -207,10 +207,10 @@ describe("config", () => {
       assert.strictEqual(cfg.watchers.copilot.enabled, true);
     });
 
-    it("watchers.claude.enabled defaults to false", () => {
+    it("watchers.claude.enabled defaults to true", () => {
       if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
       const cfg = loadConfig();
-      assert.strictEqual(cfg.watchers.claude.enabled, false);
+      assert.strictEqual(cfg.watchers.claude.enabled, true);
     });
   });
 

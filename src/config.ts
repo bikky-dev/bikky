@@ -133,7 +133,7 @@ const DEFAULTS: BikkyConfig = {
   },
   watchers: {
     copilot: { enabled: true, path: path.join(os.homedir(), ".copilot", "session-state") },
-    claude: { enabled: false, path: path.join(os.homedir(), ".claude", "projects") },
+    claude: { enabled: true, path: path.join(os.homedir(), ".claude", "projects") },
   },
   qdrant_client: {
     timeout_ms: 10_000,
