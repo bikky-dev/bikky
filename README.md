@@ -47,7 +47,7 @@ bikky install          # writes MCP config for Copilot + Claude Code
   - [Qdrant Cloud](https://cloud.qdrant.io) (free tier, 1 GB, no credit card) — needs URL + API key.
   - **Local Docker:** `docker run -p 6333:6333 qdrant/qdrant` — URL `http://localhost:6333`, no API key.
   - **Self-hosted:** any reachable Qdrant; API key only required if you set `QDRANT__SERVICE__API_KEY` on the server.
-- **Embeddings** — [Ollama](https://ollama.com) runs locally for free, or use OpenAI / AWS Bedrock.
+- **Embeddings** — [Ollama](https://ollama.com) runs locally for free, or use OpenAI / AWS Bedrock / [Portkey](https://portkey.ai) gateway.
 
 Then configure credentials — pick one:
 

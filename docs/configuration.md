@@ -6,8 +6,8 @@ Config lives at `~/.bikky/config.json`. Resolution order: **defaults → config 
 
 | Setting | Env var | Default | Description |
 |---------|---------|---------|-------------|
-| `qdrant_url` | `QDRANT_URL` | *none — must be set* | Qdrant REST URL, e.g. `https://abc123.cloud.qdrant.io:6333` |
-| `qdrant_api_key` | `QDRANT_API_KEY` | *none — must be set* | Qdrant API key from cluster dashboard |
+| `qdrant_url` | `QDRANT_URL` | *none — must be set* | Qdrant REST URL, e.g. `http://localhost:6333` (local Docker) or `https://abc123.cloud.qdrant.io:6333` (Cloud) |
+| `qdrant_api_key` | `QDRANT_API_KEY` | *none (optional)* | Qdrant API key. Required for Qdrant Cloud and any self-hosted instance with `QDRANT__SERVICE__API_KEY` set; leave unset for plain local Docker. |
 | `collection` | `BIKKY_COLLECTION` | `bikky` | Collection name. Change only if running multiple instances |
 
 ## Ontology scope fields
@@ -16,15 +16,16 @@ Bikky's ontology includes optional scope payload fields such as `workspace_id`, 
 
 ## Embedding & LLM providers
 
-Both `embedding.provider` and `llm.provider` accept exactly one of three values:
+Both `embedding.provider` and `llm.provider` accept one of four built-in values:
 
 | Value | What it is | Auth needed | `base_url` used? |
 |-------|-----------|-------------|-----------------|
 | `ollama` | Local Ollama server | None | ✅ default `http://localhost:11434` |
 | `openai` | OpenAI-compatible API | `api_key` or `OPENAI_API_KEY` | ✅ default `https://api.openai.com/v1` |
 | `bedrock` | AWS Bedrock | AWS credentials (env or IAM role) | ❌ uses AWS SDK |
+| `portkey` | [Portkey](https://portkey.ai) gateway (routes to OpenAI / Anthropic / Bedrock / etc.) | `api_key` (Portkey key) | ✅ default `https://api.portkey.ai` |
 
-> **⚠️ Only these three values are valid.** Any other value is rejected at boot — the MCP server starts up but `requireReady` returns `setup_required` with a `setup_error` message until you fix the config.
+> **⚠️ Only these four values are valid.** Any other value is rejected at boot — the MCP server starts up but `requireReady` returns `setup_required` with a `setup_error` message until you fix the config. To add a new provider, see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ### Embedding config
 
@@ -43,6 +44,7 @@ Both `embedding.provider` and `llm.provider` accept exactly one of three values:
 | `ollama` | `qwen3-embedding:0.6b`, `nomic-embed-text` | `1024`, `768` |
 | `openai` | `text-embedding-3-small`, `text-embedding-3-large` | `1536`, `3072` |
 | `bedrock` | `amazon.titan-embed-text-v2:0` | `1024` |
+| `portkey` | `@openai/text-embedding-3-small`, `@openai/text-embedding-3-large` (namespaced via Portkey routing) | `1536`, `3072` |
 
 > **⚠️ `dimensions` must match your model's output.** Mismatched dimensions will cause Qdrant insert errors. If you change the model, update dimensions too.
 
@@ -63,8 +65,16 @@ Both `embedding.provider` and `llm.provider` accept exactly one of three values:
 | `ollama` | `qwen2.5:7b`, `llama3.1:8b`, or any local model |
 | `openai` | `gpt-4.1-mini`, `gpt-4.1` |
 | `bedrock` | `anthropic.claude-3-5-haiku-20241022-v1:0` |
+| `portkey` | `@openai/gpt-4o-mini`, `@anthropic/claude-3-5-haiku-latest`, or any model exposed by your Portkey workspace |
 
 > `llm.bedrock_region` falls back to `AWS_REGION` if `AWS_BEDROCK_REGION` is not set.
+
+**Portkey extras** (optional, set via `extra.*` or `BIKKY_LLM_EXTRA_<KEY>` / `BIKKY_EMBEDDING_EXTRA_<KEY>` env vars):
+
+| Extra | Sent as header | Purpose |
+|-------|----------------|---------|
+| `virtual_key` | `x-portkey-virtual-key` | Server-side credential alias for the underlying provider |
+| `config_id` | `x-portkey-config` | Saved Portkey config bundle (routing / fallback / guardrails) |
 
 ### Provider auth quick-reference
 
@@ -73,6 +83,7 @@ Both `embedding.provider` and `llm.provider` accept exactly one of three values:
 | `ollama` | Nothing — just have Ollama running locally (`ollama serve`) |
 | `openai` | `OPENAI_API_KEY` env var **or** `"api_key": "sk-..."` in the embedding/llm config block |
 | `bedrock` | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` env vars, or an IAM instance role |
+| `portkey` | `"api_key": "<portkey-key>"` in the embedding/llm config block (sent as `x-portkey-api-key`) |
 
 ### Resilience knobs (timeouts & retries)
 
@@ -140,6 +151,26 @@ payload that now includes a human-readable `setup_error` field:
     "provider": "openai",
     "model": "gpt-4.1-mini",
     "api_key": "sk-..."
+  }
+}
+```
+
+**Portkey gateway (routes to OpenAI / Anthropic / Bedrock / …):**
+```json
+{
+  "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333",
+  "qdrant_api_key": "your-key",
+  "embedding": {
+    "provider": "portkey",
+    "model": "@openai/text-embedding-3-small",
+    "dimensions": 1536,
+    "api_key": "pk-..."
+  },
+  "llm": {
+    "provider": "portkey",
+    "model": "@openai/gpt-4o-mini",
+    "api_key": "pk-...",
+    "extra": { "virtual_key": "openai-prod" }
   }
 }
 ```
