@@ -195,7 +195,7 @@ payload that now includes a human-readable `setup_error` field:
 
 ## Daemon settings
 
-The daemon owns memory lifecycle work: it extracts ontology-v2 facts, writes lightweight session indexes, captures coherent episode summaries, and distills longer-lived patterns when consolidation is enabled.
+The daemon owns memory lifecycle work: it extracts structured facts, writes lightweight session indexes, captures coherent episode summaries, and distills longer-lived patterns when consolidation is enabled.
 
 | Setting | Default | Description |
 |---------|---------|-------------|

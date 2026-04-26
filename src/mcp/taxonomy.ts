@@ -1,7 +1,7 @@
 /**
  * Bikky memory ontology.
  *
- * Ontology v2 separates ownership boundaries from semantic meaning:
+ * The memory ontology separates ownership boundaries from semantic meaning:
  * workspace -> domain -> repo/project/surface -> workstream -> episode -> memory objects.
  */
 
@@ -54,7 +54,7 @@ export const CATEGORIES = {
     description:
       "Project goals, milestones, current state, open questions, blockers, and active workstreams.",
     examples: [
-      "The capture-policy RPI is implementing ontology v2 first.",
+      "The capture-policy workstream is implementing the memory ontology first.",
       "The UI smoke suite is tracked in bikky-dev/bikky#13.",
     ],
   },
