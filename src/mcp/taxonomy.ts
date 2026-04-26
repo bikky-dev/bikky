@@ -669,6 +669,88 @@ export function allCategoryPromptSections(): string {
   return Object.keys(CATEGORIES).map(categoryPromptSection).join("\n\n");
 }
 
+// ---------------------------------------------------------------------------
+// MCP enum descriptions — single source of truth shared with src/mcp/tools.ts
+// ---------------------------------------------------------------------------
+//
+// These render the canonical CATEGORIES / DOMAINS / KINDS / MEMORY_SUBTYPES /
+// SOURCES tables into the multiline strings agents see when they inspect a
+// tool schema. Keeping them here means tool descriptions never drift from
+// the ontology definitions above.
+
+function shortenDescription(text: string): string {
+  // Collapse any whitespace and clip to the first sentence so per-value
+  // blurbs stay readable inside a tool schema description.
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  const firstPeriod = collapsed.indexOf(". ");
+  if (firstPeriod > 0) return collapsed.slice(0, firstPeriod + 1);
+  return collapsed;
+}
+
+/** Render the `category` enum description for memory_store / memory_recall. */
+export function categoryEnumDescription(): string {
+  const lines = Object.entries(CATEGORIES).map(
+    ([name, def]) => `  • ${name} — ${shortenDescription(def.description)}`,
+  );
+  return [
+    "Subject matter of the fact. One of:",
+    ...lines,
+    `Default when omitted: ${DEFAULT_CATEGORY}.`,
+  ].join("\n");
+}
+
+/** Render the `domain` enum description. */
+export function domainEnumDescription(): string {
+  const lines = Object.entries(DOMAINS).map(
+    ([name, def]) => `  • ${name} — ${shortenDescription(def.description)}`,
+  );
+  return [
+    "Activity profile that controls vocabulary and ranking. One of:",
+    ...lines,
+    `Default when omitted: ${DEFAULT_DOMAIN}.`,
+  ].join("\n");
+}
+
+/** Render the `kind` enum description. Telemetry is daemon-only — excluded. */
+export function kindEnumDescription(): string {
+  const lines = Object.entries(KINDS)
+    .filter(([name]) => name !== "telemetry")
+    .map(([name, def]) => `  • ${name} — ${shortenDescription(def.description)}`);
+  return [
+    "Knowledge form of the memory object. One of:",
+    ...lines,
+    `Default when omitted: ${DEFAULT_KIND}. (telemetry is reserved for the daemon.)`,
+  ].join("\n");
+}
+
+/**
+ * Render the `memory_subtype` enum description, grouped by kind so the agent
+ * knows which subtypes pair with which kind (the runtime enforces this via
+ * validateMemorySubtype).
+ */
+export function memorySubtypeEnumDescription(): string {
+  const groups = Object.entries(MEMORY_SUBTYPES)
+    .filter(([, subtypes]) => subtypes.length > 0)
+    .map(([kind, subtypes]) => `  • kind=${kind}: ${subtypes.join(", ")}`);
+  return [
+    "Optional finer-grained type within the kind. Only set when one of these clearly applies — otherwise leave blank.",
+    "Subtype must match the kind (validated server-side):",
+    ...groups,
+  ].join("\n");
+}
+
+/** Render the `source` enum description for memory_store. */
+export function sourceEnumDescription(): string {
+  const lines = Object.entries(SOURCES).map(
+    ([name, def]) => `  • ${name} — ${shortenDescription(def.description)}`,
+  );
+  return [
+    "Who created this memory. One of:",
+    ...lines,
+    `Default when omitted: ${DEFAULT_SOURCE}. Only override when the human explicitly asked you to remember this (use 'user').`,
+  ].join("\n");
+}
+
 export function memorySubtypeValues(): NonEmptyStringArray {
   return Object.values(MEMORY_SUBTYPES).flat() as NonEmptyStringArray;
 }

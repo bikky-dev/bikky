@@ -12,10 +12,15 @@ import {
   THRESHOLD_RELATED,
   QDRANT_INDEXES,
   categoryValues,
+  categoryEnumDescription,
   domainValues,
+  domainEnumDescription,
   kindValues,
+  kindEnumDescription,
   memorySubtypeValues,
+  memorySubtypeEnumDescription,
   sourceValues,
+  sourceEnumDescription,
   DEFAULT_CATEGORY,
   DEFAULT_DOMAIN,
   DEFAULT_KIND,
@@ -253,7 +258,11 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "get_setup_status",
-    "Check memory system status. Returns which credentials are configured and whether Qdrant and embeddings are reachable.",
+    [
+      "Check whether the memory system is configured and reachable.",
+      "Use this when memory tools return a 'setup_required' error, or once at session start if you're not sure bikky is wired up. Reports which credentials are missing and includes onboarding instructions if anything is incomplete.",
+      "Read-only — safe to call any time.",
+    ].join(" "),
     {},
     async (): Promise<McpToolResult> => {
       const status: Record<string, unknown> = {
@@ -300,7 +309,10 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "configure_credentials",
-    "Store Qdrant + embedding credentials in ~/.bikky/config.json. Tests connectivity and creates the collection if needed.",
+    [
+      "Persist Qdrant and embedding credentials to ~/.bikky/config.json and bring the memory system online.",
+      "Call this only during onboarding (or when rotating credentials). After it succeeds, the collection is created if missing and embeddings are tested. For day-to-day use, prefer get_setup_status.",
+    ].join(" "),
     {
       qdrant_url: z.string().optional().describe("Qdrant REST URL — Qdrant Cloud (https://xxx.cloud.qdrant.io:6333), local Docker (http://localhost:6333), or self-hosted"),
       qdrant_api_key: z.string().optional().describe("Qdrant API key — required for Qdrant Cloud; optional / leave blank for unauthenticated local or self-hosted instances"),
@@ -359,7 +371,11 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "verify_connection",
-    "Test that Qdrant is reachable, embeddings work, and the collection exists.",
+    [
+      "Confirm Qdrant is reachable, embeddings work, and the collection exists.",
+      "Use this to debug a sudden 'setup_required' or empty-recall after a network blip or credential change. Lighter than configure_credentials — does not write to disk.",
+      "Read-only.",
+    ].join(" "),
     {},
     async (): Promise<McpToolResult> => {
       const results: Record<string, unknown> = { qdrant: false, embedding: false, collection: false };
@@ -396,40 +412,59 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "memory_store",
-    "Store a new fact in memory. Automatically deduplicates via content hash and vector similarity. " +
-    "Returns the action taken (inserted/reinforced/duplicate) and any similar facts found.",
+    [
+      "Persist one atomic fact to long-term memory.",
+      "Call this whenever you learn something a future session would need: a service detail, a decision rationale, a workaround, a user preference, an ownership fact, a task-resume pointer. One fact per call — split compound observations into separate calls.",
+      "Dedup is automatic (content hash + vector similarity), so you do NOT need to recall first. The tool returns one of: inserted (new fact), reinforced (exact or near-duplicate found — counters bumped), or — if there are similar-but-different facts — a list of potential conflicts so you can decide whether to use 'supersedes'.",
+      "To create a typed edge between two entities at the same time, set the optional 'relation' field — no separate tool call needed.",
+      "Do NOT use for ephemeral state (current cursor, in-flight todo). Use the harness task folder instead.",
+    ].join(" "),
     {
-      content: z.string().describe("The fact to store (atomic, single piece of knowledge)"),
-      category: z.enum(categoryValues())
-        .describe("Subject matter: codebase, infrastructure, operations, decisions, product_domain, projects, people, preferences, observations"),
-      entities: z.array(z.string()).describe("Related entities (lowercase, e.g. ['qdrant', 'platform'])"),
-      domain: z.enum(domainValues()).default(DEFAULT_DOMAIN)
-        .describe("Activity profile — e.g. software_engineering, product_strategy, business_operations, research, personal_productivity"),
-      kind: z.enum(kindValues()).default(DEFAULT_KIND)
-        .describe("Knowledge form — fact, summary, distilled, relation"),
-      memory_subtype: z.enum(memorySubtypeValues()).optional()
-        .describe("Optional subtype within kind, such as codebase_map, episode, workstream, convention, or recall_event"),
-      workspace_id: z.string().optional()
-        .describe("Optional workspace namespace for team memory."),
-      episode_id: z.string().optional().describe("Optional coherent episode identifier"),
-      workstream_key: z.string().optional().describe("Optional durable workstream key"),
-      task_key: z.string().optional().describe("Optional task or issue key"),
-      repo: z.string().optional().describe("Optional repository or project surface"),
-      branch: z.string().optional().describe("Optional branch or working surface"),
-      review_status: z.enum(["candidate", "reviewed", "approved", "rejected"]).optional()
-        .describe("Optional review lifecycle status"),
-      source: z.enum(sourceValues()).default(DEFAULT_SOURCE)
-        .describe("Creator — agent, daemon, system, user"),
-      confidence: z.number().min(0).max(1).default(0.9).describe("How certain (0.0-1.0)"),
-      importance: z.number().min(0).max(1).optional().describe("How important (0.0-1.0). Omit to default to 0.5."),
-      supersedes: z.string().optional().describe("ID of a fact this one replaces"),
+      content: z.string().describe(
+        "The fact to store. Should be one atomic, self-contained statement (no compound 'A and B') that makes sense out of context.",
+      ),
+      category: z.enum(categoryValues()).describe(categoryEnumDescription()),
+      entities: z.array(z.string()).describe(
+        "Lowercase entity names mentioned by this fact (e.g. ['qdrant', 'workspace_id']). Used for entity-scoped recall and graph traversal — keep them short and canonical.",
+      ),
+      domain: z.enum(domainValues()).default(DEFAULT_DOMAIN).describe(domainEnumDescription()),
+      kind: z.enum(kindValues()).default(DEFAULT_KIND).describe(kindEnumDescription()),
+      memory_subtype: z.enum(memorySubtypeValues()).optional().describe(memorySubtypeEnumDescription()),
+      workspace_id: z.string().optional().describe(
+        "Workspace namespace for team-shared memory. Omit to use the default workspace from config.",
+      ),
+      episode_id: z.string().optional().describe(
+        "Coherent activity-segment ID. Group facts captured during the same coherent task or transcript.",
+      ),
+      workstream_key: z.string().optional().describe(
+        "Durable continuity key for a long-running objective (survives across sessions).",
+      ),
+      task_key: z.string().optional().describe("Task or issue key (e.g. GitHub issue number, JIRA key)."),
+      repo: z.string().optional().describe("Repository or project surface this fact relates to (e.g. 'bikky-dev/bikky')."),
+      branch: z.string().optional().describe("Branch or working surface (e.g. 'main', 'feat/x')."),
+      review_status: z.enum(["candidate", "reviewed", "approved", "rejected"]).optional().describe(
+        "Review lifecycle status. candidate=auto-extracted (daemon), reviewed=human-checked, approved=human-confirmed, rejected=incorrect. Agents normally leave this unset.",
+      ),
+      source: z.enum(sourceValues()).default(DEFAULT_SOURCE).describe(sourceEnumDescription()),
+      confidence: z.number().min(0).max(1).default(0.9).describe(
+        "How certain you are this fact is correct (0.0-1.0). Default 0.9. Lower (~0.6) for inferred or unverified facts.",
+      ),
+      importance: z.number().min(0).max(1).optional().describe(
+        "How important this fact is for future recall (0.0-1.0). Defaults to 0.5 if omitted. ≥0.8 surfaces in session briefings.",
+      ),
+      supersedes: z.string().optional().describe(
+        "ID of an existing fact that this one replaces. The old fact is marked superseded and excluded from recall. Use this when a fact is updated; use memory_forget when a fact was simply wrong.",
+      ),
       relation: z.object({
-        from: z.string().describe("Source entity"),
-        type: z.string().describe("Relation type (owns, uses, decided, prefers, works-on, etc.)"),
-        to: z.string().describe("Target entity"),
-      }).optional().describe("Optional typed relation between two entities"),
-      metadata: z.record(z.string(), z.string()).optional()
-        .describe("Optional key-value metadata. Stored with the fact and filterable via memory_recall."),
+        from: z.string().describe("Source entity (lowercase)."),
+        type: z.string().describe("Relation type (e.g. 'owns', 'uses', 'decided', 'prefers', 'works-on')."),
+        to: z.string().describe("Target entity (lowercase)."),
+      }).optional().describe(
+        "Optional typed edge between two entities — created in the same call. Use this whenever the fact also expresses a relationship; no separate tool call needed.",
+      ),
+      metadata: z.record(z.string(), z.string()).optional().describe(
+        "Arbitrary key-value metadata. Stored with the fact and exact-match filterable via memory_recall.metadata_filter (all key/value pairs must match — AND logic).",
+      ),
     },
     async ({
       content,
@@ -696,30 +731,57 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "memory_recall",
-    "Semantic search over memory. Returns facts ranked by relevance. " +
-    "Use on session start with a broad query for context briefing.",
+    [
+      "Semantic + filtered search over memory. Returns facts ranked by relevance (vector similarity blended with recency, importance, and reinforcement).",
+      "Three main uses:",
+      "  1. Session-start briefing — broad query like 'session briefing: user preferences, active projects, recent decisions'.",
+      "  2. Per-prompt contextual recall — focused query derived from what the user just asked.",
+      "  3. Pre-store conflict check — recall similar facts before storing, so you can use 'supersedes' if the new fact replaces an older one.",
+      "Combine the natural-language query with structured filters (category, domain, entity, date range, metadata) for tighter results.",
+      "If you have a known entity name and want everything about it, prefer memory_entity. For 'what does X own/use?' style questions, prefer memory_relations.",
+    ].join("\n"),
     {
-      query: z.string().describe("What to search for (natural language)"),
-      category: z.string().optional().describe("Filter by category"),
-      domain: z.string().optional().describe("Filter by domain activity profile"),
-      kind: z.string().optional().describe("Filter by kind (fact, summary, distilled, relation)"),
-      memory_subtype: z.string().optional().describe("Filter by memory subtype"),
-      workspace_id: z.string().optional().describe("Filter by optional workspace namespace."),
-      include_legacy_workspace: z.boolean().optional()
-        .describe("Include legacy facts without workspace_id in this workspace query."),
-      entity: z.string().optional().describe("Filter by entity name"),
-      episode_id: z.string().optional().describe("Filter by coherent episode ID"),
-      workstream_key: z.string().optional().describe("Filter by durable workstream key"),
-      task_key: z.string().optional().describe("Filter by task or issue key"),
-      repo: z.string().optional().describe("Filter by repository or project surface"),
-      branch: z.string().optional().describe("Filter by branch or working surface"),
-      review_status: z.string().optional().describe("Filter by review lifecycle status"),
-      since: z.string().optional().describe("Only facts created after this ISO date"),
-      until: z.string().optional().describe("Only facts created before this ISO date"),
-      limit: z.number().optional().default(10).describe("Max results (default 10)"),
-      graph_depth: z.number().optional().default(0).describe("Entity graph traversal depth (0=none, 1=include 1-hop related entity facts)."),
-      metadata_filter: z.record(z.string(), z.string()).optional()
-        .describe("Filter by metadata key-value pairs. All pairs must match."),
+      query: z.string().describe(
+        "Natural-language description of what you're looking for. Embedded and matched semantically — full sentences work better than keyword lists.",
+      ),
+      category: z.string().optional().describe(
+        "Filter by category (same vocabulary as memory_store.category). Optional.",
+      ),
+      domain: z.string().optional().describe(
+        "Filter by domain activity profile (same vocabulary as memory_store.domain). Optional.",
+      ),
+      kind: z.string().optional().describe(
+        "Filter by kind: fact, summary, distilled, relation. Optional. Telemetry is excluded by default.",
+      ),
+      memory_subtype: z.string().optional().describe(
+        "Filter by memory subtype (must be valid for the chosen kind). Optional.",
+      ),
+      workspace_id: z.string().optional().describe(
+        "Filter to facts in this workspace namespace. Omit to use the default workspace from config.",
+      ),
+      include_legacy_workspace: z.boolean().optional().describe(
+        "Backwards-compatibility flag: also include legacy facts that have no workspace_id. Default false. Only set this if you suspect pre-migration data is missing from results.",
+      ),
+      entity: z.string().optional().describe(
+        "Restrict to facts mentioning this entity (case-insensitive). For full entity context prefer memory_entity.",
+      ),
+      episode_id: z.string().optional().describe("Filter by coherent episode ID."),
+      workstream_key: z.string().optional().describe("Filter by durable workstream key."),
+      task_key: z.string().optional().describe("Filter by task or issue key."),
+      repo: z.string().optional().describe("Filter by repository or project surface."),
+      branch: z.string().optional().describe("Filter by branch or working surface."),
+      review_status: z.string().optional().describe(
+        "Filter by review lifecycle status (candidate / reviewed / approved / rejected).",
+      ),
+      since: z.string().optional().describe("Only facts created on or after this ISO 8601 date or datetime."),
+      until: z.string().optional().describe("Only facts created on or before this ISO 8601 date or datetime."),
+      limit: z.number().optional().default(10).describe("Max results to return (default 10)."),
+      graph_depth: z.number().optional().default(0).describe(
+        "Entity-graph traversal depth. 0 = vector search only (fast, default). 1 = also surface 1-hop entity-related facts (slower; use when the user asks 'what's connected to X?').",
+      ),
+      metadata_filter: z.record(z.string(), z.string()).optional().describe(
+        "Exact-match filter on the metadata map stored with each fact. All key/value pairs must match (AND logic).",
+      ),
     },
     async ({
       query,
@@ -810,13 +872,20 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "memory_entity",
-    "Get everything known about an entity — all facts mentioning it plus its relationships.",
+    [
+      "Get everything bikky knows about a specific entity — facts mentioning it plus typed relations into and out of it.",
+      "Prefer this over memory_recall when the user asks 'tell me about X' or 'what do we know about X' and X is a known entity name (service, person, repo, concept). Faster and more complete than semantic search for entity-centric queries.",
+      "If you only have a fuzzy description, use memory_recall first to find the entity name.",
+    ].join(" "),
     {
-      name: z.string().describe("Entity name (e.g. 'qdrant', 'platform')"),
-      limit: z.number().optional().default(20).describe("Max facts to return"),
-      workspace_id: z.string().optional().describe("Filter by optional workspace namespace."),
-      include_legacy_workspace: z.boolean().optional()
-        .describe("Include legacy facts without workspace_id in this workspace query."),
+      name: z.string().describe(
+        "Entity name (case-insensitive, e.g. 'qdrant', 'workspace_id'). Should match the lowercase canonical form used when facts were stored.",
+      ),
+      limit: z.number().optional().default(20).describe("Max facts to return (default 20). Relations are always returned in full, capped at 50 each direction."),
+      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+      include_legacy_workspace: z.boolean().optional().describe(
+        "Backwards-compatibility: also include legacy facts with no workspace_id. Default false.",
+      ),
     },
     async ({ name, limit, workspace_id, include_legacy_workspace }): Promise<McpToolResult> => {
       const guard = requireReady();
@@ -879,15 +948,23 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "memory_relations",
-    "Query entity relationships. Returns typed edges between entities.",
+    [
+      "Query typed edges between entities. Returns 'A --[type]--> B' triples that semantic search alone wouldn't surface.",
+      "Use for 'what does X own / use / depend on?' and 'who owns Y?' style questions. Optionally filter by direction (from / to / both) and relation type.",
+      "To create relations, use memory_store with the 'relation' field — there is no separate create-relation tool.",
+    ].join(" "),
     {
-      entity: z.string().describe("Entity name to query"),
-      relation_type: z.string().optional().describe("Filter by relation type (e.g. 'owns', 'uses', 'decided')"),
-      direction: z.enum(["from", "to", "both"]).optional().default("both")
-        .describe("Direction: 'from' (entity as source), 'to' (entity as target), 'both'"),
-      workspace_id: z.string().optional().describe("Filter by optional workspace namespace."),
-      include_legacy_workspace: z.boolean().optional()
-        .describe("Include legacy facts without workspace_id in this workspace query."),
+      entity: z.string().describe("Entity name to query (case-insensitive)."),
+      relation_type: z.string().optional().describe(
+        "Filter to a specific edge label (e.g. 'owns', 'uses', 'decided', 'prefers', 'works-on'). Optional.",
+      ),
+      direction: z.enum(["from", "to", "both"]).optional().default("both").describe(
+        "Which side of the edge the entity is on. 'from' = entity is the source (X --[?]--> ?). 'to' = entity is the target (? --[?]--> X). 'both' = either (default).",
+      ),
+      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+      include_legacy_workspace: z.boolean().optional().describe(
+        "Backwards-compatibility: also include legacy facts with no workspace_id. Default false.",
+      ),
     },
     async ({ entity, relation_type, direction, workspace_id, include_legacy_workspace }): Promise<McpToolResult> => {
       const guard = requireReady();
@@ -939,11 +1016,16 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "memory_forget",
-    "Mark a fact as superseded/wrong. The fact remains but is excluded from recall results.",
+    [
+      "Mark a fact as superseded/wrong. The fact stays in storage (for audit) but is excluded from all recall results.",
+      "Use this when a fact was simply incorrect or no longer applies and there is no replacement. If you have a corrected version, use memory_store with 'supersedes: <fact_id>' instead — that way the new fact stays linked to the old one.",
+    ].join(" "),
     {
-      fact_id: z.string().describe("ID of the fact to forget"),
-      reason: z.string().describe("Why this fact is being superseded"),
-      workspace_id: z.string().optional().describe("Optional workspace namespace."),
+      fact_id: z.string().describe("ID of the fact to forget (returned by memory_store / memory_recall as 'id')."),
+      reason: z.string().describe(
+        "Short human-readable reason this fact is being retired (stored in 'superseded_by' for future audit).",
+      ),
+      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
     },
     async ({ fact_id, reason, workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
@@ -977,10 +1059,14 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "memory_verify",
-    "Confirm a fact is still accurate. Resets the staleness clock and bumps verification count.",
+    [
+      "Confirm an existing fact is still accurate, without re-storing it. Resets the staleness clock and bumps a verification counter.",
+      "Use this when memory_heartbeat surfaces a stale fact ID and you can confirm it's still true (e.g. you just observed the system in that state). Lighter than memory_store(supersedes:) — same content, fresh timestamp.",
+      "If the fact is no longer true, use memory_forget or memory_store(supersedes:) instead.",
+    ].join(" "),
     {
-      fact_id: z.string().describe("ID of the fact to verify"),
-      workspace_id: z.string().optional().describe("Optional workspace namespace."),
+      fact_id: z.string().describe("ID of the fact to verify (from memory_recall or memory_heartbeat)."),
+      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
     },
     async ({ fact_id, workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
@@ -1022,17 +1108,24 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "memory_review",
-    "Review recent daemon-extracted facts. Supports approve (verify), reject (forget), or correct (supersede with edited text).",
+    [
+      "Triage facts that were extracted automatically by the bikky daemon (source='daemon').",
+      "Only useful when the daemon is running and capturing memories from logs/transcripts; otherwise this returns an empty list. Supports four actions: list (default — show recent daemon facts), approve (mark verified), reject (mark superseded with reason), correct (replace with edited content as a new fact).",
+    ].join(" "),
     {
-      limit: z.number().optional().default(10).describe("Max facts to return (default 10)"),
-      action: z.enum(["list", "approve", "reject", "correct"]).optional().default("list")
-        .describe("Action: list, approve, reject, correct"),
-      fact_id: z.string().optional().describe("Fact ID (required for approve/reject/correct)"),
-      reason: z.string().optional().describe("Reason for rejection"),
-      corrected_content: z.string().optional().describe("Corrected fact text (for correct action)"),
-      workspace_id: z.string().optional().describe("Filter by optional workspace namespace."),
-      include_legacy_workspace: z.boolean().optional()
-        .describe("Include legacy facts without workspace_id in this workspace query."),
+      limit: z.number().optional().default(10).describe("Max facts to return when action=list (default 10)."),
+      action: z.enum(["list", "approve", "reject", "correct"]).optional().default("list").describe(
+        "What to do. list = show recent daemon-extracted facts (default). approve = confirm a fact is correct (bumps verification count). reject = mark a fact as wrong (requires 'reason'). correct = supersede with an edited version (requires 'corrected_content').",
+      ),
+      fact_id: z.string().optional().describe("Fact ID to act on. Required for approve / reject / correct."),
+      reason: z.string().optional().describe("Required for action=reject. Short reason the fact is wrong."),
+      corrected_content: z.string().optional().describe(
+        "Required for action=correct. The fixed fact text. Stored as a new fact that supersedes the original.",
+      ),
+      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+      include_legacy_workspace: z.boolean().optional().describe(
+        "Backwards-compatibility: also include legacy facts with no workspace_id. Default false.",
+      ),
     },
     async ({ limit, action, fact_id, reason, corrected_content, workspace_id, include_legacy_workspace }): Promise<McpToolResult> => {
       const guard = requireReady();
@@ -1169,7 +1262,10 @@ export function registerTools(mcp: McpServer): void {
 
   mcp.tool(
     "memory_heartbeat",
-    "Lightweight reflection check. Returns memory nudge (if no stores in 10+ min), staleness alerts (every 3rd call), and reflection prompt.",
+    [
+      "Reflection check-in. Returns up to three things: a memory nudge if you haven't stored anything in 10+ minutes, stale-fact alerts every 3rd call (with IDs you can pass to memory_verify or memory_forget), and a reflection prompt asking whether the last few minutes of work produced anything worth storing.",
+      "Call periodically during interactive sessions — roughly every 10 minutes or every 3rd user prompt. No arguments. Cheap and read-only.",
+    ].join(" "),
     {},
     async (): Promise<McpToolResult> => {
       heartbeatCount++;
