@@ -1104,6 +1104,309 @@ export function registerTools(mcp: McpServer): void {
     },
   );
 
+  // ── memory_mark_useful ──────────────────────────────────────────────────
+
+  mcp.tool(
+    "memory_mark_useful",
+    [
+      "Report that a previously recalled fact actually helped you answer the user's question or complete a task.",
+      "Bumps a 'useful_count' counter on the fact and writes a telemetry feedback_event row that future ranking work can aggregate.",
+      "Call this AFTER you used a fact from memory_recall / memory_entity and confirmed it was helpful — not for every recalled fact. If the fact was wrong or misleading, use memory_report_outcome with outcome='wrong' or 'misleading' instead.",
+    ].join(" "),
+    {
+      fact_id: z.string().describe("ID of the fact that was useful (from memory_recall or memory_entity)."),
+      note: z.string().optional().describe(
+        "Optional short note about how the fact was useful (e.g. 'unblocked auth debug'). Stored on the telemetry event for future analysis.",
+      ),
+      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+    },
+    async ({ fact_id, note, workspace_id }): Promise<McpToolResult> => {
+      const guard = requireReady();
+      if (guard) return guard;
+      const now = nowISO();
+      try {
+        const scope = resolveScope(workspace_id);
+        const writable = await getPointForWorkspaceWrite(fact_id, scope);
+        if (writable.error) {
+          return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
+        }
+        const existingPt = writable.point;
+        const currentCount = existingPt?.payload.useful_count ?? 0;
+        const newCount = currentCount + 1;
+        await qdrantSetPayload([fact_id], {
+          useful_count: newCount,
+          last_useful_at: now,
+          updated_at: now,
+        });
+
+        // Write a telemetry feedback_event row so the signal is also visible
+        // to aggregations and review tooling.
+        const eventId = newId();
+        const eventContent = note
+          ? `Fact ${fact_id} marked useful: ${note}`
+          : `Fact ${fact_id} marked useful.`;
+        const eventPayload: Record<string, unknown> = {
+          content: eventContent,
+          category: "observations",
+          domain: "software_engineering",
+          kind: "telemetry",
+          memory_subtype: "feedback_event",
+          layer: "memory_object",
+          entities: [],
+          source: "agent",
+          confidence: 1.0,
+          importance: 0.3,
+          content_hash: contentHash("feedback_event", `${fact_id}:useful:${now}`),
+          target_fact_id: fact_id,
+          feedback_kind: "useful",
+          created_at: now,
+          updated_at: now,
+        };
+        addWorkspacePayload(eventPayload, scope);
+        try {
+          const eventVector = await embed(eventContent);
+          await qdrantUpsert(eventId, eventVector, eventPayload);
+        } catch (e) {
+          log("WARN", `Failed to record feedback_event: ${e instanceof Error ? e.message : String(e)}`);
+        }
+
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "marked_useful",
+            fact_id,
+            useful_count: newCount,
+            event_id: eventId,
+          }) }],
+        };
+      } catch (e) {
+        return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : String(e)}` }] };
+      }
+    },
+  );
+
+  // ── memory_report_outcome ───────────────────────────────────────────────
+
+  mcp.tool(
+    "memory_report_outcome",
+    [
+      "Report the downstream outcome of using a recalled fact — useful, misleading, irrelevant, or wrong.",
+      "Writes a telemetry outcome_event row that future ranking and review work can aggregate. Unlike memory_mark_useful (positive-only, bumps a counter), this records a richer signal including negative outcomes and optional notes.",
+      "Use this when you can confidently judge whether a fact actually helped: 'useful' = helped you complete the task; 'misleading' = pointed in a wrong direction; 'irrelevant' = matched semantically but didn't help; 'wrong' = factually incorrect (also consider memory_forget for clearly wrong facts).",
+    ].join(" "),
+    {
+      fact_id: z.string().describe("ID of the fact whose outcome you are reporting."),
+      outcome: z.enum(["useful", "misleading", "irrelevant", "wrong"]).describe(
+        "How the fact actually played out. 'useful' = helped you finish the task; 'misleading' = sent you the wrong way; 'irrelevant' = semantically matched but didn't help; 'wrong' = factually incorrect.",
+      ),
+      notes: z.string().optional().describe(
+        "Optional short context for the outcome (e.g. 'API moved in v2', 'wrong port number'). Stored on the telemetry event for future analysis.",
+      ),
+      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+    },
+    async ({ fact_id, outcome, notes, workspace_id }): Promise<McpToolResult> => {
+      const guard = requireReady();
+      if (guard) return guard;
+      const now = nowISO();
+      try {
+        const scope = resolveScope(workspace_id);
+        const target = await getPointForWorkspaceWrite(fact_id, scope);
+        if (target.error) {
+          return { content: [{ type: "text", text: JSON.stringify(target.error, null, 2) }], isError: true };
+        }
+
+        const eventId = newId();
+        const eventContent = notes
+          ? `Fact ${fact_id} outcome=${outcome}: ${notes}`
+          : `Fact ${fact_id} outcome=${outcome}.`;
+        const eventPayload: Record<string, unknown> = {
+          content: eventContent,
+          category: "observations",
+          domain: "software_engineering",
+          kind: "telemetry",
+          memory_subtype: "outcome_event",
+          layer: "memory_object",
+          entities: [],
+          source: "agent",
+          confidence: 1.0,
+          importance: outcome === "wrong" || outcome === "misleading" ? 0.6 : 0.3,
+          content_hash: contentHash("outcome_event", `${fact_id}:${outcome}:${now}`),
+          target_fact_id: fact_id,
+          outcome,
+          created_at: now,
+          updated_at: now,
+        };
+        addWorkspacePayload(eventPayload, scope);
+        const eventVector = await embed(eventContent);
+        await qdrantUpsert(eventId, eventVector, eventPayload);
+
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "outcome_recorded",
+            fact_id,
+            outcome,
+            event_id: eventId,
+          }) }],
+        };
+      } catch (e) {
+        return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : String(e)}` }] };
+      }
+    },
+  );
+
+  // ── memory_session_summary ──────────────────────────────────────────────
+
+  mcp.tool(
+    "memory_session_summary",
+    [
+      "Persist a compact summary of the current session — what got done, what decisions were made, what's still open.",
+      "Stored as kind='summary', memory_subtype='session_index', source='agent'. Keep it short (target 30-80 words). Future sessions retrieve these via memory_recall to bootstrap context faster than re-reading the original transcript.",
+      "Call this near session close (or at major milestone boundaries) when the work is meaningful enough to want a future agent to inherit. Skip for trivial single-question sessions.",
+    ].join(" "),
+    {
+      content: z.string().describe(
+        "The summary text. Atomic, self-contained, 30-80 words ideally. Should answer: what was the goal, what did we do, what remains?",
+      ),
+      entities: z.array(z.string()).optional().describe(
+        "Lowercase entity names mentioned by the summary (services, repos, people, concepts). Used for entity-scoped recall later.",
+      ),
+      episode_id: z.string().optional().describe("Coherent activity-segment ID for grouping with related captures."),
+      workstream_key: z.string().optional().describe("Durable continuity key for a long-running objective (survives across sessions)."),
+      task_key: z.string().optional().describe("Task or issue key (e.g. GitHub issue number, JIRA key)."),
+      repo: z.string().optional().describe("Repository or project surface this summary relates to."),
+      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+    },
+    async ({ content, entities, episode_id, workstream_key, task_key, repo, workspace_id }): Promise<McpToolResult> => {
+      const guard = requireReady();
+      if (guard) return guard;
+      lastStoreTime = Date.now();
+      const now = nowISO();
+      try {
+        const scope = resolveScope(workspace_id);
+        const normalizedEntities = (entities ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean);
+        const summaryId = newId();
+        const vector = await embed(content);
+        const payload: Record<string, unknown> = {
+          content,
+          category: categoryForMemorySubtype("session_index") ?? "projects",
+          domain: "software_engineering",
+          kind: "summary",
+          memory_subtype: "session_index",
+          layer: layerForMemorySubtype("session_index") ?? "episode",
+          entities: normalizedEntities,
+          source: "agent",
+          confidence: 0.9,
+          importance: 0.6,
+          content_hash: contentHash("summary", content),
+          reinforcement_count: 1,
+          last_reinforced_at: now,
+          superseded_by: null,
+          superseded_at: null,
+          created_at: now,
+          updated_at: now,
+        };
+        if (episode_id) payload["episode_id"] = episode_id;
+        if (workstream_key) payload["workstream_key"] = workstream_key;
+        if (task_key) payload["task_key"] = task_key;
+        if (repo) payload["repo"] = repo;
+        addWorkspacePayload(payload, scope);
+        await qdrantUpsert(summaryId, vector, payload);
+
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "summary_stored",
+            summary_id: summaryId,
+            workspace_id: scope.workspaceId,
+          }) }],
+        };
+      } catch (e) {
+        return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : String(e)}` }] };
+      }
+    },
+  );
+
+  // ── memory_distill ──────────────────────────────────────────────────────
+
+  mcp.tool(
+    "memory_distill",
+    [
+      "Persist a distilled convention — a reusable learning, pattern, or runbook synthesized from multiple prior memories.",
+      "Stored as kind='distilled', memory_subtype='convention', source='agent'. Use this when you've noticed a pattern across several prior facts/sessions that's worth surfacing as its own atomic learning. The new memory will rank above raw facts in semantic recall because distilled patterns are higher-signal.",
+      "Provide 'supersedes' if this distillation replaces an earlier convention. The original stays in storage but is excluded from recall.",
+    ].join(" "),
+    {
+      content: z.string().describe(
+        "One-sentence reusable convention or pattern. Should be self-contained and applicable beyond a single situation.",
+      ),
+      entities: z.array(z.string()).describe(
+        "Lowercase entity names this distillation applies to (services, tools, concepts).",
+      ),
+      supersedes: z.string().optional().describe(
+        "ID of an earlier distilled fact that this one replaces. Old fact is marked superseded and excluded from recall.",
+      ),
+      task_key: z.string().optional().describe("Task or issue key associated with this learning, if relevant."),
+      repo: z.string().optional().describe("Repository or project surface this learning applies to."),
+      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+    },
+    async ({ content, entities, supersedes, task_key, repo, workspace_id }): Promise<McpToolResult> => {
+      const guard = requireReady();
+      if (guard) return guard;
+      lastStoreTime = Date.now();
+      const now = nowISO();
+      try {
+        const scope = resolveScope(workspace_id);
+        const normalizedEntities = entities.map((e) => e.trim().toLowerCase()).filter(Boolean);
+        const distilledId = newId();
+        const vector = await embed(content);
+
+        if (supersedes) {
+          const existing = await getPointForWorkspaceWrite(supersedes, scope);
+          if (existing.error) {
+            return { content: [{ type: "text", text: JSON.stringify(existing.error, null, 2) }], isError: true };
+          }
+          await qdrantSetPayload([supersedes], {
+            superseded_by: distilledId,
+            superseded_at: now,
+          });
+        }
+
+        const payload: Record<string, unknown> = {
+          content,
+          category: categoryForMemorySubtype("convention") ?? "observations",
+          domain: "software_engineering",
+          kind: "distilled",
+          memory_subtype: "convention",
+          layer: layerForMemorySubtype("convention") ?? "domain",
+          entities: normalizedEntities,
+          source: "agent",
+          confidence: 0.9,
+          importance: 0.7,
+          content_hash: contentHash("distilled", content),
+          reinforcement_count: 1,
+          last_reinforced_at: now,
+          superseded_by: null,
+          superseded_at: null,
+          created_at: now,
+          updated_at: now,
+        };
+        if (task_key) payload["task_key"] = task_key;
+        if (repo) payload["repo"] = repo;
+        addWorkspacePayload(payload, scope);
+        await qdrantUpsert(distilledId, vector, payload);
+
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "distilled_stored",
+            distilled_id: distilledId,
+            supersedes: supersedes ?? null,
+            workspace_id: scope.workspaceId,
+          }) }],
+        };
+      } catch (e) {
+        return { content: [{ type: "text", text: `Error: ${e instanceof Error ? e.message : String(e)}` }] };
+      }
+    },
+  );
+
   // ── memory_review ───────────────────────────────────────────────────────
 
   mcp.tool(

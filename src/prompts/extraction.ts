@@ -76,12 +76,10 @@ Subtype meaning:
   - architecture_decision: durable architecture, product, process, or technical choice with rationale
   - infra_topology: cloud/runtime/datastore/queue/service topology
   - access_pattern: roles, permissions, auth flows, approval paths, or safe access procedures
-  - deployment_procedure: release, rollout, rollback, deploy command, or post-deploy validation
-  - operational_procedure: runbook, maintenance, incident, audit, or recurring operations steps
+  - operational_procedure: runbook, deploy, rollout, rollback, maintenance, incident, audit, or recurring operations steps
   - domain_rule: product/business rule, workflow definition, metric, or domain vocabulary
   - troubleshooting_gotcha: stable failure mode, debugging quirk, or diagnostic clue
   - preference: user/team/workspace style, tooling, or interaction preference
-  - ownership: role, responsibility, team/person ownership, or backup owner
 - entities: lowercase identifiers an engineer would grep for (service names, repos, tools). Only include entities EXPLICITLY named in the transcript.
 - confidence: 0.9 for explicit statements, 0.7 for clear implications, 0.5 for inferences.
 - importance: 0.7+ for infrastructure/access/operational procedures; 0.5-0.7 for decisions/business rules; 0.3-0.5 for preferences and minor observations.

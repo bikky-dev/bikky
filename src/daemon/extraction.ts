@@ -66,7 +66,7 @@ Every fact must pass at least one gate:
 1. GREPPABLE: names a file path, package, symbol, config key, CLI flag, issue/PR, service, or API a future agent can search for.
 2. RUNNABLE: contains a command, URL, setting, port, or procedure that can be executed or checked.
 3. NAVIGABLE: tells a future agent where to look and what that location means.
-4. DECISIVE: records a durable decision, rationale, constraint, convention, preference, or ownership rule.
+4. DECISIVE: records a durable decision, rationale, constraint, convention, or preference.
 5. DIAGNOSTIC: captures a repeatable failure mode, root cause, or troubleshooting gotcha.
 
 ## Ontology
@@ -74,7 +74,7 @@ Every fact must pass at least one gate:
 - category is subject matter: codebase | infrastructure | operations | decisions | product_domain | projects | people | preferences | observations.
 - kind is object shape. For this prompt, emit only kind="fact".
 - memory_subtype must be one of:
-  codebase_map | architecture_decision | infra_topology | access_pattern | deployment_procedure | operational_procedure | domain_rule | troubleshooting_gotcha | preference | ownership.
+  codebase_map | architecture_decision | infra_topology | access_pattern | operational_procedure | domain_rule | troubleshooting_gotcha | preference.
 
 ## Examples
 GOOD:
@@ -393,7 +393,7 @@ export const factQualitySignals = (fact: ExtractedFact): FactQualitySignals => {
   const wordCount = textWordCount(content);
   const durableAnchor = hasDurableAnchor(content, entities);
   const statusOnly = isStatusOnlyContent(content, entities);
-  const isPreferenceLike = subtype === "preference" || subtype === "ownership" || subtype === "domain_rule";
+  const isPreferenceLike = subtype === "preference" || subtype === "domain_rule";
   const isDecisionLike = subtype === "architecture_decision" || subtype === "troubleshooting_gotcha";
   const shortUseful = wordCount >= 7 && wordCount <= 22 && (isPreferenceLike || isDecisionLike) && (entities.length > 0 || durableAnchor);
 
