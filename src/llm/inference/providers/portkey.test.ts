@@ -11,6 +11,9 @@ const cfg: ResolvedInferenceConfig = {
   apiKey: "pk-test",
   fallback: null,
   extra: { virtual_key: "vk-1", config_id: "cfg-2" },
+  timeoutMs: 5_000,
+  retries: 0,
+  retryBaseDelayMs: 10,
 };
 
 const log = () => {};

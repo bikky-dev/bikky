@@ -32,6 +32,12 @@ export interface EmbeddingConfig {
   api_key: string | null;
   /** Provider-specific extras (e.g. portkey virtual_key, bedrock region). */
   extra?: Record<string, string>;
+  /** Per-request HTTP timeout. Defaults to 30s. */
+  timeout_ms?: number;
+  /** Max retries on transient/rate-limit/timeout failures. Defaults to 2. */
+  retries?: number;
+  /** Base backoff delay (ms) for retries. Defaults to 250ms. */
+  retry_base_delay_ms?: number;
 }
 
 export interface LLMConfig {
@@ -44,6 +50,12 @@ export interface LLMConfig {
   fallback_provider?: string | null;
   /** Provider-specific extras. */
   extra?: Record<string, string>;
+  /** Per-request HTTP timeout. Defaults to 30s. */
+  timeout_ms?: number;
+  /** Max retries on transient/rate-limit/timeout failures. Defaults to 2. */
+  retries?: number;
+  /** Base backoff delay (ms) for retries. Defaults to 250ms. */
+  retry_base_delay_ms?: number;
 }
 
 export interface DaemonConfig {
@@ -95,6 +107,9 @@ const DEFAULTS: BikkyConfig = {
     base_url: "http://localhost:11434",
     api_key: null,
     extra: {},
+    timeout_ms: 30_000,
+    retries: 2,
+    retry_base_delay_ms: 250,
   },
   llm: {
     provider: "ollama",
@@ -103,6 +118,9 @@ const DEFAULTS: BikkyConfig = {
     api_key: null,
     fallback_provider: null,
     extra: {},
+    timeout_ms: 30_000,
+    retries: 2,
+    retry_base_delay_ms: 250,
   },
   daemon: {
     tick_interval_sec: 5,
@@ -224,6 +242,25 @@ export function loadConfig(): BikkyConfig {
     const n = parseInt(process.env.QDRANT_RETRY_BASE_DELAY_MS, 10);
     if (Number.isFinite(n) && n >= 0) config.qdrant_client.retry_base_delay_ms = n;
   }
+
+  // Embedding / LLM resilience tuning env overrides
+  const positiveInt = (raw: string | undefined): number | null => {
+    if (!raw) return null;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  const embTimeout = positiveInt(process.env.BIKKY_EMBEDDING_TIMEOUT_MS);
+  if (embTimeout !== null) config.embedding.timeout_ms = embTimeout;
+  const embRetries = positiveInt(process.env.BIKKY_EMBEDDING_RETRIES);
+  if (embRetries !== null) config.embedding.retries = embRetries;
+  const embDelay = positiveInt(process.env.BIKKY_EMBEDDING_RETRY_BASE_DELAY_MS);
+  if (embDelay !== null) config.embedding.retry_base_delay_ms = embDelay;
+  const llmTimeout = positiveInt(process.env.BIKKY_LLM_TIMEOUT_MS);
+  if (llmTimeout !== null) config.llm.timeout_ms = llmTimeout;
+  const llmRetries = positiveInt(process.env.BIKKY_LLM_RETRIES);
+  if (llmRetries !== null) config.llm.retries = llmRetries;
+  const llmDelay = positiveInt(process.env.BIKKY_LLM_RETRY_BASE_DELAY_MS);
+  if (llmDelay !== null) config.llm.retry_base_delay_ms = llmDelay;
 
   // Propagate aws_profile into env so both Bedrock clients (LLM + embedding)
   // pick it up via the SDK's default credential chain.

@@ -105,7 +105,7 @@ describe("daemon/qdrant", () => {
       assert.strictEqual(ready, false);
     });
 
-    it("returns false when qdrant_api_key is null", () => {
+    it("returns true when qdrant_url is set even if qdrant_api_key is null (self-hosted / Docker)", () => {
       saveConfig({
         ...CONFIG_DEFAULTS,
         qdrant_url: "https://my-qdrant.example.com:6333",
@@ -114,7 +114,7 @@ describe("daemon/qdrant", () => {
       resetConfig();
 
       const ready = init();
-      assert.strictEqual(ready, false);
+      assert.strictEqual(ready, true);
     });
 
     it("returns true when both url and api_key are set", () => {

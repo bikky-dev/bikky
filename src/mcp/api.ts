@@ -40,6 +40,13 @@ let llmInitialized = false;
 export let qdrantUrl: string | null = null;
 export let qdrantApiKey: string | null = null;
 export let ready = false;
+/**
+ * Reason the system is not ready, when known. Set by `setSetupError` from the
+ * MCP boot path if `initEmbedding`/`ensureCollection` fails. Surfaced in
+ * `requireReady()` and `get_setup_status` so users see an actionable message
+ * instead of a generic "setup_required".
+ */
+export let setupError: string | null = null;
 
 let client: QdrantClient | null = null;
 
@@ -52,6 +59,7 @@ export function setQdrantApiKey(v: string | null): void {
   rebuildClient();
 }
 export function setReady(v: boolean): void { ready = v; }
+export function setSetupError(v: string | null): void { setupError = v; }
 
 // ---------------------------------------------------------------------------
 // Logging (to file only — stdout/stderr are MCP stdio transport)
@@ -123,6 +131,9 @@ function ensureLLMInitialized(): void {
       apiKey: cfg.llm.api_key ?? null,
       fallback: cfg.llm.fallback_provider ?? null,
       extra: cfg.llm.extra ?? {},
+      timeoutMs: cfg.llm.timeout_ms,
+      retries: cfg.llm.retries,
+      retryBaseDelayMs: cfg.llm.retry_base_delay_ms,
     },
     logger: log as (...args: unknown[]) => void,
   });

@@ -4,6 +4,12 @@
  * Provides persistent memory across AI coding sessions. All facts, relations,
  * and entity context live as Qdrant points with vector embeddings + structured
  * payloads. Config stored in ~/.bikky/config.json.
+ *
+ * Boot resilience: every initialisation step is wrapped so a misconfigured
+ * provider, missing key, or unreachable Qdrant cluster surfaces as a
+ * `setup_required` status (with an actionable reason) instead of crashing the
+ * MCP stdio transport. The MCP server always comes up; tools then degrade
+ * gracefully via `requireReady()`.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -15,6 +21,7 @@ import {
   setQdrantApiKey,
   setReady,
   setCollection,
+  setSetupError,
   ensureCollection,
   initEmbedding,
 } from "./api.js";
@@ -34,15 +41,29 @@ export async function startMcpServer(): Promise<void> {
   setQdrantApiKey(qKey);
   setCollection(cfg.collection);
 
-  // Initialize embedding provider
-  const embCfg = initEmbedding({
-    provider: cfg.embedding.provider,
-    baseUrl: cfg.embedding.base_url,
-    model: cfg.embedding.model,
-    dimensions: cfg.embedding.dimensions,
-    apiKey: cfg.embedding.api_key ?? null,
-  });
-  log("INFO", `Embedding: ${embCfg.provider}/${embCfg.model} (${embCfg.dimensions}d) @ ${embCfg.baseUrl || "(sdk)"}`);
+  // Initialize embedding provider — wrapped so an unknown provider name or
+  // misconfiguration produces a setup_required status instead of crashing the
+  // MCP stdio transport. The server always comes up; tools degrade via
+  // requireReady().
+  try {
+    const embCfg = initEmbedding({
+      provider: cfg.embedding.provider,
+      baseUrl: cfg.embedding.base_url,
+      model: cfg.embedding.model,
+      dimensions: cfg.embedding.dimensions,
+      apiKey: cfg.embedding.api_key ?? null,
+      extra: cfg.embedding.extra ?? {},
+      timeoutMs: cfg.embedding.timeout_ms,
+      retries: cfg.embedding.retries,
+      retryBaseDelayMs: cfg.embedding.retry_base_delay_ms,
+    });
+    log("INFO", `Embedding: ${embCfg.provider}/${embCfg.model} (${embCfg.dimensions}d) @ ${embCfg.baseUrl || "(sdk)"}`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setSetupError(`Embedding init failed: ${msg}`);
+    log("ERROR", `Embedding init failed: ${msg}`);
+    // Continue — server will report setup_required for memory tools.
+  }
 
   if (qUrl) {
     try {
@@ -50,7 +71,9 @@ export async function startMcpServer(): Promise<void> {
       setReady(true);
       log("INFO", `Memory system ready ✓ (Qdrant ${qKey ? "with" : "without"} api-key auth)`);
     } catch (e) {
-      log("ERROR", `Failed to initialize collection: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      setSetupError(`Qdrant initialization failed: ${msg}`);
+      log("ERROR", `Failed to initialize collection: ${msg}`);
     }
   } else {
     log("INFO", "Memory not configured — missing: qdrant-url. Use get_setup_status + configure_credentials.");

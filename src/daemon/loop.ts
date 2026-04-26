@@ -42,6 +42,9 @@ export async function startDaemon(): Promise<void> {
       apiKey: cfg.llm.api_key,
       fallback: cfg.llm.fallback_provider ?? null,
       extra: cfg.llm.extra ?? {},
+      timeoutMs: cfg.llm.timeout_ms,
+      retries: cfg.llm.retries,
+      retryBaseDelayMs: cfg.llm.retry_base_delay_ms,
     },
     logger: log as unknown as import("../llm/index.js").LogFn,
   });

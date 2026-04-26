@@ -31,6 +31,12 @@ export interface ResolvedEmbeddingConfig {
   apiKey: string | null;
   /** Provider-specific bag — region for Bedrock, virtual_key for Portkey, project_id for Vertex, … */
   extra: Record<string, string | undefined>;
+  /** Per-request timeout in milliseconds (HTTP providers). Defaults set by initEmbedding. */
+  timeoutMs: number;
+  /** Max retries on transient/rate-limit/timeout failures. */
+  retries: number;
+  /** Base backoff delay in milliseconds (full-jitter exponential). */
+  retryBaseDelayMs: number;
 }
 
 export interface EmbeddingProvider {

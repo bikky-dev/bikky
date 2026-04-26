@@ -4,9 +4,23 @@
  * The @aws-sdk/client-bedrock-runtime package is heavy (~5 MB), so we
  * dynamic-import it inside init() — users on Ollama/OpenAI/Portkey never pay
  * the cold-start cost.
+ *
+ * Errors: SDK exceptions are translated into the shared `LlmHttpError`
+ * hierarchy when possible (using `$metadata.httpStatusCode`) so callers can
+ * branch on `err.kind` the same way they do for HTTP-based providers.
  */
 
 import { registerEmbeddingProvider } from "../registry.js";
+import {
+  classifyHttpStatus,
+  LlmAuthError,
+  LlmBadRequestError,
+  LlmRateLimitError,
+  LlmTransientError,
+  LlmUnknownError,
+  type LlmErrorDetails,
+  type LlmHttpError,
+} from "../../errors.js";
 import type { EmbeddingProvider, ResolvedEmbeddingConfig } from "../types.js";
 
 interface TitanEmbedResponse {
@@ -40,6 +54,32 @@ async function ensureSdk(cfg: ResolvedEmbeddingConfig): Promise<void> {
   InvokeModelCommand = sdk.InvokeModelCommand as unknown as InvokeModelCommandCtor;
 }
 
+function translateSdkError(err: unknown, model: string): LlmHttpError {
+  const e = err as {
+    name?: string;
+    message?: string;
+    $metadata?: { httpStatusCode?: number };
+  };
+  const status = e.$metadata?.httpStatusCode;
+  const details: LlmErrorDetails = {
+    provider: "bedrock",
+    model,
+    status,
+    body: e.message ?? e.name,
+    cause: err,
+  };
+  if (status === undefined) {
+    return new LlmTransientError(details);
+  }
+  switch (classifyHttpStatus(status)) {
+    case "auth": return new LlmAuthError(details);
+    case "rate_limit": return new LlmRateLimitError(details);
+    case "bad_request": return new LlmBadRequestError(details);
+    case "transient": return new LlmTransientError(details);
+    default: return new LlmUnknownError(details);
+  }
+}
+
 export const bedrockEmbeddingProvider: EmbeddingProvider = {
   name: "bedrock",
   label: "AWS Bedrock (Titan Embed)",
@@ -61,7 +101,12 @@ export const bedrockEmbeddingProvider: EmbeddingProvider = {
       accept: "application/json",
       body: new TextEncoder().encode(payload),
     });
-    const resp = await client!.send(command);
+    let resp: { body: Uint8Array };
+    try {
+      resp = await client!.send(command);
+    } catch (e) {
+      throw translateSdkError(e, cfg.model);
+    }
     const raw = JSON.parse(new TextDecoder().decode(resp.body)) as TitanEmbedResponse;
     if (!raw.embedding) {
       throw new Error(`Embedding response from bedrock missing data (model: ${cfg.model})`);

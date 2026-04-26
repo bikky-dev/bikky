@@ -11,6 +11,11 @@ import type {
   LogFn,
 } from "../types.js";
 import { registerInferenceProvider } from "../registry.js";
+import { resilientFetch } from "../../fetch.js";
+import { LlmHttpError } from "../../errors.js";
+import { _recordInferenceError } from "../index.js";
+
+const RETRY_CAP_MS = 5_000;
 
 export const ollamaInferenceProvider: InferenceProvider = {
   name: "ollama",
@@ -34,20 +39,30 @@ export const ollamaInferenceProvider: InferenceProvider = {
     }
 
     try {
-      const resp = await fetch(`${cfg.baseUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+      const resp = await resilientFetch({
+        url: `${cfg.baseUrl}/v1/chat/completions`,
+        init: {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        timeoutMs: cfg.timeoutMs,
+        retries: cfg.retries,
+        baseDelayMs: cfg.retryBaseDelayMs,
+        capDelayMs: RETRY_CAP_MS,
+        provider: "ollama",
+        model: cfg.model,
       });
-      if (!resp.ok) {
-        const err = await resp.text().catch(() => "");
-        log("WARN", `LLM Ollama error (${resp.status}): ${err.slice(0, 200)}`);
-        return null;
-      }
       const data = (await resp.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      _recordInferenceError(null);
       return data.choices?.[0]?.message?.content?.trim() ?? null;
     } catch (e: unknown) {
-      log("WARN", `LLM Ollama unreachable: ${(e as Error).message}`);
+      if (e instanceof LlmHttpError) {
+        _recordInferenceError(e);
+        log("WARN", `LLM Ollama ${e.kind}${e.status !== undefined ? ` (${e.status})` : ""}: ${e.message}`);
+      } else {
+        log("WARN", `LLM Ollama unreachable: ${(e as Error).message}`);
+      }
       return null;
     }
   },
