@@ -66,7 +66,7 @@ export const log = createLogger("memory-mcp", path.join(LOG_DIR, "mcp.log"), {
 const qdrantLogAdapter = (level: QdrantLogLevel, msg: string): void => log(level, msg);
 
 function rebuildClient(): void {
-  if (qdrantUrl && qdrantApiKey && collectionName) {
+  if (qdrantUrl && collectionName) {
     const cfg = loadConfig();
     client = new QdrantClient({
       url: qdrantUrl,
@@ -136,8 +136,9 @@ function ensureLLMInitialized(): void {
 function getClient(): QdrantClient {
   if (!client) {
     throw new Error(
-      "Qdrant client not initialized — credentials missing. " +
-        "Use configure_credentials or set QDRANT_URL + QDRANT_API_KEY.",
+      "Qdrant client not initialized — URL missing. " +
+        "Use configure_credentials or set QDRANT_URL " +
+        "(QDRANT_API_KEY is optional for local / self-hosted instances).",
     );
   }
   return client;

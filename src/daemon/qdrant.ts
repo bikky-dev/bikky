@@ -1,8 +1,11 @@
 /**
- * Qdrant client for the bikky daemon — direct HTTP access to Qdrant Cloud.
+ * Qdrant client for the bikky daemon — direct HTTP access to Qdrant
+ * (Cloud, Docker, or self-hosted).
  * Embedding is handled by ../llm/embedding (registry-based provider abstraction).
  *
  * Credentials: config file (~/.bikky/config.json) → env vars.
+ * `qdrant_api_key` is optional — leave unset for unauthenticated local /
+ * self-hosted instances.
  */
 
 import { randomUUID } from "node:crypto";
@@ -200,11 +203,11 @@ const init = (): boolean => {
   });
   logFn("INFO", `Embedding provider: ${embCfg.provider}/${embCfg.model} (${embCfg.dimensions}d) @ ${embCfg.baseUrl}`);
 
-  const ready = !!(qdrantUrl && qdrantApiKey);
+  const ready = !!qdrantUrl;
   if (ready) {
     client = new QdrantClient({
       url: qdrantUrl as string,
-      apiKey: qdrantApiKey as string,
+      apiKey: qdrantApiKey,
       collection,
       timeoutMs: cfg.qdrant_client.timeout_ms,
       retries: cfg.qdrant_client.retries,
@@ -213,7 +216,7 @@ const init = (): boolean => {
     });
   } else {
     client = null;
-    logFn("WARN", "Qdrant client: missing credentials (some memory features disabled)");
+    logFn("WARN", "Qdrant client: missing URL (some memory features disabled)");
   }
   return ready;
 };

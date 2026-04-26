@@ -67,16 +67,21 @@ interface CountResult {
 // --- Client ---
 
 export class QdrantClient {
+  private readonly apiKey: string | null;
+
   constructor(
     private url: string,
-    private apiKey: string,
+    apiKey: string | null | undefined,
     private collection: string,
   ) {
     this.url = url.replace(/\/+$/, "");
+    this.apiKey = apiKey || null;
   }
 
   private headers(): Record<string, string> {
-    return { "Content-Type": "application/json", "api-key": this.apiKey };
+    const h: Record<string, string> = { "Content-Type": "application/json" };
+    if (this.apiKey) h["api-key"] = this.apiKey;
+    return h;
   }
 
   private async req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -165,12 +170,12 @@ export function buildFilter(opts: {
 
 export function isQdrantConfigured(): boolean {
   const cfg = loadConfig();
-  return Boolean(cfg.qdrant_url && cfg.qdrant_api_key);
+  return Boolean(cfg.qdrant_url);
 }
 
 export function createQdrantClient(): QdrantClient {
   const cfg = loadConfig();
-  if (!cfg.qdrant_url || !cfg.qdrant_api_key) {
+  if (!cfg.qdrant_url) {
     throw new QdrantNotConfiguredError();
   }
   return new QdrantClient(cfg.qdrant_url, cfg.qdrant_api_key, cfg.collection);

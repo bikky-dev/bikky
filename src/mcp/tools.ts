@@ -265,9 +265,9 @@ export function registerTools(mcp: McpServer): void {
       };
       const missing = status["missing"] as string[];
       if (!qdrantUrl) missing.push("qdrant-url");
-      if (!qdrantApiKey) missing.push("qdrant-api-key");
+      // qdrant-api-key is optional (local / self-hosted Qdrant doesn't need it).
 
-      if (qdrantUrl && qdrantApiKey) {
+      if (qdrantUrl) {
         try {
           await qdrantReq<unknown>("GET", "/collections");
           status["qdrant_connected"] = true;
@@ -280,10 +280,11 @@ export function registerTools(mcp: McpServer): void {
 
       if (!status["ready"] && missing.length > 0) {
         status["setup_instructions"] =
-          "Run `bikky setup` or guide the user:\n" +
-          "1. Go to cloud.qdrant.io → sign up (free tier: 1GB, no credit card)\n" +
-          "2. Create a cluster → copy the REST URL and API key\n" +
-          "3. Call configure_credentials with Qdrant values";
+          "Run `bikky setup` or guide the user. Pick one Qdrant option:\n" +
+          "  • Qdrant Cloud (managed, free tier, 1GB): https://cloud.qdrant.io — copy the REST URL + API key\n" +
+          "  • Local Docker: `docker run -p 6333:6333 qdrant/qdrant` → URL `http://localhost:6333` (no API key needed)\n" +
+          "  • Self-hosted: any reachable Qdrant; API key only required if QDRANT__SERVICE__API_KEY is set on the server\n" +
+          "Then call configure_credentials with the URL (and API key if applicable).";
       }
 
       return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
@@ -296,8 +297,8 @@ export function registerTools(mcp: McpServer): void {
     "configure_credentials",
     "Store Qdrant + embedding credentials in ~/.bikky/config.json. Tests connectivity and creates the collection if needed.",
     {
-      qdrant_url: z.string().optional().describe("Qdrant Cloud REST URL (e.g. https://xxx.cloud.qdrant.io:6333)"),
-      qdrant_api_key: z.string().optional().describe("Qdrant Cloud API key"),
+      qdrant_url: z.string().optional().describe("Qdrant REST URL — Qdrant Cloud (https://xxx.cloud.qdrant.io:6333), local Docker (http://localhost:6333), or self-hosted"),
+      qdrant_api_key: z.string().optional().describe("Qdrant API key — required for Qdrant Cloud; optional / leave blank for unauthenticated local or self-hosted instances"),
       openai_api_key: z.string().optional().describe("OpenAI API key (for OpenAI embedding/LLM provider)"),
     },
     async ({ qdrant_url, qdrant_api_key, openai_api_key }): Promise<McpToolResult> => {
@@ -325,7 +326,7 @@ export function registerTools(mcp: McpServer): void {
 
       saveConfig(cfg);
 
-      if (qdrantUrl && qdrantApiKey) {
+      if (qdrantUrl) {
         try {
           await ensureCollection(QDRANT_INDEXES);
           results["qdrant_collection"] = `'${getCollection()}' ready ✓`;
@@ -342,7 +343,7 @@ export function registerTools(mcp: McpServer): void {
         results["embedding"] = `error: ${e instanceof Error ? e.message : String(e)}`;
       }
 
-      setReady(!!(qdrantUrl && qdrantApiKey));
+      setReady(!!qdrantUrl);
       results["ready"] = ready;
 
       return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
@@ -358,7 +359,7 @@ export function registerTools(mcp: McpServer): void {
     async (): Promise<McpToolResult> => {
       const results: Record<string, unknown> = { qdrant: false, embedding: false, collection: false };
 
-      if (qdrantUrl && qdrantApiKey) {
+      if (qdrantUrl) {
         try {
           await qdrantReq<unknown>("GET", "/collections");
           results["qdrant"] = true;

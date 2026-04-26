@@ -22,7 +22,7 @@ export const CATEGORIES = {
     description:
       "Cloud, deployment, runtime, secrets, queues, databases, CI/CD, and environment topology.",
     examples: [
-      "Production uses Qdrant Cloud for vector storage.",
+      "Production runs on a Qdrant cluster (Cloud or self-hosted) for vector storage.",
       "Deployments are promoted through GitHub Actions.",
     ],
   },

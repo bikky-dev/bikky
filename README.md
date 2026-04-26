@@ -41,19 +41,27 @@ npm install -g bikky
 bikky install          # writes MCP config for Copilot + Claude Code
 ```
 
-**Prerequisites:** [Qdrant Cloud](https://cloud.qdrant.io) (free tier, no credit card) + an embedding provider ([Ollama](https://ollama.com) runs locally for free, or use OpenAI / AWS Bedrock).
+**Prerequisites:** A Qdrant instance + an embedding provider.
+
+- **Qdrant** — pick one:
+  - [Qdrant Cloud](https://cloud.qdrant.io) (free tier, 1 GB, no credit card) — needs URL + API key.
+  - **Local Docker:** `docker run -p 6333:6333 qdrant/qdrant` — URL `http://localhost:6333`, no API key.
+  - **Self-hosted:** any reachable Qdrant; API key only required if you set `QDRANT__SERVICE__API_KEY` on the server.
+- **Embeddings** — [Ollama](https://ollama.com) runs locally for free, or use OpenAI / AWS Bedrock.
 
 Then configure credentials — pick one:
 
 ```bash
 # Option A: let your agent do it
-> "Call configure_credentials with my Qdrant URL and API key"
+> "Call configure_credentials with my Qdrant URL (and API key if needed)"
 
 # Option B: config file
-echo '{ "qdrant_url": "https://…:6333", "qdrant_api_key": "…" }' > ~/.bikky/config.json
+echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
+# (add "qdrant_api_key" only if your Qdrant requires auth)
 
 # Option C: env vars
-export QDRANT_URL="https://…:6333" QDRANT_API_KEY="…"
+export QDRANT_URL="http://localhost:6333"
+# export QDRANT_API_KEY="…"   # optional; required only for Qdrant Cloud / authenticated self-hosted
 ```
 
 Restart your editor — memory tools appear automatically.
