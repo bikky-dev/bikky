@@ -1,6 +1,10 @@
 /**
  * OpenAI chat-completion provider — POSTs to /v1/chat/completions with bearer
  * auth. Forwards `response_format` (json_object or json_schema) as-is.
+ *
+ * On failure: catches typed errors from the resilient fetch helper, records
+ * them via `_recordInferenceError` for surfacing by the orchestrator, and
+ * returns `null` to keep the fallback contract.
  */
 
 import type {
@@ -10,6 +14,15 @@ import type {
   LogFn,
 } from "../types.js";
 import { registerInferenceProvider } from "../registry.js";
+import { resilientFetch } from "../../fetch.js";
+import {
+  LlmAuthError,
+  LlmHttpError,
+  type LlmErrorDetails,
+} from "../../errors.js";
+import { _recordInferenceError } from "../index.js";
+
+const RETRY_CAP_MS = 5_000;
 
 export const openaiInferenceProvider: InferenceProvider = {
   name: "openai",
@@ -20,7 +33,13 @@ export const openaiInferenceProvider: InferenceProvider = {
     baseUrl: "https://api.openai.com",
   },
   async chat(opts: ChatCompletionOpts, cfg: ResolvedInferenceConfig, log: LogFn): Promise<string | null> {
-    if (!cfg.apiKey) { log("WARN", "LLM OpenAI: no API key"); return null; }
+    if (!cfg.apiKey) {
+      const details: LlmErrorDetails = { provider: "openai", model: cfg.model, body: "no API key" };
+      const err = new LlmAuthError(details);
+      _recordInferenceError(err);
+      log("WARN", `LLM OpenAI: no API key`);
+      return null;
+    }
 
     const body: Record<string, unknown> = {
       model: cfg.model,
@@ -31,23 +50,33 @@ export const openaiInferenceProvider: InferenceProvider = {
     if (opts.response_format) body.response_format = opts.response_format;
 
     try {
-      const resp = await fetch(`${cfg.baseUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${cfg.apiKey}`,
+      const resp = await resilientFetch({
+        url: `${cfg.baseUrl}/v1/chat/completions`,
+        init: {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${cfg.apiKey}`,
+          },
+          body: JSON.stringify(body),
         },
-        body: JSON.stringify(body),
+        timeoutMs: cfg.timeoutMs,
+        retries: cfg.retries,
+        baseDelayMs: cfg.retryBaseDelayMs,
+        capDelayMs: RETRY_CAP_MS,
+        provider: "openai",
+        model: cfg.model,
       });
-      if (!resp.ok) {
-        const err = await resp.text().catch(() => "");
-        log("WARN", `LLM OpenAI error (${resp.status}): ${err.slice(0, 200)}`);
-        return null;
-      }
       const data = (await resp.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      _recordInferenceError(null);
       return data.choices?.[0]?.message?.content?.trim() ?? null;
     } catch (e: unknown) {
-      log("WARN", `LLM OpenAI error: ${(e as Error).message}`);
+      if (e instanceof LlmHttpError) {
+        _recordInferenceError(e);
+        log("WARN", `LLM OpenAI ${e.kind}${e.status !== undefined ? ` (${e.status})` : ""}: ${e.message}`);
+      } else {
+        log("WARN", `LLM OpenAI error: ${(e as Error).message}`);
+      }
       return null;
     }
   },

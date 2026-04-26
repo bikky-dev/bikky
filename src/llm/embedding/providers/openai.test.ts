@@ -11,6 +11,9 @@ const baseCfg: ResolvedEmbeddingConfig = {
   baseUrl: "https://api.openai.com",
   apiKey: "sk-test",
   extra: {},
+  timeoutMs: 5_000,
+  retries: 0,
+  retryBaseDelayMs: 10,
 };
 
 describe("openai embedding provider", () => {

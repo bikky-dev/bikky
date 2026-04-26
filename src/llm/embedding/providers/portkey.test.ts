@@ -11,6 +11,9 @@ const baseCfg: ResolvedEmbeddingConfig = {
   baseUrl: "https://api.portkey.ai",
   apiKey: "pk-test",
   extra: {},
+  timeoutMs: 5_000,
+  retries: 0,
+  retryBaseDelayMs: 10,
 };
 
 describe("portkey embedding provider", () => {

@@ -12,11 +12,14 @@
  */
 
 import { registerEmbeddingProvider } from "../registry.js";
+import { resilientFetch } from "../../fetch.js";
 import type { EmbeddingProvider, ResolvedEmbeddingConfig } from "../types.js";
 
 interface PortkeyEmbedResponse {
   data: Array<{ embedding: number[] }>;
 }
+
+const RETRY_CAP_MS = 5_000;
 
 export const portkeyEmbeddingProvider: EmbeddingProvider = {
   name: "portkey",
@@ -36,15 +39,20 @@ export const portkeyEmbeddingProvider: EmbeddingProvider = {
     if (cfg.extra.virtual_key) headers["x-portkey-virtual-key"] = cfg.extra.virtual_key;
     if (cfg.extra.config_id) headers["x-portkey-config"] = cfg.extra.config_id;
 
-    const resp = await fetch(`${cfg.baseUrl}/v1/embeddings`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ model: cfg.model, input: text }),
+    const resp = await resilientFetch({
+      url: `${cfg.baseUrl}/v1/embeddings`,
+      init: {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ model: cfg.model, input: text }),
+      },
+      timeoutMs: cfg.timeoutMs,
+      retries: cfg.retries,
+      baseDelayMs: cfg.retryBaseDelayMs,
+      capDelayMs: RETRY_CAP_MS,
+      provider: "portkey",
+      model: cfg.model,
     });
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => "");
-      throw new Error(`Embedding failed [portkey/${cfg.model}] (${resp.status}): ${body.slice(0, 200)}`);
-    }
     const data = (await resp.json()) as PortkeyEmbedResponse;
     const first = data.data[0];
     if (!first) throw new Error(`Embedding response from portkey missing data`);

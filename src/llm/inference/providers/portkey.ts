@@ -16,6 +16,15 @@ import type {
   LogFn,
 } from "../types.js";
 import { registerInferenceProvider } from "../registry.js";
+import { resilientFetch } from "../../fetch.js";
+import {
+  LlmAuthError,
+  LlmHttpError,
+  type LlmErrorDetails,
+} from "../../errors.js";
+import { _recordInferenceError } from "../index.js";
+
+const RETRY_CAP_MS = 5_000;
 
 export const portkeyInferenceProvider: InferenceProvider = {
   name: "portkey",
@@ -26,7 +35,13 @@ export const portkeyInferenceProvider: InferenceProvider = {
     baseUrl: "https://api.portkey.ai",
   },
   async chat(opts: ChatCompletionOpts, cfg: ResolvedInferenceConfig, log: LogFn): Promise<string | null> {
-    if (!cfg.apiKey) { log("WARN", "LLM Portkey: no API key"); return null; }
+    if (!cfg.apiKey) {
+      const details: LlmErrorDetails = { provider: "portkey", model: cfg.model, body: "no API key" };
+      const err = new LlmAuthError(details);
+      _recordInferenceError(err);
+      log("WARN", `LLM Portkey: no API key`);
+      return null;
+    }
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -44,20 +59,30 @@ export const portkeyInferenceProvider: InferenceProvider = {
     if (opts.response_format) body.response_format = opts.response_format;
 
     try {
-      const resp = await fetch(`${cfg.baseUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
+      const resp = await resilientFetch({
+        url: `${cfg.baseUrl}/v1/chat/completions`,
+        init: {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        },
+        timeoutMs: cfg.timeoutMs,
+        retries: cfg.retries,
+        baseDelayMs: cfg.retryBaseDelayMs,
+        capDelayMs: RETRY_CAP_MS,
+        provider: "portkey",
+        model: cfg.model,
       });
-      if (!resp.ok) {
-        const err = await resp.text().catch(() => "");
-        log("WARN", `LLM Portkey error (${resp.status}): ${err.slice(0, 200)}`);
-        return null;
-      }
       const data = (await resp.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      _recordInferenceError(null);
       return data.choices?.[0]?.message?.content?.trim() ?? null;
     } catch (e: unknown) {
-      log("WARN", `LLM Portkey error: ${(e as Error).message}`);
+      if (e instanceof LlmHttpError) {
+        _recordInferenceError(e);
+        log("WARN", `LLM Portkey ${e.kind}${e.status !== undefined ? ` (${e.status})` : ""}: ${e.message}`);
+      } else {
+        log("WARN", `LLM Portkey error: ${(e as Error).message}`);
+      }
       return null;
     }
   },

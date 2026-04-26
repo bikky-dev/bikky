@@ -6,6 +6,10 @@
  *
  * Region resolution order: cfg.extra.region → AWS_BEDROCK_REGION → AWS_REGION → "us-east-1".
  * Credentials follow the SDK default chain (env → shared file → SSO → IAM role).
+ *
+ * Errors: SDK exceptions are translated to typed `LlmHttpError` subclasses
+ * (using `$metadata.httpStatusCode`) and recorded via `_recordInferenceError`,
+ * matching the contract used by the HTTP-based providers.
  */
 
 import type {
@@ -16,6 +20,17 @@ import type {
   ChatMessage,
 } from "../types.js";
 import { registerInferenceProvider } from "../registry.js";
+import {
+  classifyHttpStatus,
+  LlmAuthError,
+  LlmBadRequestError,
+  LlmRateLimitError,
+  LlmTransientError,
+  LlmUnknownError,
+  type LlmErrorDetails,
+  type LlmHttpError,
+} from "../../errors.js";
+import { _recordInferenceError } from "../index.js";
 
 interface BedrockSdk {
   client: { send(cmd: unknown): Promise<{ output?: { message?: { content?: Array<{ text?: string }> } } }> };
@@ -40,6 +55,32 @@ async function ensureSdk(cfg: ResolvedInferenceConfig): Promise<BedrockSdk> {
   };
   sdk = next;
   return next;
+}
+
+function translateSdkError(err: unknown, model: string): LlmHttpError {
+  const e = err as {
+    name?: string;
+    message?: string;
+    $metadata?: { httpStatusCode?: number };
+  };
+  const status = e.$metadata?.httpStatusCode;
+  const details: LlmErrorDetails = {
+    provider: "bedrock",
+    model,
+    status,
+    body: e.message ?? e.name,
+    cause: err,
+  };
+  if (status === undefined) {
+    return new LlmTransientError(details);
+  }
+  switch (classifyHttpStatus(status)) {
+    case "auth": return new LlmAuthError(details);
+    case "rate_limit": return new LlmRateLimitError(details);
+    case "bad_request": return new LlmBadRequestError(details);
+    case "transient": return new LlmTransientError(details);
+    default: return new LlmUnknownError(details);
+  }
 }
 
 /** Test-only: drop the cached SDK so tests can swap or reset it. */
@@ -82,11 +123,14 @@ export const bedrockInferenceProvider: InferenceProvider = {
         },
       });
       const resp = await client.send(command);
+      _recordInferenceError(null);
       const content = resp.output?.message?.content;
       const textBlock = content?.find((c) => "text" in c);
       return (textBlock?.text ?? "").trim() || null;
     } catch (e: unknown) {
-      log("WARN", `LLM Bedrock error: ${(e as Error).message}`);
+      const err = translateSdkError(e, cfg.model);
+      _recordInferenceError(err);
+      log("WARN", `LLM Bedrock ${err.kind}${err.status !== undefined ? ` (${err.status})` : ""}: ${err.message}`);
       return null;
     }
   },
