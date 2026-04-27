@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { looksLikeTempdir, inspectWatcherPaths, formatIssue } from "./watcher-health.js";
+import { looksLikeTempdir, inspectWatcherPaths, formatIssue, repairSuspiciousWatcherPaths } from "./watcher-health.js";
 import { CONFIG_DEFAULTS } from "../config.js";
 
 describe("looksLikeTempdir", () => {
@@ -85,6 +85,35 @@ describe("inspectWatcherPaths", () => {
     for (const i of issues) {
       assert.notStrictEqual(i.watcher, "claude", `claude default path should not be flagged: ${JSON.stringify(i)}`);
     }
+  });
+});
+
+describe("repairSuspiciousWatcherPaths", () => {
+  it("resets enabled tempdir watcher paths to canonical defaults", () => {
+    const cfg = structuredClone(CONFIG_DEFAULTS);
+    const stalePath = "/var/folders/0z/abc/T/bikky-test-sessions-XYZ/mixed-sessions";
+    cfg.watchers.copilot.path = stalePath;
+
+    const repairs = repairSuspiciousWatcherPaths(cfg);
+
+    assert.strictEqual(repairs.length, 1);
+    assert.strictEqual(repairs[0].watcher, "copilot");
+    assert.strictEqual(repairs[0].previousPath, stalePath);
+    assert.strictEqual(repairs[0].repairedPath, CONFIG_DEFAULTS.watchers.copilot.path);
+    assert.strictEqual(cfg.watchers.copilot.path, CONFIG_DEFAULTS.watchers.copilot.path);
+  });
+
+  it("does not rewrite disabled or non-temp custom watcher paths", () => {
+    const cfg = structuredClone(CONFIG_DEFAULTS);
+    cfg.watchers.copilot.enabled = false;
+    cfg.watchers.copilot.path = "/tmp/bikky-test-disabled";
+    cfg.watchers.claude.path = os.homedir();
+
+    const repairs = repairSuspiciousWatcherPaths(cfg);
+
+    assert.strictEqual(repairs.length, 0);
+    assert.strictEqual(cfg.watchers.copilot.path, "/tmp/bikky-test-disabled");
+    assert.strictEqual(cfg.watchers.claude.path, os.homedir());
   });
 });
 
