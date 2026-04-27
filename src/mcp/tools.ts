@@ -63,7 +63,7 @@ import {
 } from "./api.js";
 import { saveConfig, loadConfig, EXTRACTION_HEALTH_PATH } from "../config.js";
 import { existsSync, readFileSync } from "node:fs";
-import { inspectWatcherPaths, formatIssue } from "../daemon/watcher-health.js";
+import { inspectWatcherPaths, formatIssue, repairSuspiciousWatcherPaths } from "../daemon/watcher-health.js";
 import {
   addRedactionPayload,
   combineRedactions,
@@ -363,6 +363,11 @@ export function registerTools(mcp: McpServer): void {
         cfg.embedding.api_key = openai_api_key;
         cfg.llm.api_key = openai_api_key;
         results["openai_api_key"] = "stored ✓";
+      }
+
+      const watcherRepairs = repairSuspiciousWatcherPaths(cfg);
+      if (watcherRepairs.length > 0) {
+        results["watcher_path_repairs"] = watcherRepairs;
       }
 
       saveConfig(cfg);
