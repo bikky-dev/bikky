@@ -47,6 +47,23 @@ export interface ChatCompletionOpts {
   temperature?: number;
   max_tokens?: number;
   response_format?: ResponseFormat;
+  /** id@version prompt stamp from the prompt registry, used for telemetry. */
+  promptName?: string;
+  telemetry?: ChatCompletionTelemetryContext;
+}
+
+export interface ChatCompletionTelemetryContext {
+  subsystem?: string;
+  session_id?: string;
+  workstream_key?: string;
+  trigger?: string;
+}
+
+export interface ChatCompletionUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  request_id?: string;
 }
 
 export interface InferenceProvider {

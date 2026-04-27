@@ -97,7 +97,7 @@ export async function startDaemon(): Promise<void> {
     }
 
     try {
-      await entityTypingTick();
+      await entityTypingTick(cfg);
     } catch (e) {
       log("ERROR", `Entity typing tick failed: ${(e as Error).message}`);
     }

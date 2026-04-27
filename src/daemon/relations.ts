@@ -1,15 +1,9 @@
 /**
- * Relationship Inference
+ * Relationship inference.
  *
- * Periodic task that infers typed relationships between entities by analysing
- * their shared facts.  Runs inside the consolidation tick cadence.
- *
- * Flow:
- *   1. Scroll all non-superseded facts → build entity co-occurrence map
- *   2. Filter out pairs that already have a `kind: "relation"` fact
- *   3. For the top N pairs by shared-fact count, fetch the actual shared facts
- *   4. Send to a cheap LLM for a 2-4 word relationship label
- *   5. Store via storeFact with kind: "relation", source: "daemon"
+ * Infers typed relationships between entities from recently changed facts. The
+ * daemon keeps a persistent cursor so each cycle considers new evidence first
+ * instead of rebuilding a whole-collection co-occurrence map.
  */
 
 import { createHash } from "node:crypto";
@@ -21,123 +15,107 @@ import {
   safeParseJson,
 } from "../prompts/index.js";
 import type { BikkyConfig } from "../config.js";
-import type { LogFn, QdrantPayload } from "./qdrant.js";
+import type { LogFn, QdrantPayload, QdrantScrollResult } from "./qdrant.js";
+import { DEFAULT_CAPTURE_CONTEXT } from "./capture-policy.js";
 import { isGenericEntity, mapToCanonical } from "./relations-vocab.js";
-
-// ─── State ───────────────────────────────────────────────────────────────────
+import {
+  isAttemptBackedOff,
+  pruneRecentAttempts,
+  readMaintenanceState,
+  recordMaintenanceRun,
+  shouldRunMaintenance,
+} from "./maintenance-state.js";
 
 let logFn: LogFn = () => {};
-let internalTickCount = 0;
 
 const setLogger = (fn: LogFn): void => { logFn = fn; };
 
-// Run every 300 internal ticks.  consolidation.tick calls us every 5 daemon
-// ticks (≈25 s each), so effective period ≈ 300 × 25 s ≈ 2 hours.
-const TICK_INTERVAL = 300;
+const CHANGED_FACTS_LIMIT = 200;
+const SUPPORTING_FACTS_LIMIT = 10;
+const DEFAULT_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+const RELATION_ATTEMPT_BACKOFF_MS = 7 * 24 * 60 * 60 * 1000;
 
-// Max relations to infer per cycle (keeps LLM cost bounded)
-const MAX_INFER_PER_CYCLE = 3;
-
-// Minimum shared facts before we consider inferring a relation
 const MIN_SHARED_FACTS = 2;
-
-// Minimum LLM confidence to store a relation (quality gate)
 const MIN_CONFIDENCE = 0.6;
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/** Canonical pair key — alphabetical so (a,b) === (b,a) */
+/** Canonical pair key — alphabetical so (a,b) === (b,a). */
 const pairKey = (a: string, b: string): string => {
-  const sorted = [a, b].sort();
+  const sorted = [a, b].map((entity) => entity.toLowerCase()).sort();
   return `${sorted[0]}::${sorted[1]}`;
 };
 
-interface CoOccurrence {
+interface ChangedCoOccurrence {
   entityA: string;
   entityB: string;
-  count: number;
-  factIds: string[];
+  triggeringFactIds: string[];
+  latestUpdatedAt: string;
 }
 
-/**
- * Scroll ALL non-superseded facts in batches and build a co-occurrence map.
- * Returns pairs sorted by count descending.
- */
-const buildCoOccurrenceMap = async (): Promise<CoOccurrence[]> => {
-  const pairMap = new Map<string, { entityA: string; entityB: string; count: number; factIds: string[] }>();
+interface RelationFact {
+  id: string;
+  content: string;
+  category: string;
+  updated_at: string;
+  session_id?: string | null;
+  workstream_key?: string | null;
+  metadata: Record<string, string | number | boolean | null>;
+}
 
-  let offset: string | null = null;
-  const BATCH = 100;
-  let totalScrolled = 0;
+interface RelationCandidate {
+  entityA: string;
+  entityB: string;
+  triggeringFactIds: string[];
+  supportingFactIds: string[];
+  facts: Array<{ id: string; content: string; category: string }>;
+  sessionIds: string[];
+  workstreamKeys: string[];
+  latestUpdatedAt: string;
+}
 
-  // Scroll through all non-superseded, non-relation facts
-  for (;;) {
-    const body: Record<string, unknown> = {
-      filter: {
-        must: [
-          { is_null: { key: "superseded_by" } },
-        ],
-        must_not: [
-          { key: "kind", match: { value: "relation" } },
-        ],
-      },
-      limit: BATCH,
-      with_payload: { include: ["entities"] },
-    };
-    if (offset) body.offset = offset;
+const uniqueStrings = (values: Array<string | null | undefined>): string[] =>
+  [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))];
 
-    const result = await qdrant.qdrantRequest(
-      "POST",
-      `/collections/${qdrant.collection}/points/scroll`,
-      body,
-    ) as {
-      result?: {
-        points?: Array<{ id: string; payload?: Partial<QdrantPayload> }>;
-        next_page_offset?: string | null;
-      };
-    };
+const sessionIdFromFact = (fact: RelationFact | QdrantScrollResult): string | null => {
+  if (fact.session_id) return fact.session_id;
+  const extracted = fact.metadata.extracted_from_session;
+  if (typeof extracted === "string" && extracted.trim()) return extracted;
+  const summarized = fact.metadata.summarized_from_session;
+  return typeof summarized === "string" && summarized.trim() ? summarized : null;
+};
 
-    const points = result.result?.points || [];
-    if (points.length === 0) break;
+const buildChangedCoOccurrenceCandidates = (facts: QdrantScrollResult[]): ChangedCoOccurrence[] => {
+  const pairMap = new Map<string, ChangedCoOccurrence>();
 
-    for (const pt of points) {
-      const entities = (pt.payload?.entities || []).filter((e) => !isGenericEntity(e));
-      if (entities.length < 2) continue;
+  for (const fact of facts) {
+    const entities = [...new Set((fact.entities || [])
+      .map((entity) => entity.trim().toLowerCase())
+      .filter((entity) => entity.length >= 2 && !isGenericEntity(entity)))];
+    if (entities.length < 2) continue;
 
-      // Generate all pairs from this fact's entities
-      for (let i = 0; i < entities.length; i++) {
-        for (let j = i + 1; j < entities.length; j++) {
-          const eA = entities[i]!;
-          const eB = entities[j]!;
-          const key = pairKey(eA, eB);
-          const existing = pairMap.get(key);
-          if (existing) {
-            existing.count++;
-            if (existing.factIds.length < 10) existing.factIds.push(pt.id);
-          } else {
-            const sorted = [eA, eB].sort();
-            pairMap.set(key, {
-              entityA: sorted[0]!,
-              entityB: sorted[1]!,
-              count: 1,
-              factIds: [pt.id],
-            });
-          }
+    for (let i = 0; i < entities.length; i++) {
+      for (let j = i + 1; j < entities.length; j++) {
+        const entityA = entities[i]!;
+        const entityB = entities[j]!;
+        const key = pairKey(entityA, entityB);
+        const sorted = [entityA, entityB].sort();
+        const existing = pairMap.get(key);
+        if (existing) {
+          existing.triggeringFactIds = uniqueStrings([...existing.triggeringFactIds, fact.id]);
+          existing.latestUpdatedAt = [existing.latestUpdatedAt, fact.updated_at || fact.created_at].filter(Boolean).sort().at(-1) ?? "";
+        } else {
+          pairMap.set(key, {
+            entityA: sorted[0]!,
+            entityB: sorted[1]!,
+            triggeringFactIds: [fact.id],
+            latestUpdatedAt: fact.updated_at || fact.created_at,
+          });
         }
       }
     }
-
-    totalScrolled += points.length;
-    offset = result.result?.next_page_offset ?? null;
-    if (!offset) break;
   }
 
-  logFn("DEBUG", `Relations: scrolled ${totalScrolled} facts, found ${pairMap.size} co-occurrence pairs`);
-
-  // Sort by count descending
-  return Array.from(pairMap.values())
-    .filter(p => p.count >= MIN_SHARED_FACTS)
-    .sort((a, b) => b.count - a.count);
+  return [...pairMap.values()]
+    .sort((a, b) => a.latestUpdatedAt.localeCompare(b.latestUpdatedAt) || pairKey(a.entityA, a.entityB).localeCompare(pairKey(b.entityA, b.entityB)));
 };
 
 /**
@@ -179,9 +157,7 @@ const getExistingRelations = async (): Promise<Set<string>> => {
     for (const pt of points) {
       const from = pt.payload?.from_entity;
       const to = pt.payload?.to_entity;
-      if (from && to) {
-        existing.add(pairKey(from, to));
-      }
+      if (from && to) existing.add(pairKey(from, to));
     }
 
     offset = result.result?.next_page_offset ?? null;
@@ -192,37 +168,77 @@ const getExistingRelations = async (): Promise<Set<string>> => {
   return existing;
 };
 
-/**
- * Fetch the full content of specific fact IDs for the LLM prompt.
- */
-const fetchFactContents = async (
-  factIds: string[],
-): Promise<Array<{ id: string; content: string; category: string }>> => {
+const fetchSupportingFacts = async (
+  entityA: string,
+  entityB: string,
+): Promise<RelationFact[]> => {
   const result = await qdrant.qdrantRequest(
     "POST",
-    `/collections/${qdrant.collection}/points`,
-    { ids: factIds, with_payload: { include: ["content", "category"] } },
-  ) as { result?: Array<{ id: string; payload?: { content?: string; category?: string } }> };
+    `/collections/${qdrant.collection}/points/scroll`,
+    {
+      filter: {
+        must: [
+          { is_null: { key: "superseded_by" } },
+          { key: "entities", match: { value: entityA } },
+          { key: "entities", match: { value: entityB } },
+        ],
+        must_not: [
+          { key: "kind", match: { value: "relation" } },
+          { key: "kind", match: { value: "entity_type" } },
+        ],
+      },
+      order_by: { key: "updated_at", direction: "desc" },
+      limit: SUPPORTING_FACTS_LIMIT,
+      with_payload: true,
+    },
+  ) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
 
-  return (result.result || []).map(pt => ({
-    id: pt.id,
-    content: pt.payload?.content ?? "",
-    category: pt.payload?.category ?? "",
+  return (result.result?.points ?? []).map((point) => ({
+    id: point.id,
+    content: point.payload?.content ?? "",
+    category: point.payload?.category ?? "",
+    updated_at: point.payload?.updated_at ?? point.payload?.created_at ?? "",
+    session_id: point.payload?.session_id ?? null,
+    workstream_key: point.payload?.workstream_key ?? null,
+    metadata: point.payload?.metadata ?? {},
   }));
 };
 
-/**
- * Use LLM to infer a relationship label from shared facts.
- * Returns null if the LLM can't determine a meaningful relationship.
- * The LLM decides directionality — `from` is the subject, `to` is the object.
- */
+const buildRelationCandidate = async (
+  changed: ChangedCoOccurrence,
+): Promise<RelationCandidate | null> => {
+  const supportingFacts = await fetchSupportingFacts(changed.entityA, changed.entityB);
+  if (supportingFacts.length < MIN_SHARED_FACTS) return null;
+
+  return {
+    entityA: changed.entityA,
+    entityB: changed.entityB,
+    triggeringFactIds: changed.triggeringFactIds,
+    supportingFactIds: supportingFacts.map((fact) => fact.id),
+    facts: supportingFacts.map((fact) => ({ id: fact.id, content: fact.content, category: fact.category })),
+    sessionIds: uniqueStrings(supportingFacts.map(sessionIdFromFact)),
+    workstreamKeys: uniqueStrings(supportingFacts.map((fact) => fact.workstream_key)),
+    latestUpdatedAt: [changed.latestUpdatedAt, ...supportingFacts.map((fact) => fact.updated_at)].filter(Boolean).sort().at(-1) ?? "",
+  };
+};
+
 const inferRelation = async (
-  entityA: string,
-  entityB: string,
-  sharedFacts: Array<{ content: string; category: string }>,
+  candidate: RelationCandidate,
 ): Promise<{ from: string; type: string; to: string; content: string; evidence?: string; confidence?: number; inVocabulary?: boolean; judgment?: { evidence_strength?: number; durability?: string; directionality_clarity?: string } } | null> => {
-  const rendered = relationsPrompt({ entityA, entityB, sharedFacts });
-  const raw = await chatCompletion(rendered);
+  const rendered = relationsPrompt({
+    entityA: candidate.entityA,
+    entityB: candidate.entityB,
+    sharedFacts: candidate.facts.map((fact) => ({ content: fact.content, category: fact.category })),
+  });
+  const raw = await chatCompletion({
+    ...rendered,
+    telemetry: {
+      subsystem: "relation-inference",
+      ...(candidate.sessionIds.length > 0 ? { session_id: candidate.sessionIds.join(",") } : {}),
+      ...(candidate.workstreamKeys.length > 0 ? { workstream_key: candidate.workstreamKeys.join(",") } : {}),
+      trigger: "infer_relation",
+    },
+  });
 
   if (!raw) return null;
 
@@ -243,72 +259,58 @@ const inferRelation = async (
 
   if (!parsed || !parsed.type) return null;
 
-  // ── Self-judgment quality gates ──────────────────────────────────────────
   if (parsed.judgment) {
     const j = parsed.judgment;
-
-    // Gate 1: durability — reject transient/ephemeral relations
     if (j.durability === "transient" || j.durability === "ephemeral") {
-      logFn("DEBUG", `Relations: rejected ${entityA}↔${entityB} — durability="${j.durability}"`);
+      logFn("DEBUG", `Relations: rejected ${candidate.entityA}↔${candidate.entityB} — durability="${j.durability}"`);
       return null;
     }
-
-    // Gate 2: directionality — reject ambiguous direction
     if (j.directionality_clarity === "ambiguous") {
-      logFn("DEBUG", `Relations: rejected ${entityA}↔${entityB} — ambiguous directionality`);
+      logFn("DEBUG", `Relations: rejected ${candidate.entityA}↔${candidate.entityB} — ambiguous directionality`);
       return null;
     }
-
-    // Gate 3: evidence strength — reject weak evidence (< 0.5)
     if (typeof j.evidence_strength === "number" && j.evidence_strength < 0.5) {
-      logFn("DEBUG", `Relations: rejected ${entityA}↔${entityB} — evidence_strength=${j.evidence_strength}`);
+      logFn("DEBUG", `Relations: rejected ${candidate.entityA}↔${candidate.entityB} — evidence_strength=${j.evidence_strength}`);
       return null;
     }
   }
 
-  // Validate that from/to are the provided entities (not hallucinated)
-  const entities = new Set([entityA.toLowerCase(), entityB.toLowerCase()]);
+  const entities = new Set([candidate.entityA.toLowerCase(), candidate.entityB.toLowerCase()]);
   const from = parsed.from?.toLowerCase() ?? "";
   const to = parsed.to?.toLowerCase() ?? "";
 
   if (!entities.has(from) || !entities.has(to) || from === to) {
-    logFn("WARN", `Relations: LLM returned invalid from/to for ${entityA}↔${entityB}: from="${parsed.from}", to="${parsed.to}"`);
+    logFn("WARN", `Relations: LLM returned invalid from/to for ${candidate.entityA}↔${candidate.entityB}: from="${parsed.from}", to="${parsed.to}"`);
     return null;
   }
 
-  // Verify evidence quote actually appears in shared facts (anti-hallucination guard).
   if (parsed.evidence) {
-    const haystack = sharedFacts.map((f) => f.content).join(" ").toLowerCase();
+    const haystack = candidate.facts.map((f) => f.content).join(" ").toLowerCase();
     const needle = parsed.evidence.toLowerCase().slice(0, 30);
     if (needle.length > 0 && !haystack.includes(needle)) {
       logFn(
         "WARN",
-        `Relations: evidence quote not found in source facts for ${entityA}↔${entityB}: "${parsed.evidence.slice(0, 80)}"`,
+        `Relations: evidence quote not found in source facts for ${candidate.entityA}↔${candidate.entityB}: "${parsed.evidence.slice(0, 80)}"`,
       );
       return null;
     }
   }
 
-  // Use the LLM's chosen direction (normalised to original casing)
-  const resolvedFrom = from === entityA.toLowerCase() ? entityA : entityB;
-  const resolvedTo = to === entityA.toLowerCase() ? entityA : entityB;
+  const resolvedFrom = from === candidate.entityA.toLowerCase() ? candidate.entityA : candidate.entityB;
+  const resolvedTo = to === candidate.entityA.toLowerCase() ? candidate.entityA : candidate.entityB;
 
-  // Map LLM type to canonical vocabulary
   const mapped = mapToCanonical(parsed.type);
   if (mapped.changed) {
     logFn("DEBUG", `Relations: mapped type "${parsed.type}" → "${mapped.canonical}"`);
   }
-
-  // Gate 4: reject out-of-vocab relation types — they are almost always noise
   if (!mapped.inVocabulary) {
-    logFn("DEBUG", `Relations: rejected ${entityA}↔${entityB} — out-of-vocab type "${parsed.type}"`);
+    logFn("DEBUG", `Relations: rejected ${candidate.entityA}↔${candidate.entityB} — out-of-vocab type "${parsed.type}"`);
     return null;
   }
 
-  // Gate 5: confidence floor — skip low-confidence relations
   const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0.5;
   if (confidence < MIN_CONFIDENCE) {
-    logFn("DEBUG", `Relations: rejected ${entityA}↔${entityB} — confidence ${confidence} < ${MIN_CONFIDENCE}`);
+    logFn("DEBUG", `Relations: rejected ${candidate.entityA}↔${candidate.entityB} — confidence ${confidence} < ${MIN_CONFIDENCE}`);
     return null;
   }
 
@@ -324,15 +326,12 @@ const inferRelation = async (
   };
 };
 
-/**
- * Store an inferred relation as a memory fact.
- */
 const storeRelation = async (
   fromEntity: string,
   toEntity: string,
   relationType: string,
   content: string,
-  sharedFactIds: string[],
+  candidate: RelationCandidate,
   extras: { evidence?: string; confidence?: number; inVocabulary?: boolean; judgment?: { evidence_strength?: number; durability?: string; directionality_clarity?: string } } = {},
 ): Promise<string> => {
   const hash = createHash("sha256")
@@ -340,13 +339,15 @@ const storeRelation = async (
     .digest("hex");
 
   const metadata: Record<string, string> = {
-    inferred_from: sharedFactIds.slice(0, 5).join(","),
-    shared_fact_count: String(sharedFactIds.length),
+    inferred_from: candidate.supportingFactIds.slice(0, 5).join(","),
+    shared_fact_count: String(candidate.supportingFactIds.length),
     inferred_by_prompt: `${RELATIONS_PROMPT_DESCRIPTOR.id}@${RELATIONS_PROMPT_DESCRIPTOR.version}`,
+    triggering_fact_ids: candidate.triggeringFactIds.join(","),
+    supporting_fact_ids: candidate.supportingFactIds.join(","),
   };
-  if (extras.evidence) {
-    metadata.evidence_quote = extras.evidence.slice(0, 500);
-  }
+  if (candidate.sessionIds.length > 0) metadata.triggering_sessions = candidate.sessionIds.join(",");
+  if (candidate.workstreamKeys.length > 0) metadata.triggering_workstreams = candidate.workstreamKeys.join(",");
+  if (extras.evidence) metadata.evidence_quote = extras.evidence.slice(0, 500);
   if (extras.judgment) {
     const j = extras.judgment;
     if (j.evidence_strength != null) metadata.evidence_strength = String(j.evidence_strength);
@@ -356,8 +357,8 @@ const storeRelation = async (
 
   const id = await qdrant.storeFact({
     content,
-    category: "team",    // relations are about entity structure
-    domain: "work",
+    category: "people",
+    domain: DEFAULT_CAPTURE_CONTEXT.domain,
     kind: "relation",
     entities: [fromEntity, toEntity],
     source: "daemon",
@@ -365,6 +366,8 @@ const storeRelation = async (
     importance: 0.6,
     content_hash: hash,
     metadata,
+    source_fact_ids: candidate.supportingFactIds,
+    ...(candidate.workstreamKeys.length > 0 ? { workstream_key: candidate.workstreamKeys[0] } : {}),
     relation: {
       from: fromEntity,
       type: relationType,
@@ -376,45 +379,80 @@ const storeRelation = async (
   return id;
 };
 
-// ─── Main Tick ───────────────────────────────────────────────────────────────
-
 const tick = async (config: BikkyConfig): Promise<void> => {
   if (!qdrant.isReady()) return;
   if (config.daemon.relation_inference_enabled === false) return;
 
-  internalTickCount++;
-  if (internalTickCount % TICK_INTERVAL !== 0) return;
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const state = readMaintenanceState(logFn);
+  const job = state.jobs.relation_inference;
+  const intervalSec = config.daemon.relation_inference_interval_sec ?? 7200;
+  if (!shouldRunMaintenance(now, job.last_run_at, intervalSec)) return;
 
-  logFn("DEBUG", "Relations: starting inference cycle");
+  const attempts = pruneRecentAttempts(job.recent_attempts, now, RELATION_ATTEMPT_BACKOFF_MS);
+  const maxPairs = config.daemon.relation_inference_max_pairs_per_run ?? 3;
+  const since = job.cursor_updated_at ?? new Date(now.getTime() - DEFAULT_LOOKBACK_MS).toISOString();
 
   try {
-    // 1. Build co-occurrence map
-    const pairs = await buildCoOccurrenceMap();
-    if (pairs.length === 0) {
-      logFn("DEBUG", "Relations: no co-occurrence pairs above threshold");
+    const changedFacts = await qdrant.scrollFacts({
+      sinceUpdated: since,
+      excludeKinds: ["relation"],
+      orderBy: { key: "updated_at", direction: "asc" },
+    }, CHANGED_FACTS_LIMIT);
+
+    if (changedFacts.length === 0) {
+      recordMaintenanceRun("relation_inference", {
+        job: "relation_inference",
+        ran_at: nowIso,
+        status: "skipped",
+        candidates_seen: 0,
+        llm_calls: 0,
+        accepted: 0,
+        skipped_reason: "no_changed_facts",
+      }, { cursorUpdatedAt: nowIso, recentAttempts: attempts }, logFn);
       return;
     }
 
-    // 2. Get existing relations to avoid duplicates
+    const changedPairs = buildChangedCoOccurrenceCandidates(changedFacts);
+    if (changedPairs.length === 0) {
+      recordMaintenanceRun("relation_inference", {
+        job: "relation_inference",
+        ran_at: nowIso,
+        status: "skipped",
+        candidates_seen: 0,
+        llm_calls: 0,
+        accepted: 0,
+        skipped_reason: "no_entity_pairs",
+      }, { cursorUpdatedAt: changedFacts.map((fact) => fact.updated_at || fact.created_at).filter(Boolean).sort().at(-1) ?? nowIso, recentAttempts: attempts }, logFn);
+      return;
+    }
+
     const existing = await getExistingRelations();
+    const touchedPairs = changedPairs
+      .filter((pair) => !existing.has(pairKey(pair.entityA, pair.entityB)))
+      .filter((pair) => !isAttemptBackedOff(attempts, pairKey(pair.entityA, pair.entityB), now, RELATION_ATTEMPT_BACKOFF_MS));
 
-    // 3. Find candidate pairs (not yet inferred)
-    const candidates = pairs.filter(p => !existing.has(pairKey(p.entityA, p.entityB)));
-    logFn("DEBUG", `Relations: ${candidates.length} candidate pairs (${pairs.length} total above threshold)`);
+    const supportLookupLimit = Math.max(maxPairs * 5, maxPairs);
+    const relationCandidates: RelationCandidate[] = [];
+    for (const changed of touchedPairs.slice(0, supportLookupLimit)) {
+      const candidate = await buildRelationCandidate(changed);
+      if (candidate) relationCandidates.push(candidate);
+      if (relationCandidates.length >= maxPairs) break;
+    }
 
-    if (candidates.length === 0) return;
-
-    // 4. Infer relations for top N candidates
     let inferred = 0;
-    for (const candidate of candidates.slice(0, MAX_INFER_PER_CYCLE)) {
-      try {
-        const facts = await fetchFactContents(candidate.factIds);
-        if (facts.length < MIN_SHARED_FACTS) continue;
+    let llmCalls = 0;
+    let failures = 0;
 
-        const result = await inferRelation(candidate.entityA, candidate.entityB, facts);
+    for (const candidate of relationCandidates.slice(0, maxPairs)) {
+      const key = pairKey(candidate.entityA, candidate.entityB);
+      try {
+        llmCalls++;
+        attempts[key] = nowIso;
+        const result = await inferRelation(candidate);
         if (!result) continue;
 
-        // Dedup check before storing
         const hash = createHash("sha256")
           .update(`daemon-relation:${pairKey(result.from, result.to)}:${result.type}`)
           .digest("hex");
@@ -429,32 +467,52 @@ const tick = async (config: BikkyConfig): Promise<void> => {
           result.to,
           result.type,
           result.content,
-          candidate.factIds,
+          candidate,
           { evidence: result.evidence, confidence: result.confidence, inVocabulary: result.inVocabulary, judgment: result.judgment },
         );
         inferred++;
       } catch (e: unknown) {
+        failures++;
         logFn("WARN", `Relations: failed to infer ${candidate.entityA}↔${candidate.entityB}: ${(e as Error).message}`);
       }
     }
 
-    logFn("INFO", `Relations: inference cycle complete — ${inferred} new relations from ${candidates.length} candidates`);
+    const deferred = failures > 0 || touchedPairs.length > supportLookupLimit || relationCandidates.length > maxPairs;
+    const cursorUpdatedAt = deferred ? job.cursor_updated_at : changedFacts.map((fact) => fact.updated_at || fact.created_at).filter(Boolean).sort().at(-1) ?? nowIso;
+    recordMaintenanceRun("relation_inference", {
+      job: "relation_inference",
+      ran_at: nowIso,
+      status: "success",
+      candidates_seen: touchedPairs.length,
+      llm_calls: llmCalls,
+      accepted: inferred,
+      skipped_reason: deferred ? "work_deferred" : undefined,
+    }, { cursorUpdatedAt, recentAttempts: attempts }, logFn);
+
+    logFn("INFO", `Relations: inference cycle complete — ${inferred} new relations from ${touchedPairs.length} changed pair(s)`);
   } catch (e: unknown) {
+    recordMaintenanceRun("relation_inference", {
+      job: "relation_inference",
+      ran_at: nowIso,
+      status: "error",
+      candidates_seen: 0,
+      llm_calls: 0,
+      accepted: 0,
+      error: (e as Error).message,
+    }, { cursorUpdatedAt: job.cursor_updated_at, recentAttempts: attempts }, logFn);
     logFn("ERROR", `Relations: inference cycle failed: ${(e as Error).message}`);
   }
 };
 
 /** Reset state (for testing). */
-const _reset = (): void => {
-  internalTickCount = 0;
-};
+const _reset = (): void => {};
 
 export {
   tick,
   setLogger,
   _reset,
-  // Exported for testing
-  buildCoOccurrenceMap,
+  buildChangedCoOccurrenceCandidates,
+  fetchSupportingFacts,
   getExistingRelations,
   inferRelation,
   storeRelation,

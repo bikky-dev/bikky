@@ -142,7 +142,10 @@ const autoDistill = async (
       })),
     });
 
-    const raw = await chatCompletion(rendered);
+    const raw = await chatCompletion({
+      ...rendered,
+      telemetry: { subsystem: "distillation", trigger: "auto_distill" },
+    });
 
     if (!raw) {
       logFn("WARN", "Auto-distill LLM returned empty");
@@ -221,6 +224,7 @@ const autoDistill = async (
 const detectContradiction = async (
   fact: { content: string; category: string; entities: string[]; importance?: number },
   _config: BikkyConfig,
+  telemetry?: { sessionId?: string; workstreamKey?: string },
 ): Promise<ContradictionResult> => {
   if (!qdrant.isReady()) return { contradiction: false };
   if ((fact.importance || 0) < 0.3) return { contradiction: false };
@@ -250,7 +254,15 @@ const detectContradiction = async (
       })),
     });
 
-    const raw = await chatCompletion(rendered);
+    const raw = await chatCompletion({
+      ...rendered,
+      telemetry: {
+        subsystem: "contradiction",
+        ...(telemetry?.sessionId ? { session_id: telemetry.sessionId } : {}),
+        ...(telemetry?.workstreamKey ? { workstream_key: telemetry.workstreamKey } : {}),
+        trigger: "fact_contradiction_check",
+      },
+    });
     if (!raw) return { contradiction: false };
 
     const result = safeParseJson<{
@@ -500,7 +512,10 @@ const generateMemoryBrief = async (_config: BikkyConfig): Promise<boolean> => {
 
     const generatedAt = new Date().toISOString().slice(0, 10);
     const rendered = briefPrompt({ generatedAt, sections });
-    const brief = await chatCompletion(rendered);
+    const brief = await chatCompletion({
+      ...rendered,
+      telemetry: { subsystem: "brief", trigger: "memory_brief" },
+    });
 
     if (!brief) return false;
 
