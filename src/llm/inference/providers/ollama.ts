@@ -13,7 +13,7 @@ import type {
 import { registerInferenceProvider } from "../registry.js";
 import { resilientFetch } from "../../fetch.js";
 import { LlmHttpError } from "../../errors.js";
-import { _recordInferenceError } from "../index.js";
+import { _recordInferenceError, _recordInferenceUsage } from "../index.js";
 
 const RETRY_CAP_MS = 5_000;
 
@@ -53,8 +53,18 @@ export const ollamaInferenceProvider: InferenceProvider = {
         provider: "ollama",
         model: cfg.model,
       });
-      const data = (await resp.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      const data = (await resp.json()) as {
+        id?: string;
+        choices?: Array<{ message?: { content?: string } }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+      };
       _recordInferenceError(null);
+      _recordInferenceUsage({
+        input_tokens: data.usage?.prompt_tokens,
+        output_tokens: data.usage?.completion_tokens,
+        total_tokens: data.usage?.total_tokens,
+        request_id: data.id,
+      });
       return data.choices?.[0]?.message?.content?.trim() ?? null;
     } catch (e: unknown) {
       if (e instanceof LlmHttpError) {

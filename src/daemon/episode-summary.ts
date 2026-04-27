@@ -256,8 +256,21 @@ export const buildEpisodeSummaryPayload = (input: {
   return { payload, redaction };
 };
 
-const summarizeEpisodeTranscript = async (transcript: string): Promise<EpisodeSummaryDraft> => {
-  const result = await chatCompletion(episodeSummaryPrompt({ transcript }));
+const summarizeEpisodeTranscript = async (input: {
+  transcript: string;
+  sessionId: string;
+  workstreamKey?: string | null;
+}): Promise<EpisodeSummaryDraft> => {
+  const rendered = episodeSummaryPrompt({ transcript: input.transcript });
+  const result = await chatCompletion({
+    ...rendered,
+    telemetry: {
+      subsystem: "summary",
+      session_id: input.sessionId,
+      ...(input.workstreamKey ? { workstream_key: input.workstreamKey } : {}),
+      trigger: "episode_summary",
+    },
+  });
   if (!result) throw new Error("Episode summary LLM returned null");
   return parseEpisodeSummaryDraft(result);
 };
@@ -287,7 +300,11 @@ export const updateEpisodeSummary = async (input: {
   }
 
   const existing = await findExistingEpisodeSummary(input.segment.episode_id, input.scope);
-  const draft = await summarizeEpisodeTranscript(input.segment.transcript);
+  const draft = await summarizeEpisodeTranscript({
+    transcript: input.segment.transcript,
+    sessionId: input.sessionId,
+    workstreamKey: input.segment.workstream_key ?? null,
+  });
 
   // Resolve workstream key: deterministic extraction wins, then alias lookup,
   // then accept LLM-proposed key as new canonical, otherwise null.

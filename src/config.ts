@@ -71,6 +71,11 @@ export interface DaemonConfig {
   extraction_prompt: string | null;
   consolidation_enabled: boolean;
   relation_inference_enabled: boolean;
+  relation_inference_interval_sec: number;
+  relation_inference_max_pairs_per_run: number;
+  entity_typing_enabled: boolean;
+  entity_typing_interval_sec: number;
+  entity_typing_max_entities_per_run: number;
   staleness_threshold_days: number;
 }
 
@@ -150,6 +155,11 @@ const DEFAULTS: BikkyConfig = {
     extraction_prompt: null,
     consolidation_enabled: true,
     relation_inference_enabled: true,
+    relation_inference_interval_sec: 7200,
+    relation_inference_max_pairs_per_run: 3,
+    entity_typing_enabled: true,
+    entity_typing_interval_sec: 900,
+    entity_typing_max_entities_per_run: 5,
     staleness_threshold_days: 30,
   },
   watchers: {
@@ -188,6 +198,12 @@ export const CONFIG_ENV_KEYS = [
   "BIKKY_LLM_TIMEOUT_MS",
   "BIKKY_LLM_RETRIES",
   "BIKKY_LLM_RETRY_BASE_DELAY_MS",
+  "BIKKY_DAEMON_RELATION_INFERENCE_ENABLED",
+  "BIKKY_DAEMON_RELATION_INFERENCE_INTERVAL_SEC",
+  "BIKKY_DAEMON_RELATION_INFERENCE_MAX_PAIRS_PER_RUN",
+  "BIKKY_DAEMON_ENTITY_TYPING_ENABLED",
+  "BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC",
+  "BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN",
 ] as const;
 
 const CONFIG_ENV_PREFIXES = [
@@ -230,6 +246,11 @@ const daemonConfigFileSchema = z.object({
   extraction_prompt: z.string().nullable().optional(),
   consolidation_enabled: z.boolean().optional(),
   relation_inference_enabled: z.boolean().optional(),
+  relation_inference_interval_sec: nonNegativeInt.optional(),
+  relation_inference_max_pairs_per_run: nonNegativeInt.optional(),
+  entity_typing_enabled: z.boolean().optional(),
+  entity_typing_interval_sec: nonNegativeInt.optional(),
+  entity_typing_max_entities_per_run: nonNegativeInt.optional(),
   staleness_threshold_days: nonNegativeInt.optional(),
 }).passthrough();
 
@@ -499,6 +520,26 @@ export function loadConfig(): BikkyConfig {
   if (llmRetries !== null) config.llm.retries = llmRetries;
   const llmDelay = positiveInt(process.env.BIKKY_LLM_RETRY_BASE_DELAY_MS);
   if (llmDelay !== null) config.llm.retry_base_delay_ms = llmDelay;
+
+  const booleanEnv = (raw: string | undefined): boolean | null => {
+    if (!raw) return null;
+    const normalized = raw.trim().toLowerCase();
+    if (["1", "true", "yes", "on"].includes(normalized)) return true;
+    if (["0", "false", "no", "off"].includes(normalized)) return false;
+    return null;
+  };
+  const relationEnabled = booleanEnv(process.env.BIKKY_DAEMON_RELATION_INFERENCE_ENABLED);
+  if (relationEnabled !== null) config.daemon.relation_inference_enabled = relationEnabled;
+  const relationInterval = positiveInt(process.env.BIKKY_DAEMON_RELATION_INFERENCE_INTERVAL_SEC);
+  if (relationInterval !== null) config.daemon.relation_inference_interval_sec = relationInterval;
+  const relationMax = positiveInt(process.env.BIKKY_DAEMON_RELATION_INFERENCE_MAX_PAIRS_PER_RUN);
+  if (relationMax !== null) config.daemon.relation_inference_max_pairs_per_run = relationMax;
+  const entityTypingEnabled = booleanEnv(process.env.BIKKY_DAEMON_ENTITY_TYPING_ENABLED);
+  if (entityTypingEnabled !== null) config.daemon.entity_typing_enabled = entityTypingEnabled;
+  const entityTypingInterval = positiveInt(process.env.BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC);
+  if (entityTypingInterval !== null) config.daemon.entity_typing_interval_sec = entityTypingInterval;
+  const entityTypingMax = positiveInt(process.env.BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN);
+  if (entityTypingMax !== null) config.daemon.entity_typing_max_entities_per_run = entityTypingMax;
 
   // Propagate aws_profile into env so both Bedrock clients (LLM + embedding)
   // pick it up via the SDK's default credential chain.

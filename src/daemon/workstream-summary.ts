@@ -255,7 +255,11 @@ const summarizeWorkstream = async (input: {
   existingSummary?: string | null;
   episodeSummaries: string[];
 }): Promise<WorkstreamSummaryDraft> => {
-  const result = await chatCompletion(workstreamSummaryPrompt(input));
+  const rendered = workstreamSummaryPrompt(input);
+  const result = await chatCompletion({
+    ...rendered,
+    telemetry: { subsystem: "summary", workstream_key: input.workstreamKey, trigger: "workstream_summary" },
+  });
   if (!result) throw new Error("Workstream summary LLM returned null");
   return parseWorkstreamSummaryDraft(result);
 };

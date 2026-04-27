@@ -21,11 +21,18 @@ export interface LLMTelemetryRecord {
   ts: string;
   prompt: string;
   model: string;
-  provider: "ollama" | "openai" | "bedrock";
+  provider: string;
+  subsystem?: string;
+  session_id?: string;
+  workstream_key?: string;
+  trigger?: string;
   ok: boolean;
   latency_ms: number;
   tokens_in_est: number;
   tokens_out_est: number;
+  tokens_in_actual?: number;
+  tokens_out_actual?: number;
+  tokens_total_actual?: number;
   error?: string;
   request_id?: string;
 }

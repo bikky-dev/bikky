@@ -57,6 +57,7 @@ export interface QdrantPayload {
   created_at: string;
   updated_at: string;
   metadata: Record<string, string | number | boolean | null>;
+  session_id?: string | null;
   episode_id?: string | null;
   workstream_key?: string | null;
   task_key?: string | null;
@@ -97,6 +98,7 @@ export interface StoreFact {
   workspace_id?: string;
   actor_id?: string;
   metadata?: Record<string, string | number | boolean | null>;
+  session_id?: string | null;
   episode_id?: string | null;
   workstream_key?: string | null;
   task_key?: string | null;
@@ -138,6 +140,14 @@ export interface QdrantScrollResult {
   confidence: number;
   last_reinforced_at: string;
   created_at: string;
+  updated_at: string;
+  metadata: Record<string, string | number | boolean | null>;
+  session_id?: string | null;
+  workstream_key?: string | null;
+  task_key?: string | null;
+  repo?: string | null;
+  branch?: string | null;
+  source_fact_ids?: string[];
 }
 
 export interface QdrantSearchFilters {
@@ -152,7 +162,14 @@ export interface QdrantSearchFilters {
 export interface QdrantScrollFilters {
   categories?: string[];
   olderThan?: string;
+  sinceUpdated?: string;
   domain?: string;
+  entity?: string;
+  kinds?: string[];
+  excludeKinds?: string[];
+  source?: string;
+  workspaceId?: string;
+  orderBy?: { key: "created_at" | "updated_at" | "last_reinforced_at"; direction: "asc" | "desc" };
 }
 
 export type DedupAction = "insert" | "skip" | "supersede";
@@ -336,12 +353,38 @@ const scrollFacts = async (
     });
   }
 
+  if (filters.sinceUpdated) {
+    must.push({
+      key: "updated_at",
+      range: { gte: filters.sinceUpdated },
+    });
+  }
+
   if (filters.domain) {
     must.push({ key: "domain", match: { value: filters.domain } });
+  }
+  if (filters.entity) {
+    must.push({ key: "entities", match: { value: filters.entity } });
+  }
+  if (filters.kinds && filters.kinds.length > 0) {
+    must.push({
+      key: "kind",
+      match: { any: filters.kinds },
+    });
+  }
+  for (const kind of filters.excludeKinds ?? []) {
+    must_not.push({ key: "kind", match: { value: kind } });
+  }
+  if (filters.source) {
+    must.push({ key: "source", match: { value: filters.source } });
+  }
+  if (filters.workspaceId) {
+    must.push({ key: "workspace_id", match: { value: filters.workspaceId } });
   }
   const result = await qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
     filter: { must, must_not },
     limit,
+    ...(filters.orderBy ? { order_by: { key: filters.orderBy.key, direction: filters.orderBy.direction } } : {}),
     with_payload: true,
   }) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
 
@@ -353,6 +396,14 @@ const scrollFacts = async (
     confidence: pt.payload?.confidence ?? 0,
     last_reinforced_at: pt.payload?.last_reinforced_at ?? "",
     created_at: pt.payload?.created_at ?? "",
+    updated_at: pt.payload?.updated_at ?? pt.payload?.created_at ?? "",
+    metadata: pt.payload?.metadata ?? {},
+    session_id: pt.payload?.session_id ?? null,
+    workstream_key: pt.payload?.workstream_key ?? null,
+    task_key: pt.payload?.task_key ?? null,
+    repo: pt.payload?.repo ?? null,
+    branch: pt.payload?.branch ?? null,
+    source_fact_ids: pt.payload?.source_fact_ids ?? [],
   }));
 };
 
@@ -406,6 +457,7 @@ const storeFact = async (fact: StoreFact): Promise<string> => {
     created_at: now,
     updated_at: now,
     metadata: fact.metadata || {},
+    ...(fact.session_id ? { session_id: fact.session_id } : {}),
     ...(fact.episode_id ? { episode_id: fact.episode_id } : {}),
     ...(fact.workstream_key ? { workstream_key: fact.workstream_key } : {}),
     ...(fact.task_key ? { task_key: fact.task_key } : {}),

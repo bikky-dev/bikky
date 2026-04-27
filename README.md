@@ -120,7 +120,7 @@ export QDRANT_URL="http://localhost:6333"
 
 `memory_store` · `memory_recall` · `memory_entity` · `memory_relations` · `memory_forget` · `memory_verify` · `memory_heartbeat` · `memory_review` · `configure_credentials` · `verify_connection`
 
-**Daemon** — background process that passively watches session logs, extracts structured facts, writes lightweight session indexes, captures coherent episode summaries, updates current-state workstream summaries, infers entity relationships, and runs the consolidation pipeline. Lifecycle memory is daemon-owned so agents do not need to remember summary/distillation tool calls.
+**Daemon** — background process that passively watches session logs, extracts structured facts, writes lightweight session indexes, captures coherent episode summaries, updates current-state workstream summaries, infers entity relationships from recently changed facts, and runs the consolidation pipeline. Lifecycle memory is daemon-owned so agents do not need to remember summary/distillation tool calls.
 
 ---
 
@@ -168,7 +168,7 @@ Raw fact accumulation creates noise. bikky keeps the knowledge store clean autom
 - **Confidence decay** — old facts lose weight and surface for review
 - **Contradiction detection** — conflicting facts are resolved, not silently stacked
 - **Distillation** — recurring patterns across sessions consolidate into higher-level insights
-- **Entity graph** — relationships between concepts are inferred for richer recall
+- **Entity graph** — relationships between concepts are inferred incrementally for richer recall
 
 ---
 
@@ -217,7 +217,7 @@ bikky render    # render a prompt to JSON (for eval harnesses & debugging)
 config file, highlights env vars that override it, checks Qdrant reachability and
 payload-index readiness without mutating the collection, runs a live embedding
 smoke check, validates the configured LLM provider name without sending a chat
-request, and reports daemon/UI health. Use `bikky status --json` for automation,
+request, and reports daemon maintenance plus UI health. Use `bikky status --json` for automation,
 `--no-live` to skip the embedding call, and `--no-ui` to skip the local UI probe.
 
 ### `bikky render` — inspect prompts

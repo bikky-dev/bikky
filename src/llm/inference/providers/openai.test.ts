@@ -1,7 +1,11 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 
 import { openaiInferenceProvider } from "./openai.js";
+import { chatCompletion, initLLM, _resetInference } from "../index.js";
 import type { ResolvedInferenceConfig } from "../types.js";
 
 const cfg: ResolvedInferenceConfig = {
@@ -20,8 +24,22 @@ const log = () => {};
 
 describe("openai inference provider", () => {
   const realFetch = globalThis.fetch;
-  beforeEach(() => { globalThis.fetch = realFetch; });
-  afterEach(() => { globalThis.fetch = realFetch; });
+  let telemetryDir: string;
+  let telemetryFile: string;
+
+  beforeEach(() => {
+    globalThis.fetch = realFetch;
+    telemetryDir = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-openai-telemetry-"));
+    telemetryFile = path.join(telemetryDir, "llm.jsonl");
+    process.env.BIKKY_LLM_LOG = telemetryFile;
+    _resetInference();
+  });
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    delete process.env.BIKKY_LLM_LOG;
+    fs.rmSync(telemetryDir, { recursive: true, force: true });
+    _resetInference();
+  });
 
   it("sends bearer auth header and forwards json_schema response_format unchanged", async () => {
     let captured: RequestInit | null = null;
@@ -53,5 +71,27 @@ describe("openai inference provider", () => {
     globalThis.fetch = (async () => new Response("nope", { status: 401 })) as unknown as typeof fetch;
     const out = await openaiInferenceProvider.chat({ messages: [{ role: "user", content: "x" }] }, cfg, log);
     assert.strictEqual(out, null);
+  });
+
+  it("exposes OpenAI usage metadata through chatCompletion telemetry", async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      id: "chatcmpl-1",
+      choices: [{ message: { content: "ok" } }],
+      usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 },
+    }), { status: 200 })) as unknown as typeof fetch;
+
+    initLLM({ config: { provider: "openai", apiKey: "sk-test", retries: 0 } });
+    const out = await chatCompletion({
+      promptName: "openai-test@1",
+      messages: [{ role: "user", content: "x" }],
+      telemetry: { subsystem: "unit-test" },
+    });
+
+    assert.equal(out, "ok");
+    const record = JSON.parse(fs.readFileSync(telemetryFile, "utf-8").trim()) as Record<string, unknown>;
+    assert.equal(record.tokens_in_actual, 12);
+    assert.equal(record.tokens_out_actual, 4);
+    assert.equal(record.tokens_total_actual, 16);
+    assert.equal(record.request_id, "chatcmpl-1");
   });
 });
