@@ -13,11 +13,16 @@ import os from "node:os";
 // Paths
 // ---------------------------------------------------------------------------
 
-export const BIKKY_DIR = path.join(os.homedir(), ".bikky");
+// BIKKY_HOME env var lets tests (and advanced users) override the config dir
+// without touching the real ~/.bikky/. Tests MUST set this to an isolated
+// tempdir before importing this module — otherwise saveConfig() will write to
+// the user's real config file.
+export const BIKKY_DIR = process.env.BIKKY_HOME ?? path.join(os.homedir(), ".bikky");
 export const CONFIG_PATH = path.join(BIKKY_DIR, "config.json");
 export const LOG_DIR = path.join(BIKKY_DIR, "logs");
 export const STATE_DIR = path.join(BIKKY_DIR, "state");
 export const PID_PATH = path.join(STATE_DIR, "daemon.pid");
+export const EXTRACTION_HEALTH_PATH = path.join(STATE_DIR, "extraction-health.json");
 
 // ---------------------------------------------------------------------------
 // Config types

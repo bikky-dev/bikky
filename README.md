@@ -102,6 +102,8 @@ export QDRANT_URL="http://localhost:6333"
 # export QDRANT_API_KEY="…"   # only for Qdrant Cloud / authenticated self-hosted
 ```
 
+> 💡 **Tip:** Set `BIKKY_HOME` to relocate the config dir (defaults to `~/.bikky/`). Useful for tests, multiple profiles, or sandboxed setups.
+
 > 📖 **Full configuration reference** — providers, models, daemon settings, env vars, copy-paste examples for every stack: **[docs/configuration.md](docs/configuration.md)**
 >
 > 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md](CONTRIBUTING.md)** — it's a single-file change.

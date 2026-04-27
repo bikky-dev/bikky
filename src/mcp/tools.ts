@@ -61,7 +61,9 @@ import {
   qdrantSetPayload,
   qdrantGetPoints,
 } from "./api.js";
-import { saveConfig, loadConfig } from "../config.js";
+import { saveConfig, loadConfig, EXTRACTION_HEALTH_PATH } from "../config.js";
+import { existsSync, readFileSync } from "node:fs";
+import { inspectWatcherPaths, formatIssue } from "../daemon/watcher-health.js";
 
 // ---------------------------------------------------------------------------
 // Runtime state
@@ -291,6 +293,48 @@ export function registerTools(mcp: McpServer): void {
         await embed("test");
         status["embedding_connected"] = true;
       } catch { /* ignore */ }
+
+      // Watcher / extraction health (issue #58)
+      const warnings: string[] = [];
+      try {
+        const cfg = loadConfig();
+        status["watcher_path"] = cfg.watchers.copilot.path;
+        for (const issue of inspectWatcherPaths(cfg)) {
+          warnings.push(formatIssue(issue));
+        }
+      } catch { /* ignore */ }
+
+      try {
+        if (existsSync(EXTRACTION_HEALTH_PATH)) {
+          const health = JSON.parse(readFileSync(EXTRACTION_HEALTH_PATH, "utf-8")) as {
+            last_tick_at?: string;
+            last_active_session_at?: string | null;
+            active_session_count?: number;
+            watcher_path?: string;
+          };
+          status["extraction_last_tick_at"] = health.last_tick_at ?? null;
+          status["extraction_last_active_session_at"] = health.last_active_session_at ?? null;
+          status["extraction_active_session_count"] = health.active_session_count ?? 0;
+          if (health.last_active_session_at) {
+            const hours = (Date.now() - Date.parse(health.last_active_session_at)) / 3_600_000;
+            status["extraction_hours_since_active_session"] = Math.round(hours * 10) / 10;
+            if (hours > 6) {
+              warnings.push(
+                `Watcher has not seen any active Copilot sessions for ${Math.round(hours)}h — ` +
+                `check watcher_path (${health.watcher_path ?? "unknown"}) and that the daemon is running.`,
+              );
+            }
+          } else {
+            status["extraction_hours_since_active_session"] = null;
+            warnings.push("Daemon has never observed an active Copilot session — extraction may be stalled.");
+          }
+        } else {
+          status["extraction_last_tick_at"] = null;
+          status["extraction_last_active_session_at"] = null;
+          status["extraction_hours_since_active_session"] = null;
+        }
+      } catch { /* ignore */ }
+      if (warnings.length > 0) status["warnings"] = warnings;
 
       if (!status["ready"] && missing.length > 0) {
         status["setup_instructions"] =
