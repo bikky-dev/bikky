@@ -54,7 +54,7 @@ bikky setup            # writes MCP config for Copilot + Claude Code, then start
 Restart your editor — the memory tools (`memory_store`, `memory_recall`, …) appear automatically.
 
 ```bash
-bikky status           # sanity-check that Qdrant + embeddings are reachable
+bikky status           # validate config, Qdrant, embeddings, daemon, and UI health
 ```
 
 That's the whole thing. From here you can swap any piece (hosted Qdrant, OpenAI / Bedrock embeddings, a hosted LLM for richer daemon distillation) — see **Setup** below.
@@ -198,7 +198,7 @@ bikky-ui              # opens http://localhost:1422
 </p>
 <p align="center"><i>Entity graph — interactive visualization of how concepts, people, and services relate</i></p>
 
-The UI reads from your existing `~/.bikky/config.json` — no extra configuration required.
+The UI reads from your existing `~/.bikky/config.json` (or `BIKKY_HOME/config.json`) — no extra configuration required.
 
 ## CLI
 
@@ -212,6 +212,13 @@ bikky status    # check memory system health
 bikky ui        # launch the local web dashboard
 bikky render    # render a prompt to JSON (for eval harnesses & debugging)
 ```
+
+`bikky status` is the first thing to run when setup feels wrong. It validates the
+config file, highlights env vars that override it, checks Qdrant reachability and
+payload-index readiness without mutating the collection, runs a live embedding
+smoke check, validates the configured LLM provider name without sending a chat
+request, and reports daemon/UI health. Use `bikky status --json` for automation,
+`--no-live` to skip the embedding call, and `--no-ui` to skip the local UI probe.
 
 ### `bikky render` — inspect prompts
 

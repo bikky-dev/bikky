@@ -15,6 +15,8 @@ import {
   QdrantNotFoundError,
   QdrantRateLimitError,
   QdrantTransientError,
+  getCollectionVectorSize,
+  inspectPayloadIndexes,
 } from "./qdrant-client.js";
 
 type ScriptedResponse = {
@@ -260,6 +262,62 @@ describe("QdrantClient", () => {
       await client.request("GET", "/collections");
       const headers = mock.calls[0].init?.headers as Record<string, string>;
       assert.equal(headers["api-key"], undefined);
+    });
+  });
+
+  describe("collection diagnostics", () => {
+    it("extracts payload index readiness from collection info", () => {
+      const readiness = inspectPayloadIndexes({
+        payload_schema: {
+          category: { data_type: "keyword" },
+          created_at: { data_type: "datetime" },
+          confidence: { data_type: "float" },
+        },
+      }, [
+        { field_name: "category", field_schema: "keyword" },
+        { field_name: "created_at", field_schema: "datetime" },
+        { field_name: "confidence", field_schema: "integer" },
+        { field_name: "entities", field_schema: "keyword" },
+      ]);
+
+      assert.deepEqual(readiness.present, {
+        category: "keyword",
+        created_at: "datetime",
+        confidence: "float",
+      });
+      assert.deepEqual(readiness.missing, [
+        { field_name: "entities", field_schema: "keyword" },
+      ]);
+      assert.deepEqual(readiness.mismatched, [{
+        field_name: "confidence",
+        expected_schema: "integer",
+        actual_schema: "float",
+      }]);
+    });
+
+    it("reads vector size from unnamed and named vector configs", () => {
+      assert.equal(getCollectionVectorSize({
+        config: { params: { vectors: { size: 1024, distance: "Cosine" } } },
+      }), 1024);
+
+      assert.equal(getCollectionVectorSize({
+        config: { params: { vectors: { content: { size: 1536, distance: "Cosine" } } } },
+      }), 1536);
+
+      assert.equal(getCollectionVectorSize({ config: { params: {} } }), null);
+    });
+
+    it("fetches collection info through the client", async () => {
+      mock = installFetchMock([{
+        status: 200,
+        body: JSON.stringify({ result: { points_count: 10, payload_schema: { category: { data_type: "keyword" } } } }),
+      }]);
+      const client = new QdrantClient(baseOpts);
+
+      const info = await client.getCollectionInfo();
+
+      assert.equal(info.points_count, 10);
+      assert.equal(mock.calls[0].url, "https://example.qdrant.io/collections/bikky-test");
     });
   });
 });

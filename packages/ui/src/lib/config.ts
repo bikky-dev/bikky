@@ -1,13 +1,14 @@
 /**
  * Config reader for @bikky/ui.
- * Reads ~/.bikky/config.json directly — no dependency on core bikky package.
+ * Reads BIKKY_HOME/config.json (or ~/.bikky/config.json) directly — no
+ * dependency on the core bikky package.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-export const BIKKY_DIR = path.join(os.homedir(), ".bikky");
+export const BIKKY_DIR = process.env.BIKKY_HOME ?? path.join(os.homedir(), ".bikky");
 export const CONFIG_PATH = path.join(BIKKY_DIR, "config.json");
 
 export interface BikkyUIConfig {
@@ -72,6 +73,10 @@ export function loadConfig(): BikkyUIConfig {
   if (process.env.EMBEDDING_PROVIDER) config.embedding.provider = process.env.EMBEDDING_PROVIDER;
   if (process.env.EMBEDDING_MODEL) config.embedding.model = process.env.EMBEDDING_MODEL;
   if (process.env.EMBEDDING_BASE_URL) config.embedding.base_url = process.env.EMBEDDING_BASE_URL;
+  if (process.env.EMBEDDING_DIMENSIONS) {
+    const n = parseInt(process.env.EMBEDDING_DIMENSIONS, 10);
+    if (Number.isFinite(n) && n > 0) config.embedding.dimensions = n;
+  }
   if (process.env.OPENAI_API_KEY) config.embedding.api_key = process.env.OPENAI_API_KEY;
 
   // Strip trailing slashes

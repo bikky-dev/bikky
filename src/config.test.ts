@@ -25,6 +25,9 @@ const {
   LOG_DIR,
   STATE_DIR,
   CONFIG_DEFAULTS,
+  getActiveConfigEnvOverrides,
+  inspectConfigFile,
+  validateConfigObject,
 } = await import("./config.js");
 
 // ---------------------------------------------------------------------------
@@ -64,6 +67,8 @@ const ENV_KEYS = [
   "LLM_BASE_URL",
   "AWS_BEDROCK_REGION",
   "AWS_REGION",
+  "BIKKY_LLM_EXTRA_REGION",
+  "BIKKY_EMBEDDING_EXTRA_REGION",
 ];
 
 let savedEnv: Record<string, string | undefined> = {};
@@ -303,6 +308,13 @@ describe("config", () => {
       assert.strictEqual(cfg.embedding.dimensions, 1536);
     });
 
+    it("ignores invalid EMBEDDING_DIMENSIONS values", () => {
+      if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
+      process.env.EMBEDDING_DIMENSIONS = "not-a-number";
+      const cfg = loadConfig();
+      assert.strictEqual(cfg.embedding.dimensions, 1024);
+    });
+
     it("OPENAI_API_KEY overrides embedding.api_key", () => {
       if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
       process.env.OPENAI_API_KEY = "sk-test-key";
@@ -459,6 +471,57 @@ describe("config", () => {
       // Should not throw — falls back to defaults
       const cfg = loadConfig();
       assert.strictEqual(cfg.collection, "bikky");
+    });
+  });
+
+  // ── Config diagnostics ────────────────────────────────────────────────────
+
+  describe("config diagnostics", () => {
+    it("reports missing config file without errors", () => {
+      if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
+
+      const diag = inspectConfigFile();
+
+      assert.equal(diag.exists, false);
+      assert.equal(diag.parse_error, null);
+      assert.deepEqual(diag.issues, []);
+    });
+
+    it("reports malformed JSON without throwing", () => {
+      fs.mkdirSync(BIKKY_DIR, { recursive: true });
+      fs.writeFileSync(CONFIG_PATH, "{ invalid json !!!");
+
+      const diag = inspectConfigFile();
+
+      assert.equal(diag.exists, true);
+      assert.ok(diag.parse_error);
+      assert.equal(diag.issues[0]?.severity, "error");
+      assert.equal(diag.issues[0]?.path, "$");
+    });
+
+    it("validates config object types and URL fields", () => {
+      const issues = validateConfigObject({
+        qdrant_url: "ftp://qdrant.example",
+        collection: "",
+        embedding: { dimensions: -1, base_url: "not a url" },
+        daemon: { consolidation_enabled: "yes" },
+      });
+
+      assert.ok(issues.some((issue) => issue.path === "qdrant_url"));
+      assert.ok(issues.some((issue) => issue.path === "collection"));
+      assert.ok(issues.some((issue) => issue.path === "embedding.dimensions"));
+      assert.ok(issues.some((issue) => issue.path === "embedding.base_url"));
+      assert.ok(issues.some((issue) => issue.path === "daemon.consolidation_enabled"));
+    });
+
+    it("lists active exact and provider-extra env overrides", () => {
+      process.env.QDRANT_URL = "https://qdrant.example:6333";
+      process.env.BIKKY_LLM_EXTRA_REGION = "us-west-2";
+
+      const active = getActiveConfigEnvOverrides();
+
+      assert.ok(active.includes("QDRANT_URL"));
+      assert.ok(active.includes("BIKKY_LLM_EXTRA_REGION"));
     });
   });
 

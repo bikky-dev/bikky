@@ -47,6 +47,40 @@ export interface QdrantIndexSpec {
   field_schema: string;
 }
 
+export interface QdrantPayloadSchemaEntry {
+  data_type?: string;
+  schema?: string;
+  points?: number;
+  params?: unknown;
+  [key: string]: unknown;
+}
+
+export interface QdrantCollectionInfo {
+  status?: string;
+  points_count?: number;
+  vectors_count?: number;
+  indexed_vectors_count?: number;
+  payload_schema?: Record<string, QdrantPayloadSchemaEntry | string>;
+  config?: {
+    params?: {
+      vectors?: unknown;
+    };
+  };
+  [key: string]: unknown;
+}
+
+export interface QdrantIndexMismatch {
+  field_name: string;
+  expected_schema: string;
+  actual_schema: string | null;
+}
+
+export interface QdrantPayloadIndexReadiness {
+  present: Record<string, string>;
+  missing: QdrantIndexSpec[];
+  mismatched: QdrantIndexMismatch[];
+}
+
 // ---------------------------------------------------------------------------
 // Error hierarchy
 // ---------------------------------------------------------------------------
@@ -152,6 +186,60 @@ const classifyStatus = (
   if (status === 400 || status === 422) return new QdrantBadRequestError(message, status, responseBody);
   return new QdrantError(message, status, responseBody);
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function payloadSchemaType(entry: QdrantPayloadSchemaEntry | string | undefined): string | null {
+  if (typeof entry === "string") return entry.toLowerCase();
+  const dataType = entry?.data_type ?? entry?.schema;
+  return typeof dataType === "string" ? dataType.toLowerCase() : null;
+}
+
+export function inspectPayloadIndexes(
+  collectionInfo: QdrantCollectionInfo,
+  expected: ReadonlyArray<QdrantIndexSpec>,
+): QdrantPayloadIndexReadiness {
+  const payloadSchema = collectionInfo.payload_schema ?? {};
+  const present: Record<string, string> = {};
+  const missing: QdrantIndexSpec[] = [];
+  const mismatched: QdrantIndexMismatch[] = [];
+
+  for (const [field, entry] of Object.entries(payloadSchema)) {
+    const schema = payloadSchemaType(entry);
+    if (schema) present[field] = schema;
+  }
+
+  for (const spec of expected) {
+    const actual = present[spec.field_name] ?? null;
+    const expectedSchema = spec.field_schema.toLowerCase();
+    if (!actual) {
+      missing.push(spec);
+    } else if (actual !== expectedSchema) {
+      mismatched.push({
+        field_name: spec.field_name,
+        expected_schema: expectedSchema,
+        actual_schema: actual,
+      });
+    }
+  }
+
+  return { present, missing, mismatched };
+}
+
+export function getCollectionVectorSize(collectionInfo: QdrantCollectionInfo): number | null {
+  const vectors = collectionInfo.config?.params?.vectors;
+  if (!isRecord(vectors)) return null;
+
+  if (typeof vectors.size === "number") return vectors.size;
+
+  for (const value of Object.values(vectors)) {
+    if (isRecord(value) && typeof value.size === "number") return value.size;
+  }
+
+  return null;
+}
 
 export class QdrantClient {
   private readonly url: string;
@@ -273,6 +361,17 @@ export class QdrantClient {
         text.slice(0, 500),
       );
     }
+  }
+
+  async getCollectionInfo(): Promise<QdrantCollectionInfo> {
+    const res = await this.request<{ result: QdrantCollectionInfo }>("GET", `/collections/${this.collection}`);
+    return res.result;
+  }
+
+  async inspectPayloadIndexReadiness(
+    expected: ReadonlyArray<QdrantIndexSpec>,
+  ): Promise<QdrantPayloadIndexReadiness> {
+    return inspectPayloadIndexes(await this.getCollectionInfo(), expected);
   }
 
   /**
