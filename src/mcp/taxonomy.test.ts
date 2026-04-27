@@ -213,12 +213,15 @@ describe("decay policy", () => {
 });
 
 describe("QDRANT_INDEXES", () => {
+  const indexes = new Map(QDRANT_INDEXES.map((idx) => [idx.field_name, idx.field_schema]));
+
   it("includes memory ontology query-critical payload indexes", () => {
-    const indexes = new Map(QDRANT_INDEXES.map((idx) => [idx.field_name, idx.field_schema]));
     assert.strictEqual(indexes.get("category"), "keyword");
     assert.strictEqual(indexes.get("domain"), "keyword");
     assert.strictEqual(indexes.get("kind"), "keyword");
     assert.strictEqual(indexes.get("memory_subtype"), "keyword");
+    assert.strictEqual(indexes.get("content_hash"), "keyword");
+    assert.strictEqual(indexes.get("entities"), "keyword");
     assert.strictEqual(indexes.get("workspace_id"), "keyword");
     assert.strictEqual(indexes.get("episode_id"), "keyword");
     assert.strictEqual(indexes.get("workstream_key"), "keyword");
@@ -229,11 +232,21 @@ describe("QDRANT_INDEXES", () => {
   });
 
   it("keeps date and lifecycle indexes used by existing filters", () => {
-    const indexes = new Map(QDRANT_INDEXES.map((idx) => [idx.field_name, idx.field_schema]));
     assert.strictEqual(indexes.get("created_at"), "datetime");
     assert.strictEqual(indexes.get("updated_at"), "datetime");
     assert.strictEqual(indexes.get("last_seen_at"), "datetime");
+    assert.strictEqual(indexes.get("last_reinforced_at"), "datetime");
+    assert.strictEqual(indexes.get("last_verified_at"), "datetime");
     assert.strictEqual(indexes.get("superseded"), "bool");
+    assert.strictEqual(indexes.get("superseded_by"), "keyword");
     assert.strictEqual(indexes.get("verified"), "bool");
+    assert.strictEqual(indexes.get("is_bad_exemplar"), "bool");
+  });
+
+  it("indexes relation and entity traversal fields used by graph filters", () => {
+    assert.strictEqual(indexes.get("entity_name"), "keyword");
+    assert.strictEqual(indexes.get("from_entity"), "keyword");
+    assert.strictEqual(indexes.get("to_entity"), "keyword");
+    assert.strictEqual(indexes.get("relation_type"), "keyword");
   });
 });
