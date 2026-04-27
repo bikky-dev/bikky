@@ -4,6 +4,7 @@ import { ArrowLeft, Pencil, Trash2, Loader2, Save, X } from "lucide-react";
 import { apiFetch, ApiError } from "../lib/api";
 import { relativeTime, CATEGORY_COLORS, KIND_COLORS } from "../lib/format";
 import Badge from "../components/Badge";
+import { EntityChip } from "../components/EntityChip";
 import type { Fact } from "../components/FactCard";
 
 const CATEGORIES = ["infrastructure", "decisions", "observation", "preferences", "projects", "team"];
@@ -239,13 +240,7 @@ export default function MemoryFact() {
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {fact.entities.map((e) => (
-                <Link
-                  key={e}
-                  to={`/memory/entities/${encodeURIComponent(e)}`}
-                  className="inline-flex items-center px-2.5 py-1 rounded text-sm text-zinc-300 bg-zinc-800 hover:bg-zinc-700 transition-colors"
-                >
-                  {e}
-                </Link>
+                <EntityChip key={e} name={e} />
               ))}
               {fact.entities.length === 0 && (
                 <span className="text-sm text-zinc-600">None</span>
