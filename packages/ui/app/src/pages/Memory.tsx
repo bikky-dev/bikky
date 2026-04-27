@@ -10,10 +10,28 @@ const DOMAINS = ["work", "personal"];
 const KINDS = ["fact", "summary", "distilled", "relation"];
 const SOURCES = ["agent", "cortex", "system", "user", "portal"];
 const SORT_OPTIONS = [
-  { value: "", label: "Default order" },
   { value: "newest", label: "Newest first" },
   { value: "oldest", label: "Oldest first" },
+  { value: "", label: "Relevance / default" },
 ];
+
+const DATE_PRESETS: { label: string; days: number }[] = [
+  { label: "Today", days: 0 },
+  { label: "Past 3 days", days: 2 },
+  { label: "Past 7 days", days: 6 },
+  { label: "Past month", days: 29 },
+];
+
+function presetSinceDate(days: number): string {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  // YYYY-MM-DD in local time (matches <input type="date"> value format)
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 interface BrowseResponse {
   results: Fact[];
@@ -38,7 +56,7 @@ export default function Memory() {
   const [kind, setKind] = useState(searchParams.get("kind") ?? "");
   const [source, setSource] = useState(searchParams.get("source") ?? "");
   const [entity, setEntity] = useState(searchParams.get("entity") ?? "");
-  const [sort, setSort] = useState(searchParams.get("sort") ?? "");
+  const [sort, setSort] = useState(searchParams.get("sort") ?? "newest");
   const [since, setSince] = useState(searchParams.get("since") ?? "");
   const [until, setUntil] = useState(searchParams.get("until") ?? "");
 
@@ -248,6 +266,26 @@ export default function Memory() {
               Clear dates
             </button>
           )}
+        </div>
+        <div className="flex items-center gap-1 text-xs">
+          {DATE_PRESETS.map((p) => {
+            const presetSince = presetSinceDate(p.days);
+            const active = since === presetSince && !until;
+            return (
+              <button
+                key={p.label}
+                onClick={() => { setSince(presetSince); setUntil(""); }}
+                className={
+                  "px-2 py-1 rounded-md border transition-colors " +
+                  (active
+                    ? "bg-zinc-700 border-zinc-600 text-zinc-100"
+                    : "bg-zinc-900 border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200")
+                }
+              >
+                {p.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
