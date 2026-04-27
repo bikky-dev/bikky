@@ -22,6 +22,7 @@ import {
 } from "../prompts/index.js";
 import type { BikkyConfig } from "../config.js";
 import type { LogFn, QdrantPayload } from "./qdrant.js";
+import { isGenericEntity, mapToCanonical } from "./relations-vocab.js";
 
 // ─── State ───────────────────────────────────────────────────────────────────
 
@@ -97,7 +98,7 @@ const buildCoOccurrenceMap = async (): Promise<CoOccurrence[]> => {
     if (points.length === 0) break;
 
     for (const pt of points) {
-      const entities = pt.payload?.entities || [];
+      const entities = (pt.payload?.entities || []).filter((e) => !isGenericEntity(e));
       if (entities.length < 2) continue;
 
       // Generate all pairs from this fact's entities
@@ -216,7 +217,7 @@ const inferRelation = async (
   entityA: string,
   entityB: string,
   sharedFacts: Array<{ content: string; category: string }>,
-): Promise<{ from: string; type: string; to: string; content: string; evidence?: string; confidence?: number } | null> => {
+): Promise<{ from: string; type: string; to: string; content: string; evidence?: string; confidence?: number; inVocabulary?: boolean } | null> => {
   const rendered = relationsPrompt({ entityA, entityB, sharedFacts });
   const raw = await chatCompletion(rendered);
 
@@ -261,13 +262,21 @@ const inferRelation = async (
   const resolvedFrom = from === entityA.toLowerCase() ? entityA : entityB;
   const resolvedTo = to === entityA.toLowerCase() ? entityA : entityB;
 
+  // Map LLM type to canonical vocabulary; out-of-vocab types pass through
+  // (and storeRelation flags them in metadata for human review).
+  const mapped = mapToCanonical(parsed.type);
+  if (mapped.changed) {
+    logFn("DEBUG", `Relations: mapped type "${parsed.type}" → "${mapped.canonical}"`);
+  }
+
   return {
     from: resolvedFrom,
-    type: parsed.type,
+    type: mapped.canonical,
     to: resolvedTo,
-    content: parsed.content || `${resolvedFrom} ${parsed.type} ${resolvedTo}`,
+    content: parsed.content || `${resolvedFrom} ${mapped.canonical} ${resolvedTo}`,
     evidence: parsed.evidence,
     confidence: typeof parsed.confidence === "number" ? parsed.confidence : undefined,
+    inVocabulary: mapped.inVocabulary,
   };
 };
 
@@ -280,7 +289,7 @@ const storeRelation = async (
   relationType: string,
   content: string,
   sharedFactIds: string[],
-  extras: { evidence?: string; confidence?: number } = {},
+  extras: { evidence?: string; confidence?: number; inVocabulary?: boolean } = {},
 ): Promise<string> => {
   const hash = createHash("sha256")
     .update(`daemon-relation:${pairKey(fromEntity, toEntity)}:${relationType}`)
@@ -292,8 +301,10 @@ const storeRelation = async (
     inferred_by_prompt: `${RELATIONS_PROMPT_DESCRIPTOR.id}@${RELATIONS_PROMPT_DESCRIPTOR.version}`,
   };
   if (extras.evidence) {
-    // Truncate to 500 chars to keep metadata payload bounded.
     metadata.evidence_quote = extras.evidence.slice(0, 500);
+  }
+  if (extras.inVocabulary === false) {
+    metadata.relation_type_out_of_vocab = "true";
   }
 
   const id = await qdrant.storeFact({
@@ -372,7 +383,7 @@ const tick = async (config: BikkyConfig): Promise<void> => {
           result.type,
           result.content,
           candidate.factIds,
-          { evidence: result.evidence, confidence: result.confidence },
+          { evidence: result.evidence, confidence: result.confidence, inVocabulary: result.inVocabulary },
         );
         inferred++;
       } catch (e: unknown) {

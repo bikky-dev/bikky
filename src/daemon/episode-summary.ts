@@ -19,6 +19,11 @@ import {
 } from "./capture-policy.js";
 import * as qdrant from "./qdrant.js";
 import type { QdrantPayload } from "./qdrant.js";
+import {
+  resolveWorkstreamKey,
+  type ResolvedWorkstream,
+  type WorkstreamRegistry,
+} from "./workstream-resolver.js";
 
 export { buildEpisodeSummaryMessages } from "../prompts/index.js";
 
@@ -56,6 +61,7 @@ export interface EpisodeSummaryDraft {
   open_questions: string[];
   entities: string[];
   workstream_key?: string | null;
+  workstream_key_reason?: string | null;
   importance: number;
 }
 
@@ -154,6 +160,9 @@ export const parseEpisodeSummaryDraft = (raw: string): EpisodeSummaryDraft => {
     workstream_key: typeof parsed.workstream_key === "string" && parsed.workstream_key.trim()
       ? parsed.workstream_key.trim()
       : null,
+    workstream_key_reason: typeof parsed.workstream_key_reason === "string" && parsed.workstream_key_reason.trim()
+      ? parsed.workstream_key_reason.trim()
+      : null,
     importance: clampImportance(parsed.importance),
   };
 };
@@ -222,6 +231,7 @@ export const buildEpisodeSummaryPayload = (input: {
     session_id: input.sessionId,
     episode_id: input.segment.episode_id,
     ...(workstreamKey ? { workstream_key: workstreamKey } : {}),
+    ...(input.draft.workstream_key_reason ? { workstream_key_reason: input.draft.workstream_key_reason } : {}),
     prompt_version: PROMPT_VERSIONS.episodeSummary,
     capture_policy_version: CAPTURE_POLICY_VERSION,
     review_status: DEFAULT_CAPTURE_CONTEXT.reviewStatus,
@@ -270,6 +280,7 @@ export const updateEpisodeSummary = async (input: {
   sessionId: string;
   scope: WorkspaceScope;
   config: BikkyConfig;
+  workstreamRegistry?: WorkstreamRegistry;
 }): Promise<EpisodeSummaryWriteResult> => {
   if (!input.segment.transcript.trim()) {
     return { action: "skipped", reason: "empty_transcript", episodeId: input.segment.episode_id };
@@ -277,9 +288,23 @@ export const updateEpisodeSummary = async (input: {
 
   const existing = await findExistingEpisodeSummary(input.segment.episode_id, input.scope);
   const draft = await summarizeEpisodeTranscript(input.segment.transcript);
+
+  // Resolve workstream key: deterministic extraction wins, then alias lookup,
+  // then accept LLM-proposed key as new canonical, otherwise null.
+  const resolved: ResolvedWorkstream = resolveWorkstreamKey({
+    transcript: input.segment.transcript,
+    llmKey: draft.workstream_key ?? input.segment.workstream_key ?? null,
+    registry: input.workstreamRegistry,
+  });
+  const resolvedDraft: EpisodeSummaryDraft = {
+    ...draft,
+    workstream_key: resolved.key,
+    workstream_key_reason: draft.workstream_key_reason ?? resolved.reason,
+  };
+
   const now = new Date().toISOString();
   const { payload } = buildEpisodeSummaryPayload({
-    draft,
+    draft: resolvedDraft,
     segment: input.segment,
     sessionId: input.sessionId,
     scope: input.scope,
@@ -301,6 +326,6 @@ export const updateEpisodeSummary = async (input: {
     action: existing ? "updated" : "stored",
     factId,
     episodeId: input.segment.episode_id,
-    workstreamKey: draft.workstream_key ?? input.segment.workstream_key ?? null,
+    workstreamKey: resolved.key,
   };
 };
