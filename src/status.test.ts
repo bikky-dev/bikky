@@ -201,4 +201,40 @@ describe("status diagnostics", () => {
     assert.equal(report.embedding.base_url, "https://embed.example/v1?token=REDACTED");
     assert.equal(report.llm.base_url, "https://llm.example/v1?password=REDACTED");
   });
+
+  it("includes daemon maintenance summaries without making live calls", async () => {
+    const stateDir = path.join(TEST_BIKKY_HOME, "state");
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(path.join(stateDir, "maintenance-state.json"), JSON.stringify({
+      version: 1,
+      jobs: {
+        relation_inference: {
+          last_run_at: "2026-04-27T10:00:00.000Z",
+          cursor_updated_at: "2026-04-27T09:59:00.000Z",
+          recent_attempts: {},
+          last_summary: {
+            job: "relation_inference",
+            ran_at: "2026-04-27T10:00:00.000Z",
+            status: "success",
+            candidates_seen: 3,
+            llm_calls: 2,
+            accepted: 1,
+          },
+        },
+        entity_typing: {
+          last_run_at: null,
+          cursor_updated_at: null,
+          recent_attempts: {},
+          last_summary: null,
+        },
+      },
+    }));
+
+    const report = await collectStatus({ live: false, checkUi: false });
+
+    assert.equal(report.maintenance.status, "ok");
+    assert.equal(report.maintenance.relation_inference.last_summary?.llm_calls, 2);
+    assert.match(formatStatusReport(report), /Maint:/);
+    assert.match(formatStatusReport(report), /relations: success/);
+  });
 });

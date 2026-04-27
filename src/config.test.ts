@@ -69,6 +69,12 @@ const ENV_KEYS = [
   "AWS_REGION",
   "BIKKY_LLM_EXTRA_REGION",
   "BIKKY_EMBEDDING_EXTRA_REGION",
+  "BIKKY_DAEMON_RELATION_INFERENCE_ENABLED",
+  "BIKKY_DAEMON_RELATION_INFERENCE_INTERVAL_SEC",
+  "BIKKY_DAEMON_RELATION_INFERENCE_MAX_PAIRS_PER_RUN",
+  "BIKKY_DAEMON_ENTITY_TYPING_ENABLED",
+  "BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC",
+  "BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN",
 ];
 
 let savedEnv: Record<string, string | undefined> = {};
@@ -210,6 +216,11 @@ describe("config", () => {
       assert.strictEqual(cfg.daemon.extract_min_events, 10);
       assert.strictEqual(cfg.daemon.consolidation_enabled, true);
       assert.strictEqual(cfg.daemon.relation_inference_enabled, true);
+      assert.strictEqual(cfg.daemon.relation_inference_interval_sec, 7200);
+      assert.strictEqual(cfg.daemon.relation_inference_max_pairs_per_run, 3);
+      assert.strictEqual(cfg.daemon.entity_typing_enabled, true);
+      assert.strictEqual(cfg.daemon.entity_typing_interval_sec, 900);
+      assert.strictEqual(cfg.daemon.entity_typing_max_entities_per_run, 5);
       assert.strictEqual(cfg.daemon.staleness_threshold_days, 30);
     });
 
@@ -372,6 +383,25 @@ describe("config", () => {
       assert.strictEqual(cfg.llm.extra?.virtual_key, "vk-1");
       delete process.env.BIKKY_LLM_EXTRA_VIRTUAL_KEY;
     });
+
+    it("BIKKY_DAEMON_* env vars override maintenance controls", () => {
+      if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
+      process.env.BIKKY_DAEMON_RELATION_INFERENCE_ENABLED = "false";
+      process.env.BIKKY_DAEMON_RELATION_INFERENCE_INTERVAL_SEC = "3600";
+      process.env.BIKKY_DAEMON_RELATION_INFERENCE_MAX_PAIRS_PER_RUN = "2";
+      process.env.BIKKY_DAEMON_ENTITY_TYPING_ENABLED = "0";
+      process.env.BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC = "1200";
+      process.env.BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN = "4";
+
+      const cfg = loadConfig();
+
+      assert.strictEqual(cfg.daemon.relation_inference_enabled, false);
+      assert.strictEqual(cfg.daemon.relation_inference_interval_sec, 3600);
+      assert.strictEqual(cfg.daemon.relation_inference_max_pairs_per_run, 2);
+      assert.strictEqual(cfg.daemon.entity_typing_enabled, false);
+      assert.strictEqual(cfg.daemon.entity_typing_interval_sec, 1200);
+      assert.strictEqual(cfg.daemon.entity_typing_max_entities_per_run, 4);
+    });
   });
 
   // ── URL trailing slash stripping ──────────────────────────────────────────
@@ -504,7 +534,11 @@ describe("config", () => {
         qdrant_url: "ftp://qdrant.example",
         collection: "",
         embedding: { dimensions: -1, base_url: "not a url" },
-        daemon: { consolidation_enabled: "yes" },
+        daemon: {
+          consolidation_enabled: "yes",
+          relation_inference_interval_sec: -1,
+          entity_typing_enabled: "yes",
+        },
       });
 
       assert.ok(issues.some((issue) => issue.path === "qdrant_url"));
@@ -512,6 +546,8 @@ describe("config", () => {
       assert.ok(issues.some((issue) => issue.path === "embedding.dimensions"));
       assert.ok(issues.some((issue) => issue.path === "embedding.base_url"));
       assert.ok(issues.some((issue) => issue.path === "daemon.consolidation_enabled"));
+      assert.ok(issues.some((issue) => issue.path === "daemon.relation_inference_interval_sec"));
+      assert.ok(issues.some((issue) => issue.path === "daemon.entity_typing_enabled"));
     });
 
     it("lists active exact and provider-extra env overrides", () => {

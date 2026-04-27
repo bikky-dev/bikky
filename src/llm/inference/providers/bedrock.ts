@@ -30,10 +30,14 @@ import {
   type LlmErrorDetails,
   type LlmHttpError,
 } from "../../errors.js";
-import { _recordInferenceError } from "../index.js";
+import { _recordInferenceError, _recordInferenceUsage } from "../index.js";
 
-interface BedrockSdk {
-  client: { send(cmd: unknown): Promise<{ output?: { message?: { content?: Array<{ text?: string }> } } }> };
+export interface BedrockSdk {
+  client: { send(cmd: unknown): Promise<{
+    output?: { message?: { content?: Array<{ text?: string }> } };
+    usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+    $metadata?: { requestId?: string };
+  }> };
   // Use any here — the AWS ConverseCommand input type is a deeply-nested SDK
   // type; we only ever pass it shape-checked objects from this file.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,6 +92,10 @@ export function _resetBedrockInferenceClient(): void {
   sdk = null;
 }
 
+export function _setBedrockInferenceClientForTest(next: BedrockSdk): void {
+  sdk = next;
+}
+
 export const bedrockInferenceProvider: InferenceProvider = {
   name: "bedrock",
   label: "AWS Bedrock (Converse)",
@@ -124,6 +132,12 @@ export const bedrockInferenceProvider: InferenceProvider = {
       });
       const resp = await client.send(command);
       _recordInferenceError(null);
+      _recordInferenceUsage({
+        input_tokens: resp.usage?.inputTokens,
+        output_tokens: resp.usage?.outputTokens,
+        total_tokens: resp.usage?.totalTokens,
+        request_id: resp.$metadata?.requestId,
+      });
       const content = resp.output?.message?.content;
       const textBlock = content?.find((c) => "text" in c);
       return (textBlock?.text ?? "").trim() || null;

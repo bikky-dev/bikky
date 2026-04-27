@@ -29,6 +29,12 @@ import {
   type QdrantIndexSpec,
 } from "./lib/qdrant-client.js";
 import { QDRANT_INDEXES } from "./mcp/taxonomy.js";
+import {
+  MAINTENANCE_STATE_PATH,
+  readMaintenanceState,
+  type MaintenanceJobName,
+  type MaintenanceRunSummary,
+} from "./daemon/maintenance-state.js";
 
 export type DiagnosticState = "ok" | "warn" | "error" | "skipped";
 
@@ -81,6 +87,19 @@ export interface DaemonStatusReport {
   pid: number | null;
 }
 
+export interface MaintenanceJobStatus {
+  last_run_at: string | null;
+  cursor_updated_at: string | null;
+  last_summary: MaintenanceRunSummary | null;
+}
+
+export interface MaintenanceStatusReport {
+  status: DiagnosticState;
+  state_path: string;
+  relation_inference: MaintenanceJobStatus;
+  entity_typing: MaintenanceJobStatus;
+}
+
 export interface UiStatusReport {
   status: DiagnosticState;
   checked: boolean;
@@ -96,6 +115,7 @@ export interface BikkyStatusReport {
   embedding: ProviderStatus;
   llm: ProviderStatus;
   daemon: DaemonStatusReport;
+  maintenance: MaintenanceStatusReport;
   ui: UiStatusReport;
   mcp: { status: DiagnosticState; message: string };
 }
@@ -336,6 +356,26 @@ function collectDaemonStatus(): DaemonStatusReport {
   };
 }
 
+function collectMaintenanceStatus(): MaintenanceStatusReport {
+  const state = readMaintenanceState();
+  const jobStatus = (jobName: MaintenanceJobName): MaintenanceJobStatus => {
+    const job = state.jobs[jobName];
+    return {
+      last_run_at: job.last_run_at,
+      cursor_updated_at: job.cursor_updated_at,
+      last_summary: job.last_summary,
+    };
+  };
+  const summaries = [state.jobs.relation_inference.last_summary, state.jobs.entity_typing.last_summary];
+  const hasError = summaries.some((summary) => summary?.status === "error");
+  return {
+    status: hasError ? "warn" : "ok",
+    state_path: MAINTENANCE_STATE_PATH,
+    relation_inference: jobStatus("relation_inference"),
+    entity_typing: jobStatus("entity_typing"),
+  };
+}
+
 async function collectUiStatus(opts: CollectStatusOptions): Promise<UiStatusReport> {
   const url = opts.uiUrl ?? "http://localhost:1422/health";
   const reportedUrl = sanitizeStatusUrl(url) ?? url;
@@ -369,6 +409,7 @@ export async function collectStatus(opts: CollectStatusOptions = {}): Promise<Bi
   );
   const llm = collectLlmStatus(cfg);
   const daemon = collectDaemonStatus();
+  const maintenance = collectMaintenanceStatus();
   const ui = await collectUiStatus(opts);
   const required = [config.status, qdrant.status, embedding.status, llm.status];
 
@@ -379,6 +420,7 @@ export async function collectStatus(opts: CollectStatusOptions = {}): Promise<Bi
     embedding,
     llm,
     daemon,
+    maintenance,
     ui,
     mcp: { status: "ok", message: "managed by your editor (stdio)" },
   };
@@ -413,6 +455,22 @@ function qdrantSummary(qdrant: QdrantStatus): string {
     qdrant.vector_size !== null ? `vector size ${qdrant.vector_size}` : null,
   ].filter(Boolean).join(", ");
   return qdrant.error ? `${details} — ${qdrant.error}` : details;
+}
+
+function maintenanceJobSummary(label: string, job: MaintenanceJobStatus): string {
+  const summary = job.last_summary;
+  if (!summary) return `${label}: never run`;
+  const parts = [
+    `${label}: ${summary.status}`,
+    `last ${summary.ran_at}`,
+    `candidates ${summary.candidates_seen}`,
+    `LLM ${summary.llm_calls}`,
+    `accepted ${summary.accepted}`,
+  ];
+  if (summary.deterministic !== undefined) parts.push(`deterministic ${summary.deterministic}`);
+  if (summary.skipped_reason) parts.push(`reason ${summary.skipped_reason}`);
+  if (summary.error) parts.push(`error ${summary.error}`);
+  return parts.join(", ");
 }
 
 export function formatStatusReport(report: BikkyStatusReport): string {
@@ -452,6 +510,8 @@ export function formatStatusReport(report: BikkyStatusReport): string {
   );
 
   lines.push(`Daemon:   ${icon(report.daemon.status)} ${report.daemon.running ? `running (PID ${report.daemon.pid})` : "stopped"}`);
+  lines.push(`Maint:    ${icon(report.maintenance.status)} ${maintenanceJobSummary("relations", report.maintenance.relation_inference)}`);
+  lines.push(`          ${maintenanceJobSummary("entity typing", report.maintenance.entity_typing)}`);
   lines.push(`UI:       ${icon(report.ui.status)} ${report.ui.checked ? report.ui.url : "not checked"}${report.ui.error ? ` — ${report.ui.error}` : ""}`);
   lines.push(`MCP:      ${icon(report.mcp.status)} ${report.mcp.message}`);
 

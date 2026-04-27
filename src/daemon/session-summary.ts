@@ -222,10 +222,12 @@ const summarizeTranscript = async (input: {
   existingSummary?: string | null;
 }): Promise<SessionSummaryDraft> => {
   const result = await chatCompletion({
+    promptName: `session-index@${PROMPT_VERSIONS.sessionIndex}`,
     messages: buildSessionSummaryMessages(input),
     temperature: 0.2,
     max_tokens: 1500,
     response_format: { type: "json_object" },
+    telemetry: { subsystem: "summary", trigger: "session_index" },
   });
   if (!result) throw new Error("Session summary LLM returned null");
   return parseSessionSummaryDraft(result);

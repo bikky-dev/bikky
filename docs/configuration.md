@@ -140,7 +140,7 @@ config, or send an LLM chat request. It reports:
 | Qdrant | Checks reachability, collection existence, vector size, and payload-index readiness against Bikky's canonical index list |
 | Embedding | Validates the provider config and runs a small live embedding request by default |
 | LLM | Validates provider and fallback provider names without a live inference call |
-| Daemon/UI | Reports daemon PID state and probes the local UI `/health` endpoint |
+| Daemon/UI | Reports daemon PID state, maintenance-worker summaries, and probes the local UI `/health` endpoint |
 
 Useful options:
 
@@ -230,7 +230,7 @@ file and env vars.
 
 ## Daemon settings
 
-The daemon owns memory lifecycle work: it extracts structured facts, writes lightweight session indexes, captures coherent episode summaries, and distills longer-lived patterns when consolidation is enabled.
+The daemon owns memory lifecycle work: it extracts structured facts, writes lightweight session indexes, captures coherent episode summaries, and distills longer-lived patterns when consolidation is enabled. Cost-sensitive maintenance workers use wall-clock intervals plus a persistent cursor in `~/.bikky/state/maintenance-state.json`, so relation inference and entity typing process recently changed facts instead of rescanning all memory on every cycle.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -238,8 +238,26 @@ The daemon owns memory lifecycle work: it extracts structured facts, writes ligh
 | `daemon.extract_every_sec` | `300` | Seconds between extraction runs |
 | `daemon.extract_min_events` | `10` | Minimum session events before triggering extraction |
 | `daemon.consolidation_enabled` | `true` | Auto-distill daemon-generated session summaries into patterns |
-| `daemon.relation_inference_enabled` | `true` | Infer entity relationships via LLM |
+| `daemon.relation_inference_enabled` | `true` | Infer entity relationships via LLM from recently changed facts |
+| `daemon.relation_inference_interval_sec` | `7200` | Minimum seconds between relation-inference maintenance runs |
+| `daemon.relation_inference_max_pairs_per_run` | `3` | Maximum entity pairs sent to the LLM in one relation-inference run |
+| `daemon.entity_typing_enabled` | `true` | Classify entities for UI/graph filtering |
+| `daemon.entity_typing_interval_sec` | `900` | Minimum seconds between entity-typing maintenance runs |
+| `daemon.entity_typing_max_entities_per_run` | `5` | Maximum entities classified in one entity-typing run |
 | `daemon.staleness_threshold_days` | `30` | Days before a fact is flagged as stale |
+
+Environment overrides are available for the high-cost maintenance controls:
+
+| Env var | Config field |
+|---------|--------------|
+| `BIKKY_DAEMON_RELATION_INFERENCE_ENABLED` | `daemon.relation_inference_enabled` |
+| `BIKKY_DAEMON_RELATION_INFERENCE_INTERVAL_SEC` | `daemon.relation_inference_interval_sec` |
+| `BIKKY_DAEMON_RELATION_INFERENCE_MAX_PAIRS_PER_RUN` | `daemon.relation_inference_max_pairs_per_run` |
+| `BIKKY_DAEMON_ENTITY_TYPING_ENABLED` | `daemon.entity_typing_enabled` |
+| `BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC` | `daemon.entity_typing_interval_sec` |
+| `BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN` | `daemon.entity_typing_max_entities_per_run` |
+
+`bikky status` shows the latest maintenance summaries: candidates seen, LLM calls made, accepted records, deterministic entity classifications, skip reasons, and errors. For per-call token cost, inspect `~/.bikky/logs/llm.jsonl`; each daemon LLM call includes `prompt`, `subsystem`, estimated tokens, and provider-actual token fields when the provider returns usage metadata.
 
 ## Logs
 
@@ -249,6 +267,7 @@ Bikky writes logs to `~/.bikky/logs/` (the same directory as the config file).
 |------|-----------|
 | `mcp.log` | The MCP server (`bikky mcp`) |
 | `daemon.log` | The background daemon (`bikky daemon` / `bikky start`) |
+| `llm.jsonl` | LLM telemetry from daemon and MCP chat-completion calls |
 
 Logs are **structured JSON lines** produced by [pino](https://github.com/pinojs/pino). Each line has at minimum `{level, time, name, msg}`; provider failures, telemetry events, and Qdrant operations attach extra fields (e.g. `provider`, `kind`, `status`). Files rotate in-process at 2MB, keeping 3 generations (`mcp.log` + `mcp.log.1` + `mcp.log.2`).
 

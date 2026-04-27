@@ -20,12 +20,14 @@ import {
 } from "./registry.js";
 import type {
   ChatCompletionOpts,
+  ChatCompletionUsage,
   InferenceProvider,
   InitLLMInput,
   LogFn,
   ResolvedInferenceConfig,
 } from "./types.js";
 import { LlmHttpError } from "../errors.js";
+import { estimateTokens, writeTelemetry } from "../telemetry.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_RETRIES = 2;
@@ -34,6 +36,7 @@ const DEFAULT_RETRY_BASE_MS = 250;
 let resolved: ResolvedInferenceConfig | null = null;
 let log: LogFn = () => {};
 let lastError: LlmHttpError | null = null;
+let lastUsage: ChatCompletionUsage | null = null;
 
 export function initLLM(opts: { config: InitLLMInput; logger?: LogFn }): ResolvedInferenceConfig {
   const provider = getInferenceProvider(opts.config.provider);
@@ -76,11 +79,15 @@ export function _recordInferenceError(err: LlmHttpError | null): void {
   lastError = err;
 }
 
+export function _recordInferenceUsage(usage: ChatCompletionUsage | null): void {
+  lastUsage = usage;
+}
+
 export async function chatCompletion(opts: ChatCompletionOpts): Promise<string | null> {
   const cfg = getInferenceConfig();
   lastError = null;
   const primary = getInferenceProvider(cfg.provider);
-  const result = await primary.chat(opts, cfg, log);
+  const result = await callProviderWithTelemetry(primary, opts, cfg);
   if (result !== null) return result;
   const primaryErr = getLastInferenceError();
 
@@ -101,7 +108,7 @@ export async function chatCompletion(opts: ChatCompletionOpts): Promise<string |
     fallback: null,
   };
   lastError = null;
-  const fbResult = await fallback.chat(opts, fallbackCfg, log);
+  const fbResult = await callProviderWithTelemetry(fallback, opts, fallbackCfg);
   if (fbResult !== null) return fbResult;
 
   const fallbackErr = getLastInferenceError();
@@ -120,6 +127,43 @@ export function _resetInference(): void {
   resolved = null;
   log = () => {};
   lastError = null;
+  lastUsage = null;
+}
+
+async function callProviderWithTelemetry(
+  provider: InferenceProvider,
+  opts: ChatCompletionOpts,
+  cfg: ResolvedInferenceConfig,
+): Promise<string | null> {
+  lastUsage = null;
+  const startedAt = Date.now();
+  const result = await provider.chat(opts, cfg, log);
+  const latencyMs = Date.now() - startedAt;
+  const err = result === null ? getLastInferenceError() : null;
+  const usage = lastUsage as ChatCompletionUsage | null;
+  const promptText = opts.messages.map((message) => `${message.role}: ${message.content}`).join("\n\n");
+
+  await writeTelemetry({
+    ts: new Date().toISOString(),
+    prompt: opts.promptName ?? "unknown",
+    model: cfg.model,
+    provider: provider.name,
+    ...(opts.telemetry?.subsystem ? { subsystem: opts.telemetry.subsystem } : {}),
+    ...(opts.telemetry?.session_id ? { session_id: opts.telemetry.session_id } : {}),
+    ...(opts.telemetry?.workstream_key ? { workstream_key: opts.telemetry.workstream_key } : {}),
+    ...(opts.telemetry?.trigger ? { trigger: opts.telemetry.trigger } : {}),
+    ok: result !== null,
+    latency_ms: latencyMs,
+    tokens_in_est: estimateTokens(promptText),
+    tokens_out_est: estimateTokens(result ?? ""),
+    ...(usage?.input_tokens != null ? { tokens_in_actual: usage.input_tokens } : {}),
+    ...(usage?.output_tokens != null ? { tokens_out_actual: usage.output_tokens } : {}),
+    ...(usage?.total_tokens != null ? { tokens_total_actual: usage.total_tokens } : {}),
+    ...(err ? { error: `${err.kind}: ${err.message}` } : {}),
+    ...(usage?.request_id ? { request_id: usage.request_id } : {}),
+  }, log);
+
+  return result;
 }
 
 function pickMoreActionable(a: LlmHttpError | null, b: LlmHttpError | null): LlmHttpError | null {

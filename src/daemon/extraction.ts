@@ -528,7 +528,7 @@ export const isHighQualityExtractedFact = (fact: ExtractedFact): boolean => {
 /**
  * Call the LLM to extract facts from a conversation transcript.
  */
-const extractFacts = async (transcript: string, config?: BikkyConfig): Promise<ExtractedFact[]> => {
+const extractFacts = async (transcript: string, sessionId: string, config?: BikkyConfig): Promise<ExtractedFact[]> => {
   if (!transcript.trim()) return [];
 
   const rendered = extractionPrompt({
@@ -536,7 +536,10 @@ const extractFacts = async (transcript: string, config?: BikkyConfig): Promise<E
     systemOverride: config?.daemon.extraction_prompt ?? null,
   });
 
-  const result = await chatCompletion(rendered);
+  const result = await chatCompletion({
+    ...rendered,
+    telemetry: { subsystem: "extraction", session_id: sessionId, trigger: "daemon_extraction" },
+  });
 
   if (!result) {
     logFn("WARN", "Extraction LLM call returned null");
@@ -627,7 +630,10 @@ const storeFacts = async (
       // Run contradiction detection for non-trivial facts
       if (config && (fact.confidence ?? 0.5) >= 0.5) {
         try {
-          const contradiction = await detectContradiction(sanitizedFact, config);
+          const contradiction = await detectContradiction(sanitizedFact, config, {
+            sessionId,
+            workstreamKey: sanitizedFact.workstream_key ?? undefined,
+          });
           if (contradiction.contradiction && contradiction.existingId) {
             logFn("INFO", `Extraction: contradiction detected for "${fact.content.slice(0, 60)}..." vs ${contradiction.existingId}: ${contradiction.reason}`);
             // Log contradiction instead of writing to inbox
@@ -919,7 +925,7 @@ const extractForUuid = async (
     logFn("DEBUG", `Extraction: UUID ${uuid.slice(0, 8)} — chunk ${i + 1}/${chunks.length}, ${chunks[i]!.length} events, ${transcript.length} chars`);
 
     if (events.length >= minEvents) {
-      const facts = await extractFacts(transcript, config);
+      const facts = await extractFacts(transcript, stateKey, config);
 
       if (facts.length > 0) {
         const stored = await storeFacts(facts, stateKey, config);
