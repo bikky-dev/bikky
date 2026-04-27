@@ -64,10 +64,12 @@ memoryRoutes.get("/search", async (c) => {
     domain: c.req.query("domain"),
     kind: c.req.query("kind"),
     entity: c.req.query("entity"),
+    excludeEntityType: true,
   });
 
   const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 100);
-  const points = await qdrant.search(vector, filter.must.length > 0 ? filter : undefined, limit);
+  const hasFilter = filter.must.length > 0 || (filter.must_not?.length ?? 0) > 0;
+  const points = await qdrant.search(vector, hasFilter ? filter : undefined, limit);
 
   return c.json({ results: points.map(formatPoint), count: points.length });
 });
@@ -84,6 +86,7 @@ memoryRoutes.get("/browse", async (c) => {
     source: c.req.query("source"),
     since: c.req.query("since"),
     until: c.req.query("until"),
+    excludeEntityType: true,
   });
 
   const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 100);

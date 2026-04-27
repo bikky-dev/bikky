@@ -50,6 +50,7 @@ export interface FilterCondition {
 
 export interface QdrantFilter {
   must: FilterCondition[];
+  must_not?: FilterCondition[];
 }
 
 interface ScrollResult {
@@ -153,8 +154,10 @@ export function buildFilter(opts: {
   since?: string;
   until?: string;
   excludeSuperseded?: boolean;
+  excludeEntityType?: boolean;
 }): QdrantFilter {
   const must: FilterCondition[] = [];
+  const must_not: FilterCondition[] = [];
   if (opts.excludeSuperseded === true) must.push({ is_null: { key: "superseded_by" } });
   if (opts.category) must.push({ key: "category", match: { value: opts.category } });
   if (opts.domain) must.push({ key: "domain", match: { value: opts.domain } });
@@ -163,7 +166,11 @@ export function buildFilter(opts: {
   if (opts.source) must.push({ key: "source", match: { value: opts.source } });
   if (opts.since) must.push({ key: "created_at", range: { gte: opts.since } });
   if (opts.until) must.push({ key: "created_at", range: { lte: opts.until } });
-  return { must };
+  // Phase 5a entity_type sidecar points are not user-facing facts; opt-in to exclude.
+  if (opts.excludeEntityType === true && opts.kind !== "entity_type") {
+    must_not.push({ key: "kind", match: { value: "entity_type" } });
+  }
+  return must_not.length > 0 ? { must, must_not } : { must };
 }
 
 // --- Factory ---
