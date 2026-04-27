@@ -706,6 +706,28 @@ const storeFacts = async (
         reviewStatus = "candidate";
       }
 
+      // Phase 4: bad-exemplar centroid check. Compares against facts the
+      // user has previously called memory_forget on — if cosine ≥ 0.85,
+      // we've seen something like this before and the user rejected it.
+      // Downgrade to candidate with reduced confidence rather than dropping
+      // outright: similarity is a soft signal, not a hard reject.
+      try {
+        const badMatch = await qdrant.badExemplarCheck(sanitizedFact.content);
+        if (badMatch && badMatch.score >= 0.85) {
+          effectiveConfidence = clamp01(effectiveConfidence - 0.2);
+          reviewStatus = "candidate";
+          factMeta.bad_exemplar_match_id = badMatch.exemplarId;
+          factMeta.bad_exemplar_score = Math.round(badMatch.score * 1000) / 1000;
+          if (badMatch.reason) factMeta.bad_exemplar_reason = badMatch.reason;
+          logFn(
+            "DEBUG",
+            `Extraction: bad-exemplar match (score=${badMatch.score.toFixed(3)}) for "${sanitizedFact.content.slice(0, 60)}..."`,
+          );
+        }
+      } catch (e) {
+        logFn("WARN", `Extraction: bad-exemplar check failed: ${(e as Error).message}`);
+      }
+
       const storePayload: StoreFact = {
         content: sanitizedFact.content,
         category: effectiveCategory,
