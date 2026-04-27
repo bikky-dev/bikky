@@ -406,16 +406,18 @@ export const verifyVolatilityCoherence = (input: VolatilityInput): VolatilityCoh
   if (effective === "transient") {
     expiresAt = addDaysIso(asOf ?? isoDateOnly(new Date()), 30);
     halfLifeMultiplier = 0.25;
-    if (input.category && input.category !== "observations") {
+    if (input.category !== "observations") {
       forcedCategory = "observations";
-      notes.push(`category forced to observations (was ${input.category}) — volatility=transient`);
+      const wasNote = input.category ? `was ${input.category}` : "category was unset";
+      notes.push(`category forced to observations (${wasNote}) — volatility=transient`);
     }
   } else if (effective === "ephemeral") {
     expiresAt = addDaysIso(asOf ?? isoDateOnly(new Date()), 7);
     halfLifeMultiplier = 0.1;
-    if (input.category && input.category !== "observations") {
+    if (input.category !== "observations") {
       forcedCategory = "observations";
-      notes.push(`category forced to observations (was ${input.category}) — volatility=ephemeral`);
+      const wasNote = input.category ? `was ${input.category}` : "category was unset";
+      notes.push(`category forced to observations (${wasNote}) — volatility=ephemeral`);
     }
   }
 
