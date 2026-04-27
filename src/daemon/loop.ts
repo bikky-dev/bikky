@@ -14,6 +14,7 @@ import { tick as consolidationTick, setLogger as setConsolidationLogger } from "
 import { tick as relationsTick, setLogger as setRelationsLogger } from "./relations.js";
 import { tick as entityTypingTick, setLogger as setEntityTypingLogger } from "./entity-typing.js";
 import { scanStaleFacts, setLogger as setStalenessLogger } from "./staleness.js";
+import { inspectWatcherPaths, formatIssue } from "./watcher-health.js";
 
 // createLogger returns (LogLevel, ...args) but daemon modules accept (string, ...args).
 // The daemon only calls with valid LogLevel values, so the cast is safe.
@@ -26,6 +27,12 @@ let intervalHandle: ReturnType<typeof setInterval> | null = null;
 export async function startDaemon(): Promise<void> {
   const cfg = loadConfig();
   log("INFO", `Starting bikky daemon (PID ${process.pid})`);
+
+  // Sanity-check watcher paths — warn loudly if any look broken so users
+  // don't end up with a silently-idle daemon (issue #58).
+  for (const issue of inspectWatcherPaths(cfg)) {
+    log("WARN", formatIssue(issue));
+  }
 
   // Wire up loggers for all daemon sub-modules
   qdrantClient.setLogger(log);

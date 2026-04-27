@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { glob } from "node:fs/promises";
 
-import { loadConfig, STATE_DIR } from "../config.js";
+import { loadConfig, STATE_DIR, EXTRACTION_HEALTH_PATH } from "../config.js";
 import type { BikkyConfig } from "../config.js";
 import * as qdrant from "./qdrant.js";
 import { chatCompletion } from "../llm/index.js";
@@ -822,6 +822,8 @@ export const tick = async (config: BikkyConfig): Promise<void> => {
     const aliveMappings = lockMappings.filter(m => isProcessAlive(m.pid));
     logFn("INFO", `Extraction tick: ${aliveMappings.length} active copilot session(s) with events.jsonl`);
 
+    writeExtractionHealth(aliveMappings.length, config);
+
     for (const mapping of aliveMappings) {
       await extractForUuid(mapping, minEvents, config);
     }
@@ -829,6 +831,39 @@ export const tick = async (config: BikkyConfig): Promise<void> => {
     logFn("ERROR", `Extraction tick failed: ${(e as Error).message}`);
   }
 };
+
+// ── Health metric ───────────────────────────────────────────────────────────
+
+export interface ExtractionHealth {
+  /** ISO timestamp of the most recent extraction tick that ran. */
+  last_tick_at: string;
+  /** ISO timestamp of the most recent tick that saw ≥1 active session. Null if never. */
+  last_active_session_at: string | null;
+  /** Active session count from the most recent tick. */
+  active_session_count: number;
+  /** Configured copilot watcher path at the time of the tick. */
+  watcher_path: string;
+}
+
+function writeExtractionHealth(activeCount: number, config: BikkyConfig): void {
+  try {
+    let existing: Partial<ExtractionHealth> = {};
+    if (existsSync(EXTRACTION_HEALTH_PATH)) {
+      try { existing = JSON.parse(readFileSync(EXTRACTION_HEALTH_PATH, "utf-8")); } catch { /* ignore */ }
+    }
+    const now = new Date().toISOString();
+    const health: ExtractionHealth = {
+      last_tick_at: now,
+      last_active_session_at: activeCount > 0 ? now : (existing.last_active_session_at ?? null),
+      active_session_count: activeCount,
+      watcher_path: config.watchers.copilot.path,
+    };
+    mkdirSync(STATE_DIR, { recursive: true });
+    writeFileSync(EXTRACTION_HEALTH_PATH, JSON.stringify(health, null, 2) + "\n");
+  } catch (e) {
+    logFn("DEBUG", `Failed to write extraction health: ${(e as Error).message}`);
+  }
+}
 
 /**
  * Extract facts for a single Copilot session identified by UUID.
