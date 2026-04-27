@@ -310,6 +310,11 @@ const scrollFacts = async (
   const must: Record<string, unknown>[] = [
     { is_null: { key: "superseded_by" } },
   ];
+  // Entity-type points live in the same collection (Phase 5a) but are NOT
+  // facts. Exclude them from any fact-oriented scroll.
+  const must_not: Record<string, unknown>[] = [
+    { key: "kind", match: { value: "entity_type" } },
+  ];
 
   if (filters.categories && filters.categories.length > 0) {
     must.push({
@@ -329,7 +334,7 @@ const scrollFacts = async (
     must.push({ key: "domain", match: { value: filters.domain } });
   }
   const result = await qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
-    filter: { must },
+    filter: { must, must_not },
     limit,
     with_payload: true,
   }) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };

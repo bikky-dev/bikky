@@ -24,6 +24,7 @@ import {
   briefPrompt,
   episodeSummaryPrompt,
   workstreamSummaryPrompt,
+  entityTypingPrompt,
   EXTRACTION_PROMPT_DESCRIPTOR,
   DISTILL_PROMPT_DESCRIPTOR,
   CONTRADICTION_PROMPT_DESCRIPTOR,
@@ -31,6 +32,7 @@ import {
   BRIEF_PROMPT_DESCRIPTOR,
   EPISODE_SUMMARY_PROMPT_DESCRIPTOR,
   WORKSTREAM_SUMMARY_PROMPT_DESCRIPTOR,
+  ENTITY_TYPING_PROMPT_DESCRIPTOR,
   type RenderedPrompt,
 } from "./prompts/index.js";
 
@@ -83,6 +85,12 @@ export const PROMPT_REGISTRY: Record<string, PromptEntry> = {
     version: WORKSTREAM_SUMMARY_PROMPT_DESCRIPTOR.version,
     describe: 'Maintain a current-state workstream summary. Input: { workstreamKey, existingSummary?, episodeSummaries: string[] }',
     build: (input) => workstreamSummaryPrompt(input as Parameters<typeof workstreamSummaryPrompt>[0]),
+  },
+  "entity-typing": {
+    id: ENTITY_TYPING_PROMPT_DESCRIPTOR.id,
+    version: ENTITY_TYPING_PROMPT_DESCRIPTOR.version,
+    describe: 'Classify an entity into a fixed type ontology given example facts. Input: { entity: string, facts: [{ content, category }] }',
+    build: (input) => entityTypingPrompt(input as Parameters<typeof entityTypingPrompt>[0]),
   },
 };
 
