@@ -7,7 +7,7 @@
  */
 
 import { readFile, stat } from "node:fs/promises";
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { glob } from "node:fs/promises";

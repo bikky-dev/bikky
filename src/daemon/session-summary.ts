@@ -9,7 +9,6 @@ import { createHash } from "node:crypto";
 
 import type { BikkyConfig } from "../config.js";
 import { loadConfig } from "../config.js";
-import { chatCompletion } from "../llm/index.js";
 import { DEFAULT_CAPTURE_CONTEXT, CAPTURE_POLICY_VERSION, PROMPT_VERSIONS } from "./capture-policy.js";
 import { segmentTranscriptIntoEpisodes, updateEpisodeSummary } from "./episode-summary.js";
 import { buildSessionIndexFilter, updateSessionIndex } from "./session-index.js";
@@ -210,40 +209,6 @@ export const buildSessionSummaryPayload = (input: {
   }
 
   return { payload, redaction };
-};
-
-const redactionOptions = (_config: BikkyConfig): { enabled: boolean; redactPii: boolean } => ({
-  enabled: true,
-  redactPii: false,
-});
-
-const summarizeTranscript = async (input: {
-  transcript: string;
-  existingSummary?: string | null;
-}): Promise<SessionSummaryDraft> => {
-  const result = await chatCompletion({
-    promptName: `session-index@${PROMPT_VERSIONS.sessionIndex}`,
-    messages: buildSessionSummaryMessages(input),
-    temperature: 0.2,
-    max_tokens: 1500,
-    response_format: { type: "json_object" },
-    telemetry: { subsystem: "summary", trigger: "session_index" },
-  });
-  if (!result) throw new Error("Session summary LLM returned null");
-  return parseSessionSummaryDraft(result);
-};
-
-const findExistingSummary = async (
-  sessionId: string,
-  scope: WorkspaceScope,
-): Promise<ExistingSummary | null> => {
-  const result = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/scroll`, {
-    filter: buildSessionSummaryFilter(sessionId, scope),
-    limit: 1,
-    with_payload: true,
-  }) as { result?: { points?: ExistingSummary[] } };
-
-  return result.result?.points?.[0] ?? null;
 };
 
 export const updateSessionSummary = async (input: {

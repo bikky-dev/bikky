@@ -17,18 +17,18 @@ import { createHash } from "node:crypto";
 import * as qdrant from "./qdrant.js";
 import { chatCompletion } from "../llm/index.js";
 import { categoryValues, normalizeCategory, normalizeDomain } from "../mcp/taxonomy.js";
+import type { ALLOWED_BRIEF_HEADINGS } from "../prompts/index.js";
 import {
   distillPrompt,
   DISTILL_PROMPT_DESCRIPTOR,
   contradictionPrompt,
   briefPrompt,
   BRIEF_PROMPT_DESCRIPTOR,
-  ALLOWED_BRIEF_HEADINGS,
   safeParseJson,
 } from "../prompts/index.js";
 import { STATE_DIR } from "../config.js";
 import type { BikkyConfig } from "../config.js";
-import type { LogFn, QdrantPayload, StoreFact } from "./qdrant.js";
+import type { LogFn, QdrantPayload } from "./qdrant.js";
 
 // ---------------------------------------------------------------------------
 // Local types

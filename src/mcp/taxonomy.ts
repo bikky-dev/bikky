@@ -576,7 +576,6 @@ export function getDecayHalfLife(input: {
   if (kind === "relation" || kind === "telemetry") return null;
 
   const rawCategory = normalizeToken(input.category);
-  const rawDomain = normalizeToken(input.domain);
   const categoryWasProvided = rawCategory.length > 0;
   const categoryIsKnown =
     rawCategory in CATEGORIES ||

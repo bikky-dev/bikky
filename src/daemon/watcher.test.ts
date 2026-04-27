@@ -16,7 +16,7 @@ import os from "node:os";
 const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-home-watcher-"));
 process.env.BIKKY_HOME = TEST_BIKKY_HOME;
 
-const { resetConfig, loadConfig, saveConfig, CONFIG_DEFAULTS } = await import("../config.js");
+const { resetConfig, saveConfig, CONFIG_DEFAULTS } = await import("../config.js");
 const { discoverSessions } = await import("./watcher.js");
 
 // ---------------------------------------------------------------------------
