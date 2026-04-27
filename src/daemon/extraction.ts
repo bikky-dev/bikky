@@ -38,7 +38,7 @@ import {
   subtypeForCategory,
 } from "./capture-policy.js";
 import { shouldSummarizeEvents, updateSessionSummary } from "./session-summary.js";
-import { compareSubtype } from "./extraction-rules.js";
+import { compareSubtype, hasTypedToken, verifyGrounding, verifyVolatilityCoherence } from "./extraction-rules.js";
 
 // ── Module state ─────────────────────────────────────────────────────────────
 
@@ -385,18 +385,12 @@ const clamp01 = (value: number): number => Math.max(0, Math.min(1, value));
 
 const textWordCount = (text: string): number => text.trim().split(/\s+/).filter(Boolean).length;
 
+// Shape-based "anchor" check used by the quality-signals score. Delegates to
+// the typed-token detector in extraction-rules.ts (no hardcoded tool/service
+// vocabulary). The legacy entity-count rescue is preserved as a structural
+// signal (≥ 2 entities = likely well-grounded).
 const hasDurableAnchor = (content: string, entities: string[]): boolean => {
-  const text = content.trim();
-  return Boolean(
-    /(?:^|\s)(?:[\w.-]+\/)+[\w./-]+/.test(text) ||
-    /`[^`]+`/.test(text) ||
-    /\b(?:npm|pnpm|yarn|node|git|gh|docker|kubectl|make|go|python|pip|cargo|terraform|aws|curl)\b/.test(text) ||
-    /https?:\/\/\S+/.test(text) ||
-    /\b[A-Z][A-Z0-9_]{2,}\b/.test(text) ||
-    /\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|rb|php|json|ya?ml|toml|md|sql|sh)\b/.test(text) ||
-    /\b(?:issue|pr|pull request)\s*#?\d+\b/i.test(text) ||
-    entities.length >= 2,
-  );
+  return hasTypedToken(content) || entities.length >= 2;
 };
 
 const isStatusOnlyContent = (content: string, entities: string[]): boolean => {
@@ -643,11 +637,39 @@ const storeFacts = async (
       const subtype = validateMemorySubtype("fact", sanitizedFact.memory_subtype)
         ?? subtypeForCategory(normalizeCategory(sanitizedFact.category));
 
-      // Verifier: rule-table check on subtype. If rule table is confident in
-      // a *different* subtype with a margin >= 0.6, treat the LLM as suspect:
-      // keep its choice (LLM is still source of truth) but lower confidence
-      // and stash the disagreement in metadata for human review.
-      const subtypeAgreement = compareSubtype(sanitizedFact.content, subtype);
+      // Phase 2 verifier: structural grounding gate. Translates the LLM's
+      // self-judgment into a hard verdict using shape-based checks (typed
+      // tokens, entity resolution) — no vocabulary lists.
+      const grounding = verifyGrounding({
+        content: sanitizedFact.content,
+        subject: sanitizedFact.subject,
+        subject_specificity: sanitizedFact.subject_specificity,
+        self_contained: sanitizedFact.self_contained,
+        entities: sanitizedFact.entities,
+      });
+
+      if (grounding.verdict === "ungrounded") {
+        logFn(
+          "DEBUG",
+          `Extraction: dropping ungrounded fact: "${sanitizedFact.content.slice(0, 80)}…" — ${grounding.reason}`,
+        );
+        continue;
+      }
+
+      // Phase 2 verifier: volatility coherence. Translates the LLM's
+      // self-judged volatility + as_of into expires_at, valid_from, and
+      // category-force decisions.
+      const volatility = verifyVolatilityCoherence({
+        volatility: sanitizedFact.volatility,
+        as_of: sanitizedFact.as_of,
+        category: sanitizedFact.category,
+      });
+      const effectiveCategory = volatility.forcedCategory ?? sanitizedFact.category;
+      const effectiveSubtype = volatility.forcedCategory
+        ? subtypeForCategory(normalizeCategory(volatility.forcedCategory))
+        : subtype;
+
+      const subtypeAgreement = compareSubtype(sanitizedFact.content, effectiveSubtype);
       const factMeta: Record<string, string | number | boolean | null> = { ...baseMeta };
       let effectiveConfidence = fact.confidence;
       if (sanitizedFact.subtype_reason) {
@@ -659,8 +681,7 @@ const storeFacts = async (
         effectiveConfidence = clamp01(effectiveConfidence - 0.15);
       }
 
-      // Phase 1: persist self-judgment fields in metadata. The Phase 2 verifier
-      // wires these into structural decisions (downgrade, expiry, category force).
+      // Persist self-judgment fields in metadata for audit / future training.
       if (sanitizedFact.subject) factMeta.subject = sanitizedFact.subject;
       if (typeof sanitizedFact.subject_specificity === "number") {
         factMeta.subject_specificity = Math.round(sanitizedFact.subject_specificity * 100) / 100;
@@ -669,24 +690,41 @@ const storeFacts = async (
       if (typeof sanitizedFact.self_contained === "boolean") {
         factMeta.self_contained = sanitizedFact.self_contained;
       }
+      if (sanitizedFact.as_of) factMeta.as_of = sanitizedFact.as_of;
+      factMeta.has_typed_token = grounding.hasTypedToken;
+      factMeta.subject_resolves = grounding.subjectResolves;
+      factMeta.half_life_multiplier = volatility.halfLifeMultiplier;
+      if (volatility.notes.length > 0) {
+        factMeta.volatility_notes = volatility.notes.join("; ");
+      }
+
+      let reviewStatus: string = DEFAULT_CAPTURE_CONTEXT.reviewStatus;
+      if (grounding.verdict === "ambiguous") {
+        effectiveConfidence = clamp01(effectiveConfidence - 0.2);
+        factMeta.grounding_verdict = "ambiguous";
+        factMeta.grounding_reason = grounding.reason;
+        reviewStatus = "candidate";
+      }
 
       const storePayload: StoreFact = {
         content: sanitizedFact.content,
-        category: sanitizedFact.category,
+        category: effectiveCategory,
         domain: DEFAULT_CAPTURE_CONTEXT.domain,
-        memory_subtype: subtype,
+        memory_subtype: effectiveSubtype,
         entities: sanitizedFact.entities,
         source: "daemon",
         kind: "fact",
         confidence: effectiveConfidence,
         importance: fact.importance,
         content_hash: hash,
-        prompt_version: promptVersionForSubtype(subtype),
+        prompt_version: promptVersionForSubtype(effectiveSubtype),
         capture_policy_version: CAPTURE_POLICY_VERSION,
         quality_score: fact.quality_score ?? factQualitySignals(fact).computedQualityScore,
         confidence_reason: fact.confidence_reason,
-        review_status: DEFAULT_CAPTURE_CONTEXT.reviewStatus,
-        volatility: DEFAULT_CAPTURE_CONTEXT.volatility,
+        review_status: reviewStatus,
+        volatility: volatility.effective,
+        valid_from: volatility.validFrom,
+        expires_at: volatility.expiresAt,
         repo: fact.repo,
         branch: fact.branch,
         task_key: fact.task_key,
