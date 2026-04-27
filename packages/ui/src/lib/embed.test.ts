@@ -81,7 +81,7 @@ describe("ui/lib/embed", () => {
 
   it("embed throws when provider is bedrock", async () => {
     writeConfig({ embedding: { provider: "bedrock" } });
-    await assert.rejects(embed("x"), /Bedrock embeddings require AWS SDK/);
+    await assert.rejects(embed("x"), /not available in the UI/);
   });
 
   it("embed POSTs to /v1/embeddings with the right body for ollama", async () => {

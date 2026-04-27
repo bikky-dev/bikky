@@ -11,25 +11,17 @@ import { CAPTURE_POLICY_VERSION, DEFAULT_CAPTURE_CONTEXT, PROMPT_VERSIONS } from
 import type { EpisodeSummaryWriteResult } from "./episode-summary.js";
 import * as qdrant from "./qdrant.js";
 import type { QdrantPayload } from "./qdrant.js";
+import {
+  combineRedactions,
+  redactStorageText,
+  type RedactionSummary,
+} from "../privacy/redaction.js";
 
 export interface WorkspaceScope {
   workspaceId?: string;
   actorId?: string;
   includeLegacy?: boolean;
 }
-
-export interface RedactionSummary {
-  redacted: boolean;
-  summary: string;
-  matches: Array<{ type: string; count: number }>;
-}
-
-const noRedaction = (): RedactionSummary => ({ redacted: false, summary: "none", matches: [] });
-const passthroughText = (text: string, _options?: { enabled: boolean; redactPii: boolean }): { text: string; redacted: boolean; summary: string; matches: Array<{ type: string; count: number }> } => ({
-  text,
-  ...noRedaction(),
-});
-const combinePassThrough = (): RedactionSummary => noRedaction();
 
 export interface SessionIndexDraft {
   content: string;
@@ -99,9 +91,9 @@ export const buildSessionIndexPayload = (input: {
   eventCount: number;
   redactionOptions: { enabled: boolean; redactPii: boolean };
 }): SessionIndexPayloadResult => {
-  const redactedContent = passthroughText(input.draft.content, input.redactionOptions);
-  const redactedEntities = input.draft.entities.map((entity) => passthroughText(entity, input.redactionOptions));
-  const redaction = combinePassThrough();
+  const redactedContent = redactStorageText(input.draft.content, input.redactionOptions);
+  const redactedEntities = input.draft.entities.map((entity) => redactStorageText(entity, input.redactionOptions));
+  const redaction = combineRedactions([redactedContent, ...redactedEntities]);
   const existingPayload = input.existing?.payload ?? {};
 
   const payload: Record<string, unknown> = {
@@ -144,6 +136,8 @@ export const buildSessionIndexPayload = (input: {
 
   if (redaction.redacted) {
     payload["redaction"] = redaction;
+  } else {
+    delete payload["redaction"];
   }
 
   return { payload, redaction };
@@ -187,7 +181,7 @@ export const updateSessionIndex = async (input: {
     existing,
     eventCount: input.eventCount,
     redactionOptions: {
-      enabled: false,
+      enabled: true,
       redactPii: false,
     },
   });

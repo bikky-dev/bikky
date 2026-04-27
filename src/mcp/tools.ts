@@ -64,6 +64,11 @@ import {
 import { saveConfig, loadConfig, EXTRACTION_HEALTH_PATH } from "../config.js";
 import { existsSync, readFileSync } from "node:fs";
 import { inspectWatcherPaths, formatIssue } from "../daemon/watcher-health.js";
+import {
+  addRedactionPayload,
+  combineRedactions,
+  redactStorageText,
+} from "../privacy/redaction.js";
 
 // ---------------------------------------------------------------------------
 // Runtime state
@@ -91,27 +96,6 @@ interface WorkspaceScope {
   includeLegacy: boolean;
 }
 
-interface RedactionResult {
-  text: string;
-  redacted: boolean;
-  summary: string;
-  matches: Array<{ type: string; count: number }>;
-}
-
-type RedactionSummary = Omit<RedactionResult, "text">;
-
-function redactionOptions(): { enabled: boolean; redactPii: boolean } {
-  return { enabled: false, redactPii: false };
-}
-
-function redactStorageText(text: string): RedactionResult {
-  return { text, redacted: false, summary: "none", matches: [] };
-}
-
-function combineRedactions(_items: RedactionResult[]): RedactionSummary {
-  return { redacted: false, summary: "none", matches: [] };
-}
-
 function resolveScope(workspaceId?: string, includeLegacyWorkspace = false): WorkspaceScope {
   return {
     workspaceId: workspaceId?.trim() || undefined,
@@ -130,10 +114,6 @@ function scopedFilter(scope: WorkspaceScope, extra: Parameters<typeof buildFilte
 function addWorkspacePayload(payload: Record<string, unknown>, scope: WorkspaceScope): void {
   if (scope.workspaceId) payload["workspace_id"] = scope.workspaceId;
   if (scope.actorId) payload["actor_id"] = scope.actorId;
-}
-
-function addRedactionPayload(_payload: Record<string, unknown>, _summary: RedactionSummary): void {
-  // Task 243 keeps storage pass-through; redaction policy is out of scope for this branch.
 }
 
 async function getPointForWorkspaceWrite(factId: string, _scope: WorkspaceScope): Promise<{ point?: QdrantPoint; error?: Record<string, unknown> }> {
@@ -559,10 +539,16 @@ export function registerTools(mcp: McpServer): void {
         type: redactStorageText(relation.type),
         to: redactStorageText(relation.to),
       } : null;
-      const redactionSummary = combineRedactions([
+      const factRedactionSummary = combineRedactions([
         redactedContent,
         ...redactedEntities,
+      ]);
+      const relationRedactionSummary = combineRedactions([
         ...(redactedRelation ? [redactedRelation.from, redactedRelation.type, redactedRelation.to] : []),
+      ]);
+      const redactionSummary = combineRedactions([
+        factRedactionSummary,
+        relationRedactionSummary,
       ]);
       const hash = contentHash(normalizedCategory, redactedContent.text);
       const normalizedEntities = sanitizedEntities.map((e) => e.toLowerCase());
@@ -715,7 +701,7 @@ export function registerTools(mcp: McpServer): void {
       if (branch) payload["branch"] = branch;
       if (review_status) payload["review_status"] = review_status;
       addWorkspacePayload(payload, scope);
-      addRedactionPayload(payload, redactionSummary);
+      addRedactionPayload(payload, factRedactionSummary);
       if (metadata && Object.keys(metadata).length > 0) {
         payload["metadata"] = metadata;
       }
@@ -748,7 +734,7 @@ export function registerTools(mcp: McpServer): void {
           to_entity: sanitizedRelation.to.toLowerCase(),
         };
         addWorkspacePayload(relPayload, scope);
-        addRedactionPayload(relPayload, redactionSummary);
+        addRedactionPayload(relPayload, relationRedactionSummary);
         await qdrantUpsert(relationId, relVector, relPayload);
       }
 
@@ -1217,8 +1203,9 @@ export function registerTools(mcp: McpServer): void {
         const eventContent = note
           ? `Fact ${fact_id} marked useful: ${note}`
           : `Fact ${fact_id} marked useful.`;
+        const redactedEvent = redactStorageText(eventContent);
         const eventPayload: Record<string, unknown> = {
-          content: eventContent,
+          content: redactedEvent.text,
           category: "observations",
           domain: "software_engineering",
           kind: "telemetry",
@@ -1235,8 +1222,9 @@ export function registerTools(mcp: McpServer): void {
           updated_at: now,
         };
         addWorkspacePayload(eventPayload, scope);
+        addRedactionPayload(eventPayload, redactedEvent);
         try {
-          const eventVector = await embed(eventContent);
+          const eventVector = await embed(redactedEvent.text);
           await qdrantUpsert(eventId, eventVector, eventPayload);
         } catch (e) {
           log("WARN", `Failed to record feedback_event: ${e instanceof Error ? e.message : String(e)}`);
@@ -1290,8 +1278,9 @@ export function registerTools(mcp: McpServer): void {
         const eventContent = notes
           ? `Fact ${fact_id} outcome=${outcome}: ${notes}`
           : `Fact ${fact_id} outcome=${outcome}.`;
+        const redactedEvent = redactStorageText(eventContent);
         const eventPayload: Record<string, unknown> = {
-          content: eventContent,
+          content: redactedEvent.text,
           category: "observations",
           domain: "software_engineering",
           kind: "telemetry",
@@ -1308,7 +1297,8 @@ export function registerTools(mcp: McpServer): void {
           updated_at: now,
         };
         addWorkspacePayload(eventPayload, scope);
-        const eventVector = await embed(eventContent);
+        addRedactionPayload(eventPayload, redactedEvent);
+        const eventVector = await embed(redactedEvent.text);
         await qdrantUpsert(eventId, eventVector, eventPayload);
 
         return {
@@ -1356,9 +1346,10 @@ export function registerTools(mcp: McpServer): void {
         const scope = resolveScope(workspace_id);
         const normalizedEntities = (entities ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean);
         const summaryId = newId();
-        const vector = await embed(content);
+        const redactedContent = redactStorageText(content);
+        const vector = await embed(redactedContent.text);
         const payload: Record<string, unknown> = {
-          content,
+          content: redactedContent.text,
           category: categoryForMemorySubtype("session_index") ?? "projects",
           domain: "software_engineering",
           kind: "summary",
@@ -1368,7 +1359,7 @@ export function registerTools(mcp: McpServer): void {
           source: "agent",
           confidence: 0.9,
           importance: 0.6,
-          content_hash: contentHash("summary", content),
+          content_hash: contentHash("summary", redactedContent.text),
           reinforcement_count: 1,
           last_reinforced_at: now,
           superseded_by: null,
@@ -1381,6 +1372,7 @@ export function registerTools(mcp: McpServer): void {
         if (task_key) payload["task_key"] = task_key;
         if (repo) payload["repo"] = repo;
         addWorkspacePayload(payload, scope);
+        addRedactionPayload(payload, redactedContent);
         await qdrantUpsert(summaryId, vector, payload);
 
         return {
@@ -1428,7 +1420,8 @@ export function registerTools(mcp: McpServer): void {
         const scope = resolveScope(workspace_id);
         const normalizedEntities = entities.map((e) => e.trim().toLowerCase()).filter(Boolean);
         const distilledId = newId();
-        const vector = await embed(content);
+        const redactedContent = redactStorageText(content);
+        const vector = await embed(redactedContent.text);
 
         if (supersedes) {
           const existing = await getPointForWorkspaceWrite(supersedes, scope);
@@ -1442,7 +1435,7 @@ export function registerTools(mcp: McpServer): void {
         }
 
         const payload: Record<string, unknown> = {
-          content,
+          content: redactedContent.text,
           category: categoryForMemorySubtype("convention") ?? "observations",
           domain: "software_engineering",
           kind: "distilled",
@@ -1452,7 +1445,7 @@ export function registerTools(mcp: McpServer): void {
           source: "agent",
           confidence: 0.9,
           importance: 0.7,
-          content_hash: contentHash("distilled", content),
+          content_hash: contentHash("distilled", redactedContent.text),
           reinforcement_count: 1,
           last_reinforced_at: now,
           superseded_by: null,
@@ -1463,6 +1456,7 @@ export function registerTools(mcp: McpServer): void {
         if (task_key) payload["task_key"] = task_key;
         if (repo) payload["repo"] = repo;
         addWorkspacePayload(payload, scope);
+        addRedactionPayload(payload, redactedContent);
         await qdrantUpsert(distilledId, vector, payload);
 
         return {

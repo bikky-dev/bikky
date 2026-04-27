@@ -19,6 +19,11 @@ import {
 import type { EpisodeSummaryWriteResult } from "./episode-summary.js";
 import * as qdrant from "./qdrant.js";
 import type { QdrantPayload } from "./qdrant.js";
+import {
+  combineRedactions,
+  redactStorageText,
+  type RedactionSummary,
+} from "../privacy/redaction.js";
 
 export { buildWorkstreamSummaryMessages } from "../prompts/index.js";
 
@@ -27,19 +32,6 @@ export interface WorkspaceScope {
   actorId?: string;
   includeLegacy?: boolean;
 }
-
-export interface RedactionSummary {
-  redacted: boolean;
-  summary: string;
-  matches: Array<{ type: string; count: number }>;
-}
-
-const noRedaction = (): RedactionSummary => ({ redacted: false, summary: "none", matches: [] });
-const passthroughText = (text: string, _options?: { enabled: boolean; redactPii: boolean }): { text: string; redacted: boolean; summary: string; matches: Array<{ type: string; count: number }> } => ({
-  text,
-  ...noRedaction(),
-});
-const combinePassThrough = (): RedactionSummary => noRedaction();
 
 export interface WorkstreamSummaryDraft {
   content: string;
@@ -170,12 +162,18 @@ export const buildWorkstreamSummaryPayload = (input: {
   repo?: string | null;
   redactionOptions: { enabled: boolean; redactPii: boolean };
 }): WorkstreamSummaryPayloadResult => {
-  const redactedContent = passthroughText(input.draft.content, input.redactionOptions);
-  const redactedDecisions = input.draft.current_decisions.map((decision) => passthroughText(decision, input.redactionOptions));
-  const redactedNextSteps = input.draft.next_steps.map((step) => passthroughText(step, input.redactionOptions));
-  const redactedBlockers = input.draft.blockers.map((blocker) => passthroughText(blocker, input.redactionOptions));
-  const redactedEntities = input.draft.entities.map((entity) => passthroughText(entity, input.redactionOptions));
-  const redaction = combinePassThrough();
+  const redactedContent = redactStorageText(input.draft.content, input.redactionOptions);
+  const redactedDecisions = input.draft.current_decisions.map((decision) => redactStorageText(decision, input.redactionOptions));
+  const redactedNextSteps = input.draft.next_steps.map((step) => redactStorageText(step, input.redactionOptions));
+  const redactedBlockers = input.draft.blockers.map((blocker) => redactStorageText(blocker, input.redactionOptions));
+  const redactedEntities = input.draft.entities.map((entity) => redactStorageText(entity, input.redactionOptions));
+  const redaction = combineRedactions([
+    redactedContent,
+    ...redactedDecisions,
+    ...redactedNextSteps,
+    ...redactedBlockers,
+    ...redactedEntities,
+  ]);
   const existingPayload = input.existing?.payload ?? {};
 
   const payload: Record<string, unknown> = {
@@ -220,6 +218,8 @@ export const buildWorkstreamSummaryPayload = (input: {
 
   if (redaction.redacted) {
     payload["redaction"] = redaction;
+  } else {
+    delete payload["redaction"];
   }
 
   return { payload, redaction };
@@ -295,7 +295,7 @@ export const updateWorkstreamSummaries = async (input: {
       sourceEpisodeIds: episodes.map((episode) => episode.payload?.episode_id ?? episode.id).filter(Boolean) as string[],
       repo: null,
       redactionOptions: {
-        enabled: false,
+        enabled: true,
         redactPii: false,
       },
     });

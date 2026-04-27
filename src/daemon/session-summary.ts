@@ -16,25 +16,17 @@ import { buildSessionIndexFilter, updateSessionIndex } from "./session-index.js"
 import { updateWorkstreamSummaries } from "./workstream-summary.js";
 import * as qdrant from "./qdrant.js";
 import type { QdrantPayload } from "./qdrant.js";
+import {
+  combineRedactions,
+  redactStorageText,
+  type RedactionSummary,
+} from "../privacy/redaction.js";
 
 export interface WorkspaceScope {
   workspaceId?: string;
   actorId?: string;
   includeLegacy?: boolean;
 }
-
-export interface RedactionSummary {
-  redacted: boolean;
-  summary: string;
-  matches: Array<{ type: string; count: number }>;
-}
-
-const noRedaction = (): RedactionSummary => ({ redacted: false, summary: "none", matches: [] });
-const passthroughText = (text: string, _options?: { enabled: boolean; redactPii: boolean }): { text: string; redacted: boolean; summary: string; matches: Array<{ type: string; count: number }> } => ({
-  text,
-  ...noRedaction(),
-});
-const combinePassThrough = (): RedactionSummary => noRedaction();
 
 export interface SummaryEvent {
   type: string;
@@ -162,11 +154,16 @@ export const buildSessionSummaryPayload = (input: {
   eventCount: number;
   redactionOptions: { enabled: boolean; redactPii: boolean };
 }): SessionSummaryPayloadResult => {
-  const redactedContent = passthroughText(input.draft.content, input.redactionOptions);
-  const redactedTasks = input.draft.tasks_completed.map((task) => passthroughText(task, input.redactionOptions));
-  const redactedDecisions = input.draft.decisions_made.map((decision) => passthroughText(decision, input.redactionOptions));
-  const redactedEntities = input.draft.entities.map((entity) => passthroughText(entity, input.redactionOptions));
-  const redaction = combinePassThrough();
+  const redactedContent = redactStorageText(input.draft.content, input.redactionOptions);
+  const redactedTasks = input.draft.tasks_completed.map((task) => redactStorageText(task, input.redactionOptions));
+  const redactedDecisions = input.draft.decisions_made.map((decision) => redactStorageText(decision, input.redactionOptions));
+  const redactedEntities = input.draft.entities.map((entity) => redactStorageText(entity, input.redactionOptions));
+  const redaction = combineRedactions([
+    redactedContent,
+    ...redactedTasks,
+    ...redactedDecisions,
+    ...redactedEntities,
+  ]);
   const existingPayload = input.existing?.payload ?? {};
 
   const payload: Record<string, unknown> = {
@@ -208,13 +205,15 @@ export const buildSessionSummaryPayload = (input: {
 
   if (redaction.redacted) {
     payload["redaction"] = redaction;
+  } else {
+    delete payload["redaction"];
   }
 
   return { payload, redaction };
 };
 
 const redactionOptions = (_config: BikkyConfig): { enabled: boolean; redactPii: boolean } => ({
-  enabled: false,
+  enabled: true,
   redactPii: false,
 });
 

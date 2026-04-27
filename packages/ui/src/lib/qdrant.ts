@@ -26,6 +26,11 @@ export interface FactPayload {
   created_at: string;
   updated_at: string;
   metadata?: Record<string, string>;
+  redaction?: {
+    redacted: boolean;
+    summary: string;
+    matches: Array<{ type: string; count: number }>;
+  } | null;
   from_entity?: string;
   relation_type?: string;
   to_entity?: string;

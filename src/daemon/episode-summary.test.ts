@@ -92,10 +92,10 @@ describe("daemon/episode-summary", () => {
     ), false);
   });
 
-  it("builds memory ontology episode payloads", () => {
-    const { payload } = buildEpisodeSummaryPayload({
+  it("redacts secrets in memory ontology episode payloads", () => {
+    const { payload, redaction } = buildEpisodeSummaryPayload({
       draft: {
-        content: "Implemented daemon episode summaries for src/daemon/episode-summary.ts.",
+        content: "Implemented daemon episode summaries with token=supersecretvalue.",
         tasks_completed: ["episode summaries"],
         decisions_made: ["Use episode summaries instead of one evolving session summary"],
         open_questions: ["workstream updater"],
@@ -121,5 +121,8 @@ describe("daemon/episode-summary", () => {
     assert.equal(payload.episode_id, "episode-1");
     assert.equal(payload.workstream_key, "243-bikky-data-capture-policy");
     assert.equal((payload.metadata as Record<string, string>).summary_subtype, "episode");
+    assert.equal(payload.content, "Implemented daemon episode summaries with token=[REDACTED:secret]");
+    assert.equal(redaction.redacted, true);
+    assert.deepEqual(payload.redaction, redaction);
   });
 });

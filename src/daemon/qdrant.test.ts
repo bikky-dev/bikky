@@ -17,6 +17,7 @@ import {
   isReady,
   setLogger,
   setEmbeddingConfig,
+  storeFact,
 } from "./qdrant.js";
 import type { StoreFact } from "./qdrant.js";
 
@@ -26,6 +27,7 @@ import type { StoreFact } from "./qdrant.js";
 
 let savedConfig: string | null = null;
 const configPath = path.join(os.homedir(), ".bikky", "config.json");
+const realFetch = globalThis.fetch;
 
 // Env vars that override config — must be cleared for null-credential tests
 const QDRANT_ENV_KEYS = ["QDRANT_URL", "QDRANT_API_KEY"];
@@ -55,6 +57,7 @@ describe("daemon/qdrant", () => {
     if (savedConfig !== null) {
       fs.writeFileSync(configPath, savedConfig);
     }
+    globalThis.fetch = realFetch;
     resetConfig();
   });
 
@@ -63,6 +66,7 @@ describe("daemon/qdrant", () => {
     for (const key of QDRANT_ENV_KEYS) {
       delete process.env[key];
     }
+    globalThis.fetch = realFetch;
     resetConfig();
   });
 
@@ -242,6 +246,63 @@ describe("daemon/qdrant", () => {
         relation: null,
       };
       assert.strictEqual(fact.relation, null);
+    });
+  });
+
+  describe("storeFact", () => {
+    it("redacts secret content before embedding and Qdrant upsert", async () => {
+      const embedInputs: string[] = [];
+      const upsertBodies: Record<string, unknown>[] = [];
+
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        const body = init?.body ? JSON.parse(String(init.body)) : null;
+        if (url.includes("/v1/embeddings")) {
+          embedInputs.push(String(body?.input ?? ""));
+          return new Response(JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }), { status: 200 });
+        }
+        if (url.includes("/collections/test-redaction/points") && init?.method === "PUT") {
+          if (body) upsertBodies.push(body);
+        }
+        return new Response(JSON.stringify({ result: {} }), { status: 200 });
+      }) as typeof fetch;
+
+      saveConfig({
+        ...CONFIG_DEFAULTS,
+        qdrant_url: "https://qdrant.example.com:6333",
+        qdrant_api_key: null,
+        collection: "test-redaction",
+        embedding: {
+          ...CONFIG_DEFAULTS.embedding,
+          provider: "ollama",
+          model: "test-model",
+          base_url: "http://embed.test:11434",
+          dimensions: 3,
+        },
+      });
+      resetConfig();
+      init();
+
+      await storeFact({
+        content: "daemon extracted token=supersecretvalue",
+        category: "infrastructure",
+        entities: ["daemon"],
+        content_hash: "raw-hash",
+      });
+
+      assert.deepEqual(embedInputs, ["daemon extracted token=[REDACTED:secret]"]);
+      assert.equal(upsertBodies.length, 1, "expected Qdrant upsert body");
+      const upsertBody = upsertBodies[0]!;
+      const points = upsertBody.points;
+      assert.ok(Array.isArray(points), "expected Qdrant points array");
+      const point = points[0] as { payload: Record<string, unknown> };
+      assert.equal(point.payload.content, "daemon extracted token=[REDACTED:secret]");
+      assert.notEqual(point.payload.content_hash, "raw-hash");
+      assert.deepEqual(point.payload.redaction, {
+        redacted: true,
+        summary: "secret:1",
+        matches: [{ type: "secret", count: 1 }],
+      });
     });
   });
 });

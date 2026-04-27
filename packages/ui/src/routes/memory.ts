@@ -6,6 +6,7 @@
 import { Hono } from "hono";
 import { createQdrantClient, buildFilter, type QdrantPoint, type QdrantFilter, type FactPayload } from "../lib/qdrant.js";
 import { embed, isEmbeddingAvailable } from "../lib/embed.js";
+import { addRedactionPayload, combineRedactions, redactStorageText } from "../lib/redaction.js";
 
 export const memoryRoutes = new Hono();
 
@@ -115,24 +116,47 @@ memoryRoutes.get("/facts/:id", async (c) => {
 // PUT /api/memory/facts/:id
 memoryRoutes.put("/facts/:id", async (c) => {
   const id = c.req.param("id");
-  const body = await c.req.json<Partial<Pick<FactPayload, "content" | "category" | "domain" | "entities" | "confidence">>>();
+  const body = await c.req.json<Partial<Pick<FactPayload, "content" | "category" | "domain" | "entities" | "confidence" | "from_entity" | "relation_type" | "to_entity">>>();
 
   const qdrant = createQdrantClient();
   const existing = await qdrant.getPoints([id]);
   if (existing.length === 0) return c.json({ error: "Not found" }, 404);
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (body.content !== undefined) updates.content = body.content;
+  const redactedContent = body.content !== undefined ? redactStorageText(body.content) : null;
+  const redactedEntities = body.entities !== undefined ? body.entities.map((entity) => redactStorageText(entity)) : null;
+  const redactedFromEntity = body.from_entity !== undefined ? redactStorageText(body.from_entity) : null;
+  const redactedRelationType = body.relation_type !== undefined ? redactStorageText(body.relation_type) : null;
+  const redactedToEntity = body.to_entity !== undefined ? redactStorageText(body.to_entity) : null;
+  const redactionSummary = combineRedactions([
+    redactedContent,
+    ...(redactedEntities ?? []),
+    redactedFromEntity,
+    redactedRelationType,
+    redactedToEntity,
+  ]);
+  if (redactedContent) {
+    updates.content = redactedContent.text;
+    updates.content_hash = await hashContent(redactedContent.text);
+  }
   if (body.category !== undefined) updates.category = body.category;
   if (body.domain !== undefined) updates.domain = body.domain;
-  if (body.entities !== undefined) updates.entities = body.entities.map((e: string) => e.toLowerCase());
+  if (redactedEntities !== null) updates.entities = redactedEntities.map((e) => e.text.toLowerCase());
   if (body.confidence !== undefined) updates.confidence = body.confidence;
+  if (redactedFromEntity) updates.from_entity = redactedFromEntity.text;
+  if (redactedRelationType) updates.relation_type = redactedRelationType.text;
+  if (redactedToEntity) updates.to_entity = redactedToEntity.text;
+  if (redactionSummary.redacted) {
+    addRedactionPayload(updates, redactionSummary);
+  } else if (redactedContent) {
+    updates.redaction = null;
+  }
 
   await qdrant.setPayload([id], updates);
 
   // Re-embed if content changed and embedding is available
-  if (body.content && isEmbeddingAvailable()) {
-    const vector = await embed(body.content);
+  if (redactedContent && isEmbeddingAvailable()) {
+    const vector = await embed(redactedContent.text);
     const mergedPayload = { ...existing[0]!.payload, ...updates };
     await qdrant.upsert(id, vector, mergedPayload);
   }
@@ -181,19 +205,31 @@ memoryRoutes.post("/facts", async (c) => {
   }
 
   const qdrant = createQdrantClient();
-  const vector = await embed(body.content);
+  const redactedContent = redactStorageText(body.content);
+  const redactedEntities = body.entities.map((entity) => redactStorageText(entity));
+  const redactedFromEntity = body.from_entity ? redactStorageText(body.from_entity) : null;
+  const redactedRelationType = body.relation_type ? redactStorageText(body.relation_type) : null;
+  const redactedToEntity = body.to_entity ? redactStorageText(body.to_entity) : null;
+  const redactionSummary = combineRedactions([
+    redactedContent,
+    ...redactedEntities,
+    redactedFromEntity,
+    redactedRelationType,
+    redactedToEntity,
+  ]);
+  const vector = await embed(redactedContent.text);
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
   const payload: Record<string, unknown> = {
-    content: body.content,
+    content: redactedContent.text,
     category: body.category,
     domain: body.domain || "work",
     kind: body.kind || "fact",
-    entities: body.entities.map((e) => e.toLowerCase()),
+    entities: redactedEntities.map((e) => e.text.toLowerCase()),
     source: "ui",
     confidence: body.confidence ?? 0.9,
-    content_hash: await hashContent(body.content),
+    content_hash: await hashContent(redactedContent.text),
     reinforcement_count: 0,
     last_reinforced_at: now,
     superseded_by: null,
@@ -203,9 +239,10 @@ memoryRoutes.post("/facts", async (c) => {
   };
 
   if (body.metadata) payload.metadata = body.metadata;
-  if (body.from_entity) payload.from_entity = body.from_entity;
-  if (body.relation_type) payload.relation_type = body.relation_type;
-  if (body.to_entity) payload.to_entity = body.to_entity;
+  if (redactedFromEntity) payload.from_entity = redactedFromEntity.text;
+  if (redactedRelationType) payload.relation_type = redactedRelationType.text;
+  if (redactedToEntity) payload.to_entity = redactedToEntity.text;
+  addRedactionPayload(payload, redactionSummary);
 
   await qdrant.upsert(id, vector, payload);
   return c.json({ ok: true, id }, 201);
