@@ -339,6 +339,17 @@ const buildTranscript = (events: ParsedEvent[]): string => {
 
 // ── LLM extraction ──────────────────────────────────────────────────────────
 
+export type Volatility = "stable" | "evolving" | "transient" | "ephemeral";
+
+const VOLATILITY_VALUES: ReadonlySet<Volatility> = new Set([
+  "stable",
+  "evolving",
+  "transient",
+  "ephemeral",
+]);
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 export interface ExtractedFact {
   content: string;
   category: string;
@@ -353,6 +364,13 @@ export interface ExtractedFact {
   branch?: string | null;
   task_key?: string | null;
   workstream_key?: string | null;
+  // Self-judgment fields (prompt v2026-04-28-1+)
+  subject?: string | null;
+  subject_specificity?: number | null;
+  volatility?: Volatility | null;
+  volatility_reason?: string | null;
+  self_contained?: boolean | null;
+  as_of?: string | null;
 }
 
 export interface FactQualitySignals {
@@ -408,6 +426,15 @@ export const factQualitySignals = (fact: ExtractedFact): FactQualitySignals => {
   if ((fact.importance ?? 0) >= 0.7) score += 0.1;
   if (statusOnly) score -= 0.4;
 
+  // Phase 1: fold the LLM's self-judged subject_specificity into the score so
+  // the verifier in Phase 2 can act on it. The verifier itself remains the
+  // structural backstop — this is just a smooth signal.
+  if (typeof fact.subject_specificity === "number") {
+    if (fact.subject_specificity >= 0.7) score += 0.1;
+    else if (fact.subject_specificity < 0.3) score -= 0.2;
+  }
+  if (fact.self_contained === false) score -= 0.15;
+
   return {
     wordCount,
     hasDurableAnchor: durableAnchor,
@@ -440,6 +467,24 @@ export const normalizeExtractedFact = (raw: Record<string, unknown>): ExtractedF
     ? normalizeEntities(raw.entities.map((entity) => String(entity)))
     : [];
 
+  // Self-judgment fields (prompt v2026-04-28-1+)
+  const subject = typeof raw.subject === "string" && raw.subject.trim().length > 0
+    ? raw.subject.trim()
+    : null;
+  const subjectSpecificity = typeof raw.subject_specificity === "number"
+    ? clamp01(raw.subject_specificity)
+    : null;
+  const rawVolatility = typeof raw.volatility === "string" ? raw.volatility.trim().toLowerCase() : null;
+  const volatility: Volatility | null = rawVolatility && VOLATILITY_VALUES.has(rawVolatility as Volatility)
+    ? (rawVolatility as Volatility)
+    : null;
+  const volatilityReason = typeof raw.volatility_reason === "string" && raw.volatility_reason.trim().length > 0
+    ? raw.volatility_reason.trim()
+    : null;
+  const selfContained = typeof raw.self_contained === "boolean" ? raw.self_contained : null;
+  const rawAsOf = typeof raw.as_of === "string" ? raw.as_of.trim() : null;
+  const asOf = rawAsOf && ISO_DATE_RE.test(rawAsOf) ? rawAsOf : null;
+
   const fact: ExtractedFact = {
     content: raw.content.trim(),
     category,
@@ -450,10 +495,16 @@ export const normalizeExtractedFact = (raw: Record<string, unknown>): ExtractedF
     importance,
     quality_score: qualityScore,
     confidence_reason: typeof raw.confidence_reason === "string" ? raw.confidence_reason.trim() : null,
-    repo: typeof raw.repo === "string" ? raw.repo.trim() : null,
+    repo: typeof raw.repo === "string" && raw.repo.trim().length > 0 ? raw.repo.trim() : null,
     branch: typeof raw.branch === "string" ? raw.branch.trim() : null,
     task_key: typeof raw.task_key === "string" ? raw.task_key.trim() : null,
     workstream_key: typeof raw.workstream_key === "string" ? raw.workstream_key.trim() : null,
+    subject,
+    subject_specificity: subjectSpecificity,
+    volatility,
+    volatility_reason: volatilityReason,
+    self_contained: selfContained,
+    as_of: asOf,
   };
 
   return isHighQualityExtractedFact(fact) ? fact : null;
@@ -606,6 +657,17 @@ const storeFacts = async (
         factMeta.subtype_rule_disagreement = subtypeAgreement.ruleSubtype;
         factMeta.subtype_rule_margin = Math.round(subtypeAgreement.margin * 100) / 100;
         effectiveConfidence = clamp01(effectiveConfidence - 0.15);
+      }
+
+      // Phase 1: persist self-judgment fields in metadata. The Phase 2 verifier
+      // wires these into structural decisions (downgrade, expiry, category force).
+      if (sanitizedFact.subject) factMeta.subject = sanitizedFact.subject;
+      if (typeof sanitizedFact.subject_specificity === "number") {
+        factMeta.subject_specificity = Math.round(sanitizedFact.subject_specificity * 100) / 100;
+      }
+      if (sanitizedFact.volatility_reason) factMeta.volatility_reason = sanitizedFact.volatility_reason;
+      if (typeof sanitizedFact.self_contained === "boolean") {
+        factMeta.self_contained = sanitizedFact.self_contained;
       }
 
       const storePayload: StoreFact = {
