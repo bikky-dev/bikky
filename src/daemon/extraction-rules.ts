@@ -160,3 +160,271 @@ export const compareSubtype = (
   }
   return { verdict: "agree", ruleSubtype: score.subtype, ruleScore: score.score, margin };
 };
+
+// ── Phase 2: structural grounding + volatility coherence verifiers ──────────
+//
+// These verifiers translate the LLM's self-judged fields (subject_specificity,
+// volatility, self_contained, as_of) into store-time decisions. They are
+// SHAPE-BASED, not vocabulary-based — no hand-curated lists of "vague words"
+// or "transient markers". The detection criteria are:
+//
+//   - typed token shape (path, URL, code-formatted span, identifier shape)
+//   - subject resolution against the entities array
+//   - structural coherence (transient ⇒ as_of present, ephemeral ⇒ observations)
+//
+// The LLM remains source of truth — we only DOWNGRADE/REJECT/FLAG, never
+// silently rewrite content.
+
+export type GroundingVerdict = "grounded" | "ambiguous" | "ungrounded";
+
+export interface GroundingResult {
+  verdict: GroundingVerdict;
+  reason: string;
+  hasTypedToken: boolean;
+  subjectResolves: boolean;
+}
+
+/**
+ * Shape-based typed-token detector. A "typed token" is any substring that an
+ * engineer could plausibly grep for and find a unique referent: file paths,
+ * URLs, code-formatted spans, version strings, issue/PR refs, identifier-shaped
+ * names (kebab-case / snake_case / dotted / camelCase ≥ 3 chars).
+ *
+ * Intentionally shape-only — no hardcoded tool/service vocabulary.
+ */
+export const hasTypedToken = (content: string): boolean => {
+  const text = content || "";
+  return Boolean(
+    // Backtick-quoted code spans
+    /`[^`\n]{2,}`/.test(text) ||
+    // URLs
+    /\bhttps?:\/\/\S+/.test(text) ||
+    // File paths (slash-separated with at least one segment containing a dot OR ≥ 3 segments)
+    /(?:^|[\s(])(?:[\w.-]+\/){1,}[\w.-]+\.[a-z0-9]{1,8}(?=[\s),.;:]|$)/i.test(text) ||
+    /(?:^|[\s(])(?:[\w.-]+\/){2,}[\w.-]+(?=[\s),.;:]|$)/.test(text) ||
+    // Filenames with extension (no slash)
+    /\b[\w.-]+\.(?:[a-z]{1,4}|ya?ml|toml|json|sql|md)\b/i.test(text) ||
+    // Issue / PR refs
+    /(?:^|[\s(])#\d{2,}\b/.test(text) ||
+    /\b(?:issue|pr|pull[- ]request)\s*#?\d+\b/i.test(text) ||
+    // Version strings (semver-ish or hash-ish)
+    /\bv?\d+\.\d+(?:\.\d+)?(?:[-+][\w.]+)?\b/.test(text) ||
+    /\b[0-9a-f]{7,40}\b/.test(text) ||
+    // Constant-case identifiers (≥ 3 chars)
+    /\b[A-Z][A-Z0-9_]{2,}\b/.test(text) ||
+    // Dotted identifiers (a.b.c) — service names, package paths
+    /\b[a-z][\w-]*(?:\.[\w-]+){2,}\b/.test(text) ||
+    // Kebab/snake identifiers ≥ 8 chars containing a digit OR ≥ 2 separators
+    // (filters out plain English compounds like "pre-built", "high-quality")
+    /\b[a-z][a-z0-9]*[-_][a-z0-9-_]{4,}\b(?=.*\d|.*[-_].*[-_])/.test(text) ||
+    // CamelCase identifiers (≥ 2 humps)
+    /\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]+\b/.test(text),
+  );
+};
+
+/**
+ * Returns true iff `subject` either:
+ *   - looks like a typed token itself, OR
+ *   - matches (case-insensitively) one of the entities the LLM extracted, OR
+ *   - is a substring of one of the entities (or vice versa) — handles
+ *     "the foo cronjob" vs entity "foo".
+ *
+ * Intentionally permissive — we want to catch the ungrounded cases, not
+ * second-guess every wording choice.
+ */
+export const subjectResolves = (
+  subject: string | null | undefined,
+  entities: ReadonlyArray<string>,
+): boolean => {
+  const s = (subject || "").trim();
+  if (!s) return false;
+  if (hasTypedToken(s)) return true;
+
+  const sLower = s.toLowerCase();
+  for (const entity of entities) {
+    const e = entity.toLowerCase();
+    if (!e) continue;
+    if (sLower === e) return true;
+    if (sLower.includes(e) && e.length >= 3) return true;
+    if (e.includes(sLower) && sLower.length >= 3) return true;
+  }
+  return false;
+};
+
+export interface GroundingInput {
+  content: string;
+  subject?: string | null;
+  subject_specificity?: number | null;
+  self_contained?: boolean | null;
+  entities: ReadonlyArray<string>;
+}
+
+/**
+ * Structural grounding gate. Combines:
+ *   - typed-token presence in `content`
+ *   - subject resolution against typed tokens or entities
+ *   - LLM's own subject_specificity self-grade
+ *   - LLM's own self_contained self-grade
+ *
+ * Verdict semantics (consumed by storeFacts):
+ *   - grounded   → no action, store as-is
+ *   - ambiguous  → keep, but lower confidence and flag in metadata
+ *   - ungrounded → drop entirely
+ */
+export const verifyGrounding = (input: GroundingInput): GroundingResult => {
+  const typed = hasTypedToken(input.content);
+  const subjectOk = subjectResolves(input.subject, input.entities);
+  const specificity = typeof input.subject_specificity === "number"
+    ? input.subject_specificity
+    : null;
+  const selfContained = input.self_contained;
+
+  // Hard reject conditions:
+  //   1. The fact carries no typed token AND its subject does not resolve.
+  //   2. The LLM rated subject_specificity below 0.3 AND the subject does not
+  //      resolve to entities — a typed token elsewhere in `content` is NOT
+  //      enough to rescue a vague subject (the subject is what the fact is
+  //      ABOUT, the rest of the content is supporting detail).
+  //   3. The LLM said the fact is not self-contained AND nothing rescues it.
+  if (!typed && !subjectOk) {
+    return {
+      verdict: "ungrounded",
+      reason: "no typed token and subject does not resolve to entities",
+      hasTypedToken: typed,
+      subjectResolves: subjectOk,
+    };
+  }
+  if (specificity !== null && specificity < 0.3 && !subjectOk) {
+    return {
+      verdict: "ungrounded",
+      reason: `LLM self-rated subject_specificity=${specificity}; subject does not resolve to entities`,
+      hasTypedToken: typed,
+      subjectResolves: subjectOk,
+    };
+  }
+  if (selfContained === false && !subjectOk) {
+    return {
+      verdict: "ungrounded",
+      reason: "LLM marked self_contained=false and subject does not resolve to entities",
+      hasTypedToken: typed,
+      subjectResolves: subjectOk,
+    };
+  }
+
+  // Soft downgrade: subject resolves but LLM is not confident.
+  if (specificity !== null && specificity < 0.5) {
+    return {
+      verdict: "ambiguous",
+      reason: `LLM self-rated subject_specificity=${specificity}`,
+      hasTypedToken: typed,
+      subjectResolves: subjectOk,
+    };
+  }
+  if (selfContained === false) {
+    return {
+      verdict: "ambiguous",
+      reason: "LLM marked self_contained=false but subject resolves to entities",
+      hasTypedToken: typed,
+      subjectResolves: subjectOk,
+    };
+  }
+
+  return {
+    verdict: "grounded",
+    reason: "typed token present and/or subject resolves",
+    hasTypedToken: typed,
+    subjectResolves: subjectOk,
+  };
+};
+
+export type Volatility = "stable" | "evolving" | "transient" | "ephemeral";
+
+export interface VolatilityInput {
+  volatility?: Volatility | null;
+  as_of?: string | null;
+  category?: string | null;
+}
+
+export interface VolatilityCoherenceResult {
+  /** Effective volatility after coherence checks (may be downgraded). */
+  effective: Volatility;
+  /** Effective category after coherence checks (may be forced to observations). */
+  forcedCategory: string | null;
+  /** Computed expires_at ISO timestamp, or null for stable/evolving. */
+  expiresAt: string | null;
+  /** valid_from anchor — `as_of` if supplied, else now. */
+  validFrom: string;
+  /** Half-life multiplier consumed by the recall ranker (Phase 3). */
+  halfLifeMultiplier: number;
+  /** Reasons applied during coherence checks, for metadata audit. */
+  notes: string[];
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const isoDateOnly = (d: Date): string => d.toISOString().slice(0, 10);
+
+const addDaysIso = (anchor: string, days: number): string => {
+  const base = ISO_DATE_RE.test(anchor) ? new Date(`${anchor}T00:00:00Z`) : new Date();
+  return new Date(base.getTime() + days * DAY_MS).toISOString();
+};
+
+/**
+ * Translate the LLM's self-judged volatility into structural decisions:
+ *   - transient  → expires_at = as_of + 30d, force category=observations,
+ *                  half-life × 0.25
+ *   - ephemeral  → expires_at = as_of + 7d, force category=observations,
+ *                  half-life × 0.1
+ *   - stable     → no expiry, half-life × 1.0
+ *   - evolving   → no expiry, half-life × 1.0 (default)
+ *
+ * If the LLM emitted no volatility, defaults to "evolving" (NOT "stable") —
+ * we err on the side of letting decay do its job.
+ *
+ * If volatility >= transient and `as_of` is missing, we fall back to today
+ * and note the synthesis in the audit metadata.
+ */
+export const verifyVolatilityCoherence = (input: VolatilityInput): VolatilityCoherenceResult => {
+  const notes: string[] = [];
+  const effective: Volatility = input.volatility ?? "evolving";
+  if (!input.volatility) notes.push("volatility defaulted to 'evolving' (LLM omitted)");
+
+  let asOf = input.as_of && ISO_DATE_RE.test(input.as_of) ? input.as_of : null;
+  if ((effective === "transient" || effective === "ephemeral") && !asOf) {
+    asOf = isoDateOnly(new Date());
+    notes.push(`as_of synthesised to ${asOf} (LLM omitted but volatility=${effective})`);
+  }
+  const validFrom = asOf
+    ? new Date(`${asOf}T00:00:00Z`).toISOString()
+    : new Date().toISOString();
+
+  let expiresAt: string | null = null;
+  let halfLifeMultiplier = 1.0;
+  let forcedCategory: string | null = null;
+
+  if (effective === "transient") {
+    expiresAt = addDaysIso(asOf ?? isoDateOnly(new Date()), 30);
+    halfLifeMultiplier = 0.25;
+    if (input.category && input.category !== "observations") {
+      forcedCategory = "observations";
+      notes.push(`category forced to observations (was ${input.category}) — volatility=transient`);
+    }
+  } else if (effective === "ephemeral") {
+    expiresAt = addDaysIso(asOf ?? isoDateOnly(new Date()), 7);
+    halfLifeMultiplier = 0.1;
+    if (input.category && input.category !== "observations") {
+      forcedCategory = "observations";
+      notes.push(`category forced to observations (was ${input.category}) — volatility=ephemeral`);
+    }
+  }
+
+  return {
+    effective,
+    forcedCategory,
+    expiresAt,
+    validFrom,
+    halfLifeMultiplier,
+    notes,
+  };
+};
