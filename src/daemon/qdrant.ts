@@ -516,6 +516,45 @@ const dedupCheck = async (
   }
 };
 
+/**
+ * Check whether incoming content is similar to any fact previously marked as a
+ * bad exemplar (via memory_forget). Returns the top similarity score, or null
+ * if no bad exemplars are nearby.
+ *
+ * Bad exemplars act as a data-driven "what we've already rejected" centroid.
+ * No hardcoded vocabulary — purely embedding-similarity based, and the
+ * exemplar set grows organically every time a user calls memory_forget.
+ */
+const badExemplarCheck = async (
+  content: string,
+  workspaceId?: string,
+): Promise<{ score: number; exemplarId: string; reason?: string } | null> => {
+  try {
+    const vector = await embed(content);
+    const must: Record<string, unknown>[] = [
+      { key: "is_bad_exemplar", match: { value: true } },
+    ];
+    if (workspaceId) must.push({ key: "workspace_id", match: { value: workspaceId } });
+    const result = await qdrantRequest("POST", `/collections/${collection}/points/search`, {
+      vector,
+      filter: { must },
+      limit: 1,
+      with_payload: true,
+    }) as { result?: Array<{ id: string; score: number; payload?: Partial<QdrantPayload> }> };
+    const top = result.result?.[0];
+    if (!top) return null;
+    return {
+      score: top.score,
+      exemplarId: top.id,
+      reason: (top.payload as { bad_exemplar_reason?: string } | undefined)?.bad_exemplar_reason,
+    };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    logFn("WARN", `Qdrant bad-exemplar check failed: ${msg}`);
+    return null; // fail open
+  }
+};
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
@@ -534,5 +573,6 @@ export {
   supersedeFact,
   reinforceFact,
   dedupCheck,
+  badExemplarCheck,
   collection,
 };

@@ -1042,6 +1042,13 @@ export function registerTools(mcp: McpServer): void {
           superseded_by: `forgotten:${redactedReason.text}`,
           superseded_at: now,
           updated_at: now,
+          // Mark this fact's vector as a bad-exemplar centroid: future
+          // candidates with high cosine similarity will be auto-flagged
+          // for review. Forgotten facts keep their original vector — the
+          // is_bad_exemplar payload flag opts them into the centroid set
+          // without requiring a new point.
+          is_bad_exemplar: true,
+          bad_exemplar_reason: redactedReason.text,
         });
         return { content: [{ type: "text", text: JSON.stringify({
           status: "forgotten",
