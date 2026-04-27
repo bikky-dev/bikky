@@ -1,8 +1,9 @@
 /**
  * Tests for the session watcher.
  *
- * Creates a temporary directory structure mimicking ~/.copilot/session-state/
- * and verifies discoverSessions() behavior.
+ * Uses BIKKY_HOME to point bikky at an isolated tempdir for the entire test
+ * file — this prevents saveConfig() from clobbering the user's real
+ * ~/.bikky/config.json if a test crashes mid-run (root cause of issue #58).
  */
 
 import { describe, it, before, after, beforeEach } from "node:test";
@@ -11,15 +12,18 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { resetConfig, loadConfig, saveConfig, CONFIG_DEFAULTS } from "../config.js";
-import { discoverSessions } from "./watcher.js";
+// Set BIKKY_HOME *before* importing config so all derived paths use it.
+const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-home-watcher-"));
+process.env.BIKKY_HOME = TEST_BIKKY_HOME;
+
+const { resetConfig, loadConfig, saveConfig, CONFIG_DEFAULTS } = await import("../config.js");
+const { discoverSessions } = await import("./watcher.js");
 
 // ---------------------------------------------------------------------------
 // Test directory setup
 // ---------------------------------------------------------------------------
 
 let testDir: string;
-let savedConfig: string | null = null;
 
 function createTestDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "bikky-test-sessions-"));
@@ -27,25 +31,12 @@ function createTestDir(): string {
 
 describe("discoverSessions", () => {
   before(() => {
-    // Save existing config state
-    const configPath = path.join(os.homedir(), ".bikky", "config.json");
-    if (fs.existsSync(configPath)) {
-      savedConfig = fs.readFileSync(configPath, "utf-8");
-    }
     testDir = createTestDir();
   });
 
   after(() => {
-    // Clean up test directory
     fs.rmSync(testDir, { recursive: true, force: true });
-
-    // Restore original config
-    const configPath = path.join(os.homedir(), ".bikky", "config.json");
-    if (savedConfig !== null) {
-      fs.writeFileSync(configPath, savedConfig);
-    } else if (fs.existsSync(configPath)) {
-      fs.unlinkSync(configPath);
-    }
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
     resetConfig();
   });
 

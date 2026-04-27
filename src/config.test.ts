@@ -1,16 +1,22 @@
 /**
  * Tests for the config system.
  *
- * Strategy: we backup/restore ~/.bikky/config.json around file-based tests
- * and use env var overrides + resetConfig() for env-var tests.
+ * Uses BIKKY_HOME to point at an isolated tempdir for the entire test file —
+ * this prevents saveConfig() from clobbering the user's real ~/.bikky/config.json
+ * if a test crashes mid-run (root cause of issue #58).
  */
 
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
-import {
+// Set BIKKY_HOME *before* importing config so all derived paths use it.
+const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-home-config-"));
+process.env.BIKKY_HOME = TEST_BIKKY_HOME;
+
+const {
   loadConfig,
   resetConfig,
   saveConfig,
@@ -19,10 +25,10 @@ import {
   LOG_DIR,
   STATE_DIR,
   CONFIG_DEFAULTS,
-} from "./config.js";
+} = await import("./config.js");
 
 // ---------------------------------------------------------------------------
-// Helpers: backup & restore any existing config
+// Helpers: backup & restore any existing config (now scoped to BIKKY_HOME tempdir)
 // ---------------------------------------------------------------------------
 
 let originalConfig: string | null = null;
@@ -98,6 +104,7 @@ describe("config", () => {
   after(() => {
     restoreConfig();
     restoreEnv();
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
   });
 
   beforeEach(() => {
@@ -113,8 +120,8 @@ describe("config", () => {
   // ── Path exports ──────────────────────────────────────────────────────────
 
   describe("path exports", () => {
-    it("BIKKY_DIR is under home directory", () => {
-      assert.ok(BIKKY_DIR.includes(".bikky"));
+    it("BIKKY_DIR honours BIKKY_HOME env var", () => {
+      assert.strictEqual(BIKKY_DIR, TEST_BIKKY_HOME);
     });
 
     it("CONFIG_PATH is config.json inside BIKKY_DIR", () => {
