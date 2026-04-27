@@ -46,14 +46,17 @@ describe("daemon/session-index", () => {
   });
 
   it("builds memory ontology session index payloads", () => {
-    const draft = buildSessionIndexDraft({
-      sessionId: "uuid:test-session",
-      eventCount: 12,
-      episodeResults: [
-        { action: "stored", factId: "fact-1", episodeId: "episode-1", workstreamKey: "task-a" },
-      ],
-    });
-    const { payload } = buildSessionIndexPayload({
+    const draft = {
+      ...buildSessionIndexDraft({
+        sessionId: "uuid:test-session",
+        eventCount: 12,
+        episodeResults: [
+          { action: "stored", factId: "fact-1", episodeId: "episode-1", workstreamKey: "task-a" },
+        ],
+      }),
+      content: "Session captured one episode with password=supersecretvalue.",
+    };
+    const { payload, redaction } = buildSessionIndexPayload({
       draft,
       sessionId: "uuid:test-session",
       scope: { workspaceId: "team-a", actorId: "agent-1", includeLegacy: false },
@@ -65,7 +68,10 @@ describe("daemon/session-index", () => {
     assert.equal(payload.kind, "summary");
     assert.equal(payload.memory_subtype, "session_index");
     assert.equal(payload.domain, "software_engineering");
+    assert.equal(payload.content, "Session captured one episode with password=[REDACTED:secret]");
     assert.deepEqual(payload.source_episode_ids, ["episode-1"]);
     assert.equal((payload.metadata as Record<string, string>).workstream_keys, "task-a");
+    assert.equal(redaction.redacted, true);
+    assert.deepEqual(payload.redaction, redaction);
   });
 });

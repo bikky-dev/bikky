@@ -27,9 +27,9 @@ interface QdrantCall { method: string; path: string; body: any }
 function installMock(opts: {
   qdrantHandler?: (call: QdrantCall) => unknown;
   embedding?: number[];
-} = {}): { calls: QdrantCall[]; embedCalls: number } {
+} = {}): { calls: QdrantCall[]; embedCalls: number; embedInputs: string[] } {
   const calls: QdrantCall[] = [];
-  const state = { embedCalls: 0 };
+  const state = { embedCalls: 0, embedInputs: [] as string[] };
 
   globalThis.fetch = (async (input: any, init: RequestInit = {}) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -39,6 +39,7 @@ function installMock(opts: {
     // Embedding endpoint
     if (url.includes("/v1/embeddings")) {
       state.embedCalls++;
+      state.embedInputs.push(String(body?.input ?? ""));
       return new Response(JSON.stringify({
         data: [{ embedding: opts.embedding ?? [0.1, 0.2, 0.3] }],
       }), { status: 200 });
@@ -53,9 +54,10 @@ function installMock(opts: {
     return new Response(JSON.stringify(result), { status: 200 });
   }) as typeof fetch;
 
-  return new Proxy({ calls, embedCalls: state.embedCalls } as { calls: QdrantCall[]; embedCalls: number }, {
+  return new Proxy({ calls, embedCalls: state.embedCalls, embedInputs: state.embedInputs } as { calls: QdrantCall[]; embedCalls: number; embedInputs: string[] }, {
     get(_target, prop) {
       if (prop === "embedCalls") return state.embedCalls;
+      if (prop === "embedInputs") return state.embedInputs;
       if (prop === "calls") return calls;
       return undefined;
     },
@@ -230,7 +232,7 @@ describe("ui/routes/memory", () => {
       assert.equal(res.status, 404);
     });
 
-    it("calls setPayload with normalized entities and re-embeds when content changes", async () => {
+    it("redacts content before setPayload and re-embedding when content changes", async () => {
       let getCount = 0;
       const log = installMock({
         qdrantHandler: (c) => {
@@ -247,18 +249,24 @@ describe("ui/routes/memory", () => {
       const res = await app.fetch(new Request("http://localhost/api/memory/facts/id1", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content: "updated", entities: ["FOO", "Bar"] }),
+        body: JSON.stringify({ content: "updated password=supersecretvalue", entities: ["FOO", "Bar"] }),
       }));
       assert.equal(res.status, 200);
 
       const setPayload = log.calls.find((c) => c.path.endsWith("/points/payload"));
       assert.ok(setPayload, "expected setPayload call");
       assert.deepEqual(setPayload!.body.payload.entities, ["foo", "bar"]);
-      assert.equal(setPayload!.body.payload.content, "updated");
+      assert.equal(setPayload!.body.payload.content, "updated password=[REDACTED:secret]");
+      assert.deepEqual(setPayload!.body.payload.redaction, {
+        redacted: true,
+        summary: "secret:1",
+        matches: [{ type: "secret", count: 1 }],
+      });
 
       // Re-embed + upsert because content changed
       const upsert = log.calls.find((c) => c.method === "PUT" && c.path.endsWith("/points"));
       assert.ok(upsert, "expected upsert call after re-embed");
+      assert.deepEqual(log.embedInputs, ["updated password=[REDACTED:secret]"]);
     });
   });
 
@@ -305,26 +313,43 @@ describe("ui/routes/memory", () => {
       assert.equal(res.status, 501);
     });
 
-    it("creates the fact, embeds it, lowercases entities, and returns 201", async () => {
+    it("creates the fact, redacts secrets in stored fields, lowercases entities, and returns 201", async () => {
       const log = installMock({ qdrantHandler: () => ({ result: {} }) });
       const app = buildApp();
 
       const res = await app.fetch(new Request("http://localhost/api/memory/facts", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ content: "Hello world", category: "infrastructure", entities: ["FOO", "Bar"] }),
+        body: JSON.stringify({
+          content: "Hello password=supersecretvalue",
+          category: "infrastructure",
+          entities: ["FOO", "api_key=entitysecret"],
+          from_entity: "token=fromsecret",
+          relation_type: "Owns",
+          to_entity: "Bar",
+        }),
       }));
       assert.equal(res.status, 201);
 
       const upsert = log.calls.find((c) => c.method === "PUT" && c.path.endsWith("/points"));
       assert.ok(upsert);
       const point = upsert!.body.points[0];
-      assert.deepEqual(point.payload.entities, ["foo", "bar"]);
+      assert.equal(point.payload.content, "Hello password=[REDACTED:secret]");
+      assert.deepEqual(point.payload.entities, ["foo", "api_key=[redacted:secret]"]);
+      assert.equal(point.payload.from_entity, "token=[REDACTED:secret]");
+      assert.equal(point.payload.relation_type, "Owns");
+      assert.equal(point.payload.to_entity, "Bar");
       assert.equal(point.payload.source, "ui");
       assert.equal(point.payload.kind, "fact");
       assert.equal(point.payload.domain, "work");
       assert.equal(typeof point.id, "string");
       assert.equal(typeof point.payload.content_hash, "string");
+      assert.deepEqual(point.payload.redaction, {
+        redacted: true,
+        summary: "secret:3",
+        matches: [{ type: "secret", count: 3 }],
+      });
+      assert.deepEqual(log.embedInputs, ["Hello password=[REDACTED:secret]"]);
     });
   });
 

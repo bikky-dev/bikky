@@ -8,7 +8,7 @@
  * self-hosted instances.
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { loadConfig } from "../config.js";
 import { embed, initEmbedding, getEmbeddingConfig } from "../llm/index.js";
@@ -24,6 +24,11 @@ import {
   normalizeKind,
   validateMemorySubtype,
 } from "../mcp/taxonomy.js";
+import {
+  combineRedactions,
+  redactStorageText,
+  type RedactionSummary,
+} from "../privacy/redaction.js";
 
 // ---------------------------------------------------------------------------
 // Types (local)
@@ -71,6 +76,7 @@ export interface QdrantPayload {
   expires_at?: string | null;
   quality_score?: number | null;
   confidence_reason?: string | null;
+  redaction?: RedactionSummary;
   from_entity?: string;
   relation_type?: string;
   to_entity?: string;
@@ -362,11 +368,23 @@ const storeFact = async (fact: StoreFact): Promise<string> => {
     : normalizeCategory(fact.category);
   const normalizedDomain = normalizeDomain(fact.domain ?? DEFAULT_DOMAIN);
   const normalizedLayer = fact.layer ?? (normalizedSubtype ? layerForMemorySubtype(normalizedSubtype) : null);
-  const vector = await embed(fact.content);
+  const redactedContent = redactStorageText(fact.content);
+  const redactedEntities = (fact.entities || []).map((entity) => redactStorageText(entity));
+  const redactedRelation = fact.relation ? {
+    from: redactStorageText(fact.relation.from),
+    type: redactStorageText(fact.relation.type),
+    to: redactStorageText(fact.relation.to),
+  } : null;
+  const redaction = combineRedactions([
+    redactedContent,
+    ...redactedEntities,
+    ...(redactedRelation ? [redactedRelation.from, redactedRelation.type, redactedRelation.to] : []),
+  ]);
+  const vector = await embed(redactedContent.text);
   const now = new Date().toISOString();
   const id = randomUUID();
   const payload: QdrantPayload = {
-    content: fact.content,
+    content: redactedContent.text,
     category: normalizedCategory,
     domain: normalizedDomain,
     kind: normalizedKind,
@@ -374,11 +392,13 @@ const storeFact = async (fact: StoreFact): Promise<string> => {
     ...(normalizedSubtype ? { memory_subtype: normalizedSubtype } : {}),
     ...(fact.workspace_id ? { workspace_id: fact.workspace_id } : {}),
     ...(fact.actor_id ? { actor_id: fact.actor_id } : {}),
-    entities: (fact.entities || []).map((entity) => entity.toLowerCase()),
+    entities: redactedEntities.map((entity) => entity.text.toLowerCase()),
     source: fact.source || "daemon",
     confidence: fact.confidence ?? 0.7,
     importance: fact.importance ?? 0.5,
-    content_hash: fact.content_hash,
+    content_hash: redactedContent.redacted
+      ? createHash("sha256").update(redactedContent.text).digest("hex")
+      : fact.content_hash,
     reinforcement_count: 1,
     last_reinforced_at: now,
     superseded_by: null,
@@ -407,17 +427,20 @@ const storeFact = async (fact: StoreFact): Promise<string> => {
     ...(fact.confidence_reason ? { confidence_reason: fact.confidence_reason } : {}),
   };
   // Add relation fields if present
-  if (fact.relation) {
-    payload.from_entity = fact.relation.from;
-    payload.relation_type = fact.relation.type;
-    payload.to_entity = fact.relation.to;
+  if (redactedRelation) {
+    payload.from_entity = redactedRelation.from.text;
+    payload.relation_type = redactedRelation.type.text;
+    payload.to_entity = redactedRelation.to.text;
+  }
+  if (redaction.redacted) {
+    payload.redaction = redaction;
   }
 
   await qdrantRequest("PUT", `/collections/${collection}/points`, {
     points: [{ id, vector, payload }],
   });
 
-  logFn("DEBUG", `Qdrant: stored fact ${id} [${normalizedCategory}] ${fact.content.slice(0, 60)}`);
+  logFn("DEBUG", `Qdrant: stored fact ${id} [${normalizedCategory}] ${redactedContent.text.slice(0, 60)}`);
   return id;
 };
 

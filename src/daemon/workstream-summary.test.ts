@@ -86,10 +86,10 @@ describe("daemon/workstream-summary", () => {
     ), false);
   });
 
-  it("builds one current-state payload per workstream", () => {
-    const { payload } = buildWorkstreamSummaryPayload({
+  it("redacts secrets in one current-state payload per workstream", () => {
+    const { payload, redaction } = buildWorkstreamSummaryPayload({
       draft: {
-        content: "Memory ontology implementation is in validation.",
+        content: "Memory ontology implementation is in validation with api_key=supersecretvalue.",
         current_decisions: ["Use software_engineering as the default domain"],
         next_steps: ["Run npm test"],
         blockers: [],
@@ -111,5 +111,8 @@ describe("daemon/workstream-summary", () => {
     assert.equal(payload.repo, "bikky-dev/bikky");
     assert.deepEqual(payload.source_episode_ids, ["episode-1", "episode-2"]);
     assert.equal((payload.metadata as Record<string, string>).summary_subtype, "workstream");
+    assert.equal(payload.content, "Memory ontology implementation is in validation with api_key=[REDACTED:secret]");
+    assert.equal(redaction.redacted, true);
+    assert.deepEqual(payload.redaction, redaction);
   });
 });

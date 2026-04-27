@@ -116,7 +116,7 @@ describe("daemon/session-summary", () => {
   });
 
   describe("buildSessionSummaryPayload", () => {
-    it("builds raw system summary payloads with optional workspace metadata", () => {
+    it("redacts secrets in system summary payloads with optional workspace metadata", () => {
       const { payload, redaction } = buildSessionSummaryPayload({
         draft: {
           content: "Configured service with password=supersecretvalue during daemon summary work.",
@@ -140,14 +140,16 @@ describe("daemon/session-summary", () => {
       assert.equal(payload.workspace_id, "team-a");
       assert.equal(payload.actor_id, "agent-1");
       assert.equal(payload.session_id, "uuid:test-session");
-      assert.match(String(payload.content), /password=supersecretvalue/);
+      assert.equal(payload.content, "Configured service with password=[REDACTED:secret] during daemon summary work.");
       assert.deepEqual(payload.tasks_completed, ["issue #14"]);
       assert.deepEqual(payload.decisions_made, ["Daemon owns summaries"]);
       assert.deepEqual(payload.entities, ["bikky", "daemon"]);
       assert.equal((payload.metadata as Record<string, string>).summary_source, "daemon");
       assert.equal((payload.metadata as Record<string, string>).summary_subtype, "session_index");
       assert.equal((payload.metadata as Record<string, string>).summary_event_count, "7");
-      assert.equal(redaction.redacted, false);
+      assert.equal(redaction.redacted, true);
+      assert.deepEqual(redaction.matches, [{ type: "secret", count: 1 }]);
+      assert.deepEqual(payload.redaction, redaction);
     });
 
     it("preserves existing created_at and fact counters on update", () => {
