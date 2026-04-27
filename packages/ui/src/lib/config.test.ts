@@ -6,8 +6,12 @@ import { describe, it, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
-import { loadConfig, _resetConfig, CONFIG_PATH } from "./config.js";
+const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-ui-config-"));
+process.env.BIKKY_HOME = TEST_BIKKY_HOME;
+
+const { loadConfig, _resetConfig, CONFIG_PATH, BIKKY_DIR } = await import("./config.js");
 
 const ENV_KEYS = [
   "QDRANT_URL",
@@ -16,6 +20,7 @@ const ENV_KEYS = [
   "EMBEDDING_PROVIDER",
   "EMBEDDING_MODEL",
   "EMBEDDING_BASE_URL",
+  "EMBEDDING_DIMENSIONS",
   "OPENAI_API_KEY",
 ];
 
@@ -40,12 +45,18 @@ describe("ui/lib/config", () => {
     if (savedConfig !== null) fs.writeFileSync(CONFIG_PATH, savedConfig);
     else if (!configExisted && fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
     _resetConfig();
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
   });
 
   beforeEach(() => {
     for (const k of ENV_KEYS) delete process.env[k];
     if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
     _resetConfig();
+  });
+
+  it("honors BIKKY_HOME for the config directory", () => {
+    assert.equal(BIKKY_DIR, TEST_BIKKY_HOME);
+    assert.equal(CONFIG_PATH, path.join(TEST_BIKKY_HOME, "config.json"));
   });
 
   it("returns defaults when no config file or env vars are set", () => {
@@ -93,6 +104,14 @@ describe("ui/lib/config", () => {
     assert.equal(cfg.qdrant_url, "https://from-env:6333");
     assert.equal(cfg.qdrant_api_key, "env-key");
     assert.equal(cfg.collection, "envcol");
+  });
+
+  it("reads embedding dimensions from env vars", () => {
+    process.env.EMBEDDING_DIMENSIONS = "1536";
+
+    const cfg = loadConfig();
+
+    assert.equal(cfg.embedding.dimensions, 1536);
   });
 
   it("strips trailing slashes from URLs", () => {

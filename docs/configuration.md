@@ -1,6 +1,6 @@
 # Configuration
 
-Config lives at `~/.bikky/config.json`. Resolution order: **defaults → config file → env vars** (highest wins).
+Config lives at `~/.bikky/config.json`, or `BIKKY_HOME/config.json` when `BIKKY_HOME` is set. Resolution order: **defaults → config file → env vars** (highest wins).
 
 ## Qdrant (required)
 
@@ -21,7 +21,7 @@ Both `embedding.provider` and `llm.provider` accept one of four built-in values:
 | Value | What it is | Auth needed | `base_url` used? |
 |-------|-----------|-------------|-----------------|
 | `ollama` | Local Ollama server | None | ✅ default `http://localhost:11434` |
-| `openai` | OpenAI-compatible API | `api_key` or `OPENAI_API_KEY` | ✅ default `https://api.openai.com/v1` |
+| `openai` | OpenAI-compatible API | `api_key` or `OPENAI_API_KEY` | ✅ default `https://api.openai.com` |
 | `bedrock` | AWS Bedrock | AWS credentials (env or IAM role) | ❌ uses AWS SDK |
 | `portkey` | [Portkey](https://portkey.ai) gateway (routes to OpenAI / Anthropic / Bedrock / etc.) | `api_key` (Portkey key) | ✅ default `https://api.portkey.ai` |
 
@@ -56,7 +56,7 @@ Both `embedding.provider` and `llm.provider` accept one of four built-in values:
 | `llm.model` | `LLM_MODEL` | `qwen2.5:7b` |
 | `llm.base_url` | `LLM_BASE_URL` | `http://localhost:11434` |
 | `llm.api_key` | `OPENAI_API_KEY` | — |
-| `llm.bedrock_region` | `AWS_BEDROCK_REGION` | `us-east-1` |
+| `llm.extra.region` | `AWS_BEDROCK_REGION` / `AWS_REGION` | `us-east-1` |
 
 **Models by provider:**
 
@@ -64,10 +64,12 @@ Both `embedding.provider` and `llm.provider` accept one of four built-in values:
 |----------|-------------------|
 | `ollama` | `qwen2.5:7b`, `llama3.1:8b`, or any local model |
 | `openai` | `gpt-4.1-mini`, `gpt-4.1` |
-| `bedrock` | `anthropic.claude-3-5-haiku-20241022-v1:0` |
+| `bedrock` | `us.anthropic.claude-sonnet-4-20250514`, `anthropic.claude-3-5-haiku-20241022-v1:0` |
 | `portkey` | `@openai/gpt-4o-mini`, `@anthropic/claude-3-5-haiku-latest`, or any model exposed by your Portkey workspace |
 
-> `llm.bedrock_region` falls back to `AWS_REGION` if `AWS_BEDROCK_REGION` is not set.
+> Bedrock reads `embedding.extra.region` and `llm.extra.region`. `AWS_BEDROCK_REGION`
+> populates both, falling back to `AWS_REGION`; `aws_profile` or `AWS_PROFILE`
+> selects the shared AWS profile when you are not using direct env credentials.
 
 **Portkey extras** (optional, set via `extra.*` or `BIKKY_LLM_EXTRA_<KEY>` / `BIKKY_EMBEDDING_EXTRA_<KEY>` env vars):
 
@@ -124,7 +126,40 @@ payload that now includes a human-readable `setup_error` field:
 }
 ```
 
-`get_setup_status` exposes the same info for diagnostics.
+`get_setup_status` exposes the same info for MCP diagnostics. From the terminal,
+run `bikky status`.
+
+### `bikky status`
+
+`bikky status` is read-only. It does not create collections, add indexes, repair
+config, or send an LLM chat request. It reports:
+
+| Check | What it does |
+|-------|--------------|
+| Config | Parses `~/.bikky/config.json` (or `BIKKY_HOME/config.json`), validates common schema/type mistakes, and lists active env overrides |
+| Qdrant | Checks reachability, collection existence, vector size, and payload-index readiness against Bikky's canonical index list |
+| Embedding | Validates the provider config and runs a small live embedding request by default |
+| LLM | Validates provider and fallback provider names without a live inference call |
+| Daemon/UI | Reports daemon PID state and probes the local UI `/health` endpoint |
+
+Useful options:
+
+```bash
+bikky status --json     # machine-readable report
+bikky status --no-live  # skip the live embedding request
+bikky status --no-ui    # skip the local UI health probe
+```
+
+`bikky status` exits non-zero when required setup is broken, such as invalid
+JSON, unknown provider names, missing Qdrant configuration, unreachable Qdrant,
+or embedding connectivity/dimension failures. Missing Qdrant payload indexes are
+reported as warnings because they affect query performance/readiness but can be
+repaired separately by normal startup readiness logic.
+
+After changing provider, Qdrant, or AWS settings, restart the long-running
+processes that already loaded the old config: run `bikky stop && bikky start`
+for the daemon, and restart your editor so its MCP server process re-reads the
+file and env vars.
 
 ## Copy-paste examples
 
@@ -187,8 +222,8 @@ payload that now includes a human-readable `setup_error` field:
   },
   "llm": {
     "provider": "bedrock",
-    "model": "anthropic.claude-3-5-haiku-20241022-v1:0",
-    "bedrock_region": "us-east-1"
+    "model": "us.anthropic.claude-sonnet-4-20250514",
+    "extra": { "region": "us-east-1" }
   }
 }
 ```

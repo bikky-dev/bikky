@@ -8,6 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -96,6 +97,21 @@ export interface BikkyConfig {
   qdrant_client: QdrantClientConfig;
 }
 
+export type ConfigIssueSeverity = "error" | "warning";
+
+export interface ConfigIssue {
+  severity: ConfigIssueSeverity;
+  path: string;
+  message: string;
+}
+
+export interface ConfigFileDiagnostics {
+  path: string;
+  exists: boolean;
+  parse_error: string | null;
+  issues: ConfigIssue[];
+}
+
 // ---------------------------------------------------------------------------
 // Defaults
 // ---------------------------------------------------------------------------
@@ -147,6 +163,105 @@ const DEFAULTS: BikkyConfig = {
   },
 };
 
+export const CONFIG_ENV_KEYS = [
+  "QDRANT_URL",
+  "QDRANT_API_KEY",
+  "BIKKY_COLLECTION",
+  "EMBEDDING_PROVIDER",
+  "EMBEDDING_MODEL",
+  "EMBEDDING_BASE_URL",
+  "EMBEDDING_DIMENSIONS",
+  "OPENAI_API_KEY",
+  "LLM_PROVIDER",
+  "LLM_MODEL",
+  "LLM_BASE_URL",
+  "LLM_FALLBACK_PROVIDER",
+  "AWS_PROFILE",
+  "AWS_BEDROCK_REGION",
+  "AWS_REGION",
+  "QDRANT_TIMEOUT_MS",
+  "QDRANT_RETRIES",
+  "QDRANT_RETRY_BASE_DELAY_MS",
+  "BIKKY_EMBEDDING_TIMEOUT_MS",
+  "BIKKY_EMBEDDING_RETRIES",
+  "BIKKY_EMBEDDING_RETRY_BASE_DELAY_MS",
+  "BIKKY_LLM_TIMEOUT_MS",
+  "BIKKY_LLM_RETRIES",
+  "BIKKY_LLM_RETRY_BASE_DELAY_MS",
+] as const;
+
+const CONFIG_ENV_PREFIXES = [
+  "BIKKY_EMBEDDING_EXTRA_",
+  "BIKKY_LLM_EXTRA_",
+] as const;
+
+const nonNegativeInt = z.number().int().nonnegative();
+const positiveInt = z.number().int().positive();
+const stringRecord = z.record(z.string());
+
+const embeddingConfigFileSchema = z.object({
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  dimensions: positiveInt.optional(),
+  base_url: z.string().optional(),
+  api_key: z.string().nullable().optional(),
+  extra: stringRecord.optional(),
+  timeout_ms: nonNegativeInt.optional(),
+  retries: nonNegativeInt.optional(),
+  retry_base_delay_ms: nonNegativeInt.optional(),
+}).passthrough();
+
+const llmConfigFileSchema = z.object({
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  base_url: z.string().optional(),
+  api_key: z.string().nullable().optional(),
+  fallback_provider: z.string().nullable().optional(),
+  extra: stringRecord.optional(),
+  timeout_ms: nonNegativeInt.optional(),
+  retries: nonNegativeInt.optional(),
+  retry_base_delay_ms: nonNegativeInt.optional(),
+}).passthrough();
+
+const daemonConfigFileSchema = z.object({
+  tick_interval_sec: nonNegativeInt.optional(),
+  extract_every_sec: nonNegativeInt.optional(),
+  extract_min_events: nonNegativeInt.optional(),
+  extraction_prompt: z.string().nullable().optional(),
+  consolidation_enabled: z.boolean().optional(),
+  relation_inference_enabled: z.boolean().optional(),
+  staleness_threshold_days: nonNegativeInt.optional(),
+}).passthrough();
+
+const watcherConfigFileSchema = z.object({
+  copilot: z.object({
+    enabled: z.boolean().optional(),
+    path: z.string().optional(),
+  }).passthrough().optional(),
+  claude: z.object({
+    enabled: z.boolean().optional(),
+    path: z.string().optional(),
+  }).passthrough().optional(),
+}).passthrough();
+
+const qdrantClientConfigFileSchema = z.object({
+  timeout_ms: nonNegativeInt.optional(),
+  retries: nonNegativeInt.optional(),
+  retry_base_delay_ms: nonNegativeInt.optional(),
+}).passthrough();
+
+const configFileSchema = z.object({
+  qdrant_url: z.string().nullable().optional(),
+  qdrant_api_key: z.string().nullable().optional(),
+  collection: z.string().optional(),
+  aws_profile: z.string().nullable().optional(),
+  embedding: embeddingConfigFileSchema.optional(),
+  llm: llmConfigFileSchema.optional(),
+  daemon: daemonConfigFileSchema.optional(),
+  watchers: watcherConfigFileSchema.optional(),
+  qdrant_client: qdrantClientConfigFileSchema.optional(),
+}).passthrough();
+
 // ---------------------------------------------------------------------------
 // Deep merge utility
 // ---------------------------------------------------------------------------
@@ -163,6 +278,121 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Record<
     }
   }
   return result;
+}
+
+function issuePath(pathParts: Array<string | number>): string {
+  return pathParts.length === 0 ? "$" : pathParts.map(String).join(".");
+}
+
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function childObject(raw: Record<string, unknown>, key: string): Record<string, unknown> | null {
+  const value = raw[key];
+  return isObject(value) ? value : null;
+}
+
+function validateUrlLike(value: unknown, pathName: string, issues: ConfigIssue[]): void {
+  if (typeof value !== "string" || value.trim() === "") return;
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      issues.push({
+        severity: "error",
+        path: pathName,
+        message: "must use http:// or https://",
+      });
+    }
+  } catch {
+    issues.push({
+      severity: "error",
+      path: pathName,
+      message: "must be a valid URL",
+    });
+  }
+}
+
+export function validateConfigObject(raw: unknown): ConfigIssue[] {
+  const parsed = configFileSchema.safeParse(raw);
+  const issues: ConfigIssue[] = [];
+
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      issues.push({
+        severity: "error",
+        path: issuePath(issue.path),
+        message: issue.message,
+      });
+    }
+    if (!isObject(raw)) return issues;
+  }
+
+  if (!isObject(raw)) {
+    issues.push({
+      severity: "error",
+      path: "$",
+      message: "config file must contain a JSON object",
+    });
+    return issues;
+  }
+
+  if (typeof raw.collection === "string" && raw.collection.trim() === "") {
+    issues.push({
+      severity: "error",
+      path: "collection",
+      message: "must not be empty",
+    });
+  }
+
+  validateUrlLike(raw.qdrant_url, "qdrant_url", issues);
+
+  const embedding = childObject(raw, "embedding");
+  if (embedding) validateUrlLike(embedding.base_url, "embedding.base_url", issues);
+
+  const llm = childObject(raw, "llm");
+  if (llm) validateUrlLike(llm.base_url, "llm.base_url", issues);
+
+  return issues;
+}
+
+export function inspectConfigFile(configPath = CONFIG_PATH): ConfigFileDiagnostics {
+  if (!fs.existsSync(configPath)) {
+    return { path: configPath, exists: false, parse_error: null, issues: [] };
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(configPath, "utf-8")) as unknown;
+    return {
+      path: configPath,
+      exists: true,
+      parse_error: null,
+      issues: validateConfigObject(raw),
+    };
+  } catch (e) {
+    return {
+      path: configPath,
+      exists: true,
+      parse_error: e instanceof Error ? e.message : String(e),
+      issues: [{
+        severity: "error",
+        path: "$",
+        message: e instanceof Error ? e.message : String(e),
+      }],
+    };
+  }
+}
+
+export function getActiveConfigEnvOverrides(env: NodeJS.ProcessEnv = process.env): string[] {
+  const active = new Set<string>();
+  for (const key of CONFIG_ENV_KEYS) {
+    if (env[key]) active.add(key);
+  }
+  for (const [key, value] of Object.entries(env)) {
+    if (!value) continue;
+    if (CONFIG_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) active.add(key);
+  }
+  return [...active].sort();
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +431,10 @@ export function loadConfig(): BikkyConfig {
   if (process.env.EMBEDDING_PROVIDER) config.embedding.provider = process.env.EMBEDDING_PROVIDER;
   if (process.env.EMBEDDING_MODEL) config.embedding.model = process.env.EMBEDDING_MODEL;
   if (process.env.EMBEDDING_BASE_URL) config.embedding.base_url = process.env.EMBEDDING_BASE_URL;
-  if (process.env.EMBEDDING_DIMENSIONS) config.embedding.dimensions = parseInt(process.env.EMBEDDING_DIMENSIONS, 10);
+  if (process.env.EMBEDDING_DIMENSIONS) {
+    const n = parseInt(process.env.EMBEDDING_DIMENSIONS, 10);
+    if (Number.isFinite(n) && n > 0) config.embedding.dimensions = n;
+  }
   if (process.env.OPENAI_API_KEY) config.embedding.api_key = process.env.OPENAI_API_KEY;
   // Generic provider-extras: BIKKY_EMBEDDING_EXTRA_<KEY>=value
   config.embedding.extra = config.embedding.extra ?? {};

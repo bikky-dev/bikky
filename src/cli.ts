@@ -16,8 +16,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { startMcpServer } from "./mcp/index.js";
-import { getDaemonStatus, startAll, killDaemon } from "./lifecycle.js";
+import { startAll, killDaemon } from "./lifecycle.js";
 import { runRenderCli } from "./render.js";
+import { collectStatus, formatStatusReport, statusExitCode } from "./status.js";
 
 const command = process.argv[2] ?? "mcp";
 
@@ -79,11 +80,30 @@ async function main(): Promise<void> {
       break;
 
     case "status": {
-      const status = getDaemonStatus();
-      printVersion();
-      console.log(`Daemon: ${status.running ? `🟢 running (PID ${status.pid})` : "🔴 stopped"}`);
-      console.log("MCP:    managed by your editor (stdio)");
-      console.log("\nRun `bikky start` to launch everything.");
+      const args = process.argv.slice(3);
+      const allowed = new Set(["--json", "--no-live", "--no-ui"]);
+      const unknown = args.filter((arg) => !allowed.has(arg));
+      if (unknown.length > 0) {
+        console.error(`Unknown status option: ${unknown.join(", ")}`);
+        console.error("Usage: bikky status [--json] [--no-live] [--no-ui]");
+        process.exit(1);
+      }
+
+      const report = await collectStatus({
+        live: !args.includes("--no-live"),
+        checkUi: !args.includes("--no-ui"),
+      });
+      if (args.includes("--json")) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        printVersion();
+        console.log("");
+        console.log(formatStatusReport(report));
+        if (!report.ok) {
+          console.log("\nRun `bikky start` after fixing setup issues.");
+        }
+      }
+      process.exitCode = statusExitCode(report);
       break;
     }
 
