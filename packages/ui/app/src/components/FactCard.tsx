@@ -1,4 +1,5 @@
 import Badge from "./Badge";
+import { EntityChip } from "./EntityChip";
 import { relativeTime, truncate, CATEGORY_COLORS, KIND_COLORS } from "../lib/format";
 
 export interface Fact {
@@ -16,6 +17,12 @@ export interface Fact {
   relation_type?: string;
   to_entity?: string;
   score?: number | null;
+  session_id?: string;
+  workstream_key?: string;
+  task_key?: string;
+  episode_id?: string;
+  repo?: string;
+  branch?: string;
 }
 
 interface FactCardProps {
@@ -43,12 +50,7 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
           <Badge label={fact.domain} color="green" />
         )}
         {fact.entities.map((e) => (
-          <span
-            key={e}
-            className="inline-flex items-center px-2 py-0.5 rounded text-xs text-zinc-400 bg-zinc-800"
-          >
-            {e}
-          </span>
+          <EntityChip key={e} name={e} link={false} />
         ))}
       </div>
 
@@ -56,7 +58,22 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
         <span>{relativeTime(fact.created_at)}</span>
         <span>{Math.round(fact.confidence * 100)}% conf</span>
         {fact.score != null && <span>score {fact.score.toFixed(3)}</span>}
+        {fact.workstream_key && <ProvChip label="ws" value={fact.workstream_key} />}
+        {fact.task_key && <ProvChip label="task" value={fact.task_key} />}
+        {fact.repo && <ProvChip label="repo" value={fact.repo} />}
+        {fact.branch && <ProvChip label="branch" value={fact.branch} />}
+        {fact.session_id && <ProvChip label="session" value={fact.session_id.slice(0, 8)} />}
+        {fact.episode_id && <ProvChip label="episode" value={fact.episode_id.slice(0, 8)} />}
       </div>
     </button>
+  );
+}
+
+function ProvChip({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800/60 text-zinc-400">
+      <span className="text-[10px] uppercase tracking-wide opacity-70">{label}</span>
+      <span className="font-mono text-[11px]">{value}</span>
+    </span>
   );
 }
