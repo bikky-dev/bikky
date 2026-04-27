@@ -41,6 +41,9 @@ const MAX_INFER_PER_CYCLE = 3;
 // Minimum shared facts before we consider inferring a relation
 const MIN_SHARED_FACTS = 2;
 
+// Minimum LLM confidence to store a relation (quality gate)
+const MIN_CONFIDENCE = 0.6;
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Canonical pair key — alphabetical so (a,b) === (b,a) */
@@ -217,7 +220,7 @@ const inferRelation = async (
   entityA: string,
   entityB: string,
   sharedFacts: Array<{ content: string; category: string }>,
-): Promise<{ from: string; type: string; to: string; content: string; evidence?: string; confidence?: number; inVocabulary?: boolean } | null> => {
+): Promise<{ from: string; type: string; to: string; content: string; evidence?: string; confidence?: number; inVocabulary?: boolean; judgment?: { evidence_strength?: number; durability?: string; directionality_clarity?: string } } | null> => {
   const rendered = relationsPrompt({ entityA, entityB, sharedFacts });
   const raw = await chatCompletion(rendered);
 
@@ -231,9 +234,37 @@ const inferRelation = async (
     evidence?: string;
     confidence?: number;
     reason?: string;
+    judgment?: {
+      evidence_strength?: number;
+      durability?: string;
+      directionality_clarity?: string;
+    };
   }>(raw);
 
   if (!parsed || !parsed.type) return null;
+
+  // ── Self-judgment quality gates ──────────────────────────────────────────
+  if (parsed.judgment) {
+    const j = parsed.judgment;
+
+    // Gate 1: durability — reject transient/ephemeral relations
+    if (j.durability === "transient" || j.durability === "ephemeral") {
+      logFn("DEBUG", `Relations: rejected ${entityA}↔${entityB} — durability="${j.durability}"`);
+      return null;
+    }
+
+    // Gate 2: directionality — reject ambiguous direction
+    if (j.directionality_clarity === "ambiguous") {
+      logFn("DEBUG", `Relations: rejected ${entityA}↔${entityB} — ambiguous directionality`);
+      return null;
+    }
+
+    // Gate 3: evidence strength — reject weak evidence (< 0.5)
+    if (typeof j.evidence_strength === "number" && j.evidence_strength < 0.5) {
+      logFn("DEBUG", `Relations: rejected ${entityA}↔${entityB} — evidence_strength=${j.evidence_strength}`);
+      return null;
+    }
+  }
 
   // Validate that from/to are the provided entities (not hallucinated)
   const entities = new Set([entityA.toLowerCase(), entityB.toLowerCase()]);
@@ -262,11 +293,23 @@ const inferRelation = async (
   const resolvedFrom = from === entityA.toLowerCase() ? entityA : entityB;
   const resolvedTo = to === entityA.toLowerCase() ? entityA : entityB;
 
-  // Map LLM type to canonical vocabulary; out-of-vocab types pass through
-  // (and storeRelation flags them in metadata for human review).
+  // Map LLM type to canonical vocabulary
   const mapped = mapToCanonical(parsed.type);
   if (mapped.changed) {
     logFn("DEBUG", `Relations: mapped type "${parsed.type}" → "${mapped.canonical}"`);
+  }
+
+  // Gate 4: reject out-of-vocab relation types — they are almost always noise
+  if (!mapped.inVocabulary) {
+    logFn("DEBUG", `Relations: rejected ${entityA}↔${entityB} — out-of-vocab type "${parsed.type}"`);
+    return null;
+  }
+
+  // Gate 5: confidence floor — skip low-confidence relations
+  const confidence = typeof parsed.confidence === "number" ? parsed.confidence : 0.5;
+  if (confidence < MIN_CONFIDENCE) {
+    logFn("DEBUG", `Relations: rejected ${entityA}↔${entityB} — confidence ${confidence} < ${MIN_CONFIDENCE}`);
+    return null;
   }
 
   return {
@@ -275,8 +318,9 @@ const inferRelation = async (
     to: resolvedTo,
     content: parsed.content || `${resolvedFrom} ${mapped.canonical} ${resolvedTo}`,
     evidence: parsed.evidence,
-    confidence: typeof parsed.confidence === "number" ? parsed.confidence : undefined,
+    confidence,
     inVocabulary: mapped.inVocabulary,
+    judgment: parsed.judgment,
   };
 };
 
@@ -289,7 +333,7 @@ const storeRelation = async (
   relationType: string,
   content: string,
   sharedFactIds: string[],
-  extras: { evidence?: string; confidence?: number; inVocabulary?: boolean } = {},
+  extras: { evidence?: string; confidence?: number; inVocabulary?: boolean; judgment?: { evidence_strength?: number; durability?: string; directionality_clarity?: string } } = {},
 ): Promise<string> => {
   const hash = createHash("sha256")
     .update(`daemon-relation:${pairKey(fromEntity, toEntity)}:${relationType}`)
@@ -303,8 +347,11 @@ const storeRelation = async (
   if (extras.evidence) {
     metadata.evidence_quote = extras.evidence.slice(0, 500);
   }
-  if (extras.inVocabulary === false) {
-    metadata.relation_type_out_of_vocab = "true";
+  if (extras.judgment) {
+    const j = extras.judgment;
+    if (j.evidence_strength != null) metadata.evidence_strength = String(j.evidence_strength);
+    if (j.durability) metadata.durability = j.durability;
+    if (j.directionality_clarity) metadata.directionality_clarity = j.directionality_clarity;
   }
 
   const id = await qdrant.storeFact({
@@ -383,7 +430,7 @@ const tick = async (config: BikkyConfig): Promise<void> => {
           result.type,
           result.content,
           candidate.factIds,
-          { evidence: result.evidence, confidence: result.confidence, inVocabulary: result.inVocabulary },
+          { evidence: result.evidence, confidence: result.confidence, inVocabulary: result.inVocabulary, judgment: result.judgment },
         );
         inferred++;
       } catch (e: unknown) {
