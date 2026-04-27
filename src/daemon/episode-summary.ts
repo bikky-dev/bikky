@@ -20,6 +20,11 @@ import {
 import * as qdrant from "./qdrant.js";
 import type { QdrantPayload } from "./qdrant.js";
 import {
+  combineRedactions,
+  redactStorageText,
+  type RedactionSummary,
+} from "../privacy/redaction.js";
+import {
   resolveWorkstreamKey,
   type ResolvedWorkstream,
   type WorkstreamRegistry,
@@ -32,19 +37,6 @@ export interface WorkspaceScope {
   actorId?: string;
   includeLegacy?: boolean;
 }
-
-export interface RedactionSummary {
-  redacted: boolean;
-  summary: string;
-  matches: Array<{ type: string; count: number }>;
-}
-
-const noRedaction = (): RedactionSummary => ({ redacted: false, summary: "none", matches: [] });
-const passthroughText = (text: string, _options?: { enabled: boolean; redactPii: boolean }): { text: string; redacted: boolean; summary: string; matches: Array<{ type: string; count: number }> } => ({
-  text,
-  ...noRedaction(),
-});
-const combinePassThrough = (): RedactionSummary => noRedaction();
 
 export interface EpisodeSegment {
   episode_id: string;
@@ -198,12 +190,18 @@ export const buildEpisodeSummaryPayload = (input: {
   existing?: { id: string; payload?: Partial<QdrantPayload> } | null;
   redactionOptions: { enabled: boolean; redactPii: boolean };
 }): EpisodeSummaryPayloadResult => {
-  const redactedContent = passthroughText(input.draft.content, input.redactionOptions);
-  const redactedTasks = input.draft.tasks_completed.map((task) => passthroughText(task, input.redactionOptions));
-  const redactedDecisions = input.draft.decisions_made.map((decision) => passthroughText(decision, input.redactionOptions));
-  const redactedOpenQuestions = input.draft.open_questions.map((question) => passthroughText(question, input.redactionOptions));
-  const redactedEntities = input.draft.entities.map((entity) => passthroughText(entity, input.redactionOptions));
-  const redaction = combinePassThrough();
+  const redactedContent = redactStorageText(input.draft.content, input.redactionOptions);
+  const redactedTasks = input.draft.tasks_completed.map((task) => redactStorageText(task, input.redactionOptions));
+  const redactedDecisions = input.draft.decisions_made.map((decision) => redactStorageText(decision, input.redactionOptions));
+  const redactedOpenQuestions = input.draft.open_questions.map((question) => redactStorageText(question, input.redactionOptions));
+  const redactedEntities = input.draft.entities.map((entity) => redactStorageText(entity, input.redactionOptions));
+  const redaction = combineRedactions([
+    redactedContent,
+    ...redactedTasks,
+    ...redactedDecisions,
+    ...redactedOpenQuestions,
+    ...redactedEntities,
+  ]);
   const existingPayload = input.existing?.payload ?? {};
   const workstreamKey = input.draft.workstream_key ?? input.segment.workstream_key ?? null;
 
@@ -251,6 +249,8 @@ export const buildEpisodeSummaryPayload = (input: {
 
   if (redaction.redacted) {
     payload["redaction"] = redaction;
+  } else {
+    delete payload["redaction"];
   }
 
   return { payload, redaction };
@@ -311,7 +311,7 @@ export const updateEpisodeSummary = async (input: {
     now,
     existing,
     redactionOptions: {
-      enabled: false,
+      enabled: true,
       redactPii: false,
     },
   });

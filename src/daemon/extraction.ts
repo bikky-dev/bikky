@@ -38,6 +38,7 @@ import {
   subtypeForCategory,
 } from "./capture-policy.js";
 import { shouldSummarizeEvents, updateSessionSummary } from "./session-summary.js";
+import { redactStorageText } from "../privacy/redaction.js";
 import { compareSubtype, hasTypedToken, verifyGrounding, verifyVolatilityCoherence } from "./extraction-rules.js";
 
 // ── Module state ─────────────────────────────────────────────────────────────
@@ -604,11 +605,13 @@ const storeFacts = async (
   let stored = 0;
 
   for (const fact of facts) {
-    const hash = contentHash(fact.content);
+    const redactedContent = redactStorageText(fact.content);
     const sanitizedFact: ExtractedFact = {
       ...fact,
+      content: redactedContent.text,
       entities: fact.entities.map((entity) => entity.toLowerCase()),
     };
+    const hash = contentHash(sanitizedFact.content);
 
     try {
       const dedup = await qdrant.dedupCheck(sanitizedFact.content, hash);

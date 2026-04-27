@@ -235,9 +235,9 @@ describe("mcp/tools handlers", () => {
     it("inserts a new point when no duplicates are found", async () => {
       on("/points/scroll", () => ({ result: { points: [] } }));
       on("/points/search", () => ({ result: [] }));
-      let upsertBody: Record<string, unknown> | null = null;
+      const upsertBodies: Record<string, unknown>[] = [];
       on(/\/points$/, (call) => {
-        if (call.method === "PUT") upsertBody = call.body;
+        if (call.method === "PUT" && call.body) upsertBodies.push(call.body);
         return { status: "ok" };
       });
 
@@ -251,14 +251,48 @@ describe("mcp/tools handlers", () => {
       const parsed = JSON.parse(textOf(result));
       assert.equal(parsed.action, "inserted");
       assert.ok(parsed.fact_id, "should return a generated fact_id");
-      assert.ok(upsertBody, "expected an upsert PUT to /points");
-      const pt = (upsertBody as { points: Array<{ payload: Record<string, unknown> }> }).points[0];
+      assert.equal(upsertBodies.length, 1, "expected an upsert PUT to /points");
+      const upsertBody = upsertBodies[0]!;
+      const points = upsertBody.points;
+      assert.ok(Array.isArray(points), "expected points array");
+      const pt = points[0] as { payload: Record<string, unknown> };
       assert.equal(pt.payload.content, "platform is on AWS");
       assert.deepEqual(pt.payload.entities, ["platform"]); // lowercased
       assert.equal(pt.payload.reinforcement_count, 1);
       assert.equal(pt.payload.importance, 0.7);
       assert.ok(pt.payload.content_hash, "content_hash should be set");
       assert.equal(pt.payload.superseded_by, null);
+    });
+
+    it("redacts secret values before embedding and storage", async () => {
+      on("/points/scroll", () => ({ result: { points: [] } }));
+      on("/points/search", () => ({ result: [] }));
+      const upsertBodies: Record<string, unknown>[] = [];
+      on(/\/points$/, (call) => {
+        if (call.method === "PUT" && call.body) upsertBodies.push(call.body);
+        return { status: "ok" };
+      });
+
+      const result = await invoke("memory_store", {
+        content: "platform deploy uses password=supersecretvalue",
+        category: "infrastructure",
+        entities: ["platform"],
+      });
+
+      const parsed = JSON.parse(textOf(result));
+      assert.equal(parsed.action, "inserted");
+      const embedCall = callsTo("/v1/embeddings")[0];
+      assert.equal(embedCall?.body?.input, "platform deploy uses password=[REDACTED:secret]");
+      assert.equal(upsertBodies.length, 1, "expected an upsert PUT to /points");
+      const points = upsertBodies[0]!.points;
+      assert.ok(Array.isArray(points), "expected points array");
+      const pt = points[0] as { payload: Record<string, unknown> };
+      assert.equal(pt.payload.content, "platform deploy uses password=[REDACTED:secret]");
+      assert.deepEqual(pt.payload.redaction, {
+        redacted: true,
+        summary: "secret:1",
+        matches: [{ type: "secret", count: 1 }],
+      });
     });
 
     it("flags potential conflicts when similarity is in the related band with shared entities", async () => {
@@ -351,6 +385,41 @@ describe("mcp/tools handlers", () => {
       assert.equal(relPt.payload.to_entity, "platform");
       assert.equal(relPt.payload.relation_type, "owns");
       assert.deepEqual(relPt.payload.entities, ["saber", "platform"]);
+    });
+
+    it("scopes relation redaction metadata to the relation payload", async () => {
+      on("/points/scroll", () => ({ result: { points: [] } }));
+      on("/points/search", () => ({ result: [] }));
+      const upserts: Array<Record<string, unknown>> = [];
+      on(/\/points$/, (call) => {
+        if (call.method === "PUT") upserts.push(call.body as Record<string, unknown>);
+        return { status: "ok" };
+      });
+
+      const result = await invoke("memory_store", {
+        content: "saber owns platform",
+        category: "team",
+        entities: ["saber", "platform"],
+        relation: { from: "api_key=relationsecret", type: "Owns", to: "Platform" },
+      });
+
+      const parsed = JSON.parse(textOf(result));
+      assert.equal(parsed.action, "inserted");
+      assert.deepEqual(parsed.redaction, {
+        redacted: true,
+        summary: "secret:1",
+        matches: [{ type: "secret", count: 1 }],
+      });
+      assert.equal(upserts.length, 2);
+      const factPt = (upserts[0] as { points: Array<{ payload: Record<string, unknown> }> }).points[0];
+      const relPt = (upserts[1] as { points: Array<{ payload: Record<string, unknown> }> }).points[0];
+      assert.equal(factPt.payload.redaction, undefined);
+      assert.equal(relPt.payload.content, "api_key=[REDACTED:secret] Owns Platform");
+      assert.deepEqual(relPt.payload.redaction, {
+        redacted: true,
+        summary: "secret:1",
+        matches: [{ type: "secret", count: 1 }],
+      });
     });
   });
 
