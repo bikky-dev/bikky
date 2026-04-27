@@ -37,16 +37,33 @@ export function lastActivityDate(payload: FactPayload): string | undefined {
 // ---------------------------------------------------------------------------
 
 /**
+ * Multiplier on the per-category half-life when a fact carries a volatility
+ * label. Transient/ephemeral facts decay much faster than the category default.
+ * Stable/evolving (and undefined) leave the half-life unchanged.
+ */
+const VOLATILITY_HALF_LIFE_MULTIPLIER: Record<string, number> = {
+  stable: 1.0,
+  evolving: 1.0,
+  transient: 0.25,
+  ephemeral: 0.1,
+};
+
+/**
  * Compute effective confidence using exponential decay.
  * Categories with null half-life (session_summary, distilled) don't decay.
  */
 export function computeEffectiveConfidence(payload: FactPayload): number {
-  const halfLife = getDecayHalfLife({
+  const baseHalfLife = getDecayHalfLife({
     category: payload.category,
     domain: payload.domain,
     kind: payload.kind,
   });
-  if (halfLife === null || halfLife === undefined) return payload.confidence;
+  if (baseHalfLife === null || baseHalfLife === undefined) return payload.confidence;
+  const volatilityMultiplier =
+    payload.volatility && VOLATILITY_HALF_LIFE_MULTIPLIER[payload.volatility] !== undefined
+      ? VOLATILITY_HALF_LIFE_MULTIPLIER[payload.volatility]
+      : 1.0;
+  const halfLife = baseHalfLife * volatilityMultiplier;
   const days = daysSince(lastActivityDate(payload));
   const decayFactor = Math.pow(0.5, days / halfLife);
   return Math.round(payload.confidence * decayFactor * 100) / 100;
