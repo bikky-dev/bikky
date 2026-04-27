@@ -167,7 +167,7 @@ describe("mcp/tools — Qdrant integration", { skip: !enabled }, () => {
         match,
         `expected paraphrase to reinforce or appear in similar_facts; got ${JSON.stringify(r)}`,
       );
-      // eslint-disable-next-line no-console
+
       console.warn(`[integration] paraphrase landed in related band (score=${match!.score}) — consider tuning THRESHOLD_DUPLICATE for this embedding model`);
     }
   });

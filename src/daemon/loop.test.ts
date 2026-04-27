@@ -17,7 +17,7 @@ const configPath = path.join(os.homedir(), ".bikky", "config.json");
 const qdrantEnvKeys = ["QDRANT_URL", "QDRANT_API_KEY"] as const;
 
 let savedConfig: string | null = null;
-let savedQdrantEnv: Record<string, string | undefined> = {};
+const savedQdrantEnv: Record<string, string | undefined> = {};
 let savedFetch: typeof fetch;
 let calls: FetchCall[] = [];
 

@@ -5,6 +5,7 @@ import path from "node:path";
 import { loadConfig, LOG_DIR } from "../config.js";
 import { createLogger } from "../logger.js";
 import { initLLM } from "../llm/index.js";
+import type { LogFn as InferenceLogFn } from "../llm/index.js";
 import type { LogFn } from "./qdrant.js";
 
 // Import daemon modules
@@ -55,7 +56,7 @@ export async function startDaemon(): Promise<void> {
       retries: cfg.llm.retries,
       retryBaseDelayMs: cfg.llm.retry_base_delay_ms,
     },
-    logger: log as unknown as import("../llm/index.js").LogFn,
+    logger: log as unknown as InferenceLogFn,
   });
 
   // Initialize Qdrant client

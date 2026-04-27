@@ -31,7 +31,7 @@ const realFetch = globalThis.fetch;
 
 // Env vars that override config — must be cleared for null-credential tests
 const QDRANT_ENV_KEYS = ["QDRANT_URL", "QDRANT_API_KEY"];
-let savedQdrantEnv: Record<string, string | undefined> = {};
+const savedQdrantEnv: Record<string, string | undefined> = {};
 
 describe("daemon/qdrant", () => {
   before(() => {
@@ -163,7 +163,7 @@ describe("daemon/qdrant", () => {
   describe("setLogger", () => {
     it("does not throw when called with a function", () => {
       assert.doesNotThrow(() => {
-        setLogger((level: string, ...args: unknown[]) => {
+        setLogger((_level: string, ..._args: unknown[]) => {
           // noop logger
         });
       });

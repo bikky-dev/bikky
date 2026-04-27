@@ -26,7 +26,7 @@ import type {
   LogFn,
   ResolvedInferenceConfig,
 } from "./types.js";
-import { LlmHttpError } from "../errors.js";
+import type { LlmHttpError } from "../errors.js";
 import { estimateTokens, writeTelemetry } from "../telemetry.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
