@@ -208,6 +208,36 @@ memoryRoutes.post("/facts", async (c) => {
   return c.json({ ok: true, id }, 201);
 });
 
+// GET /api/memory/entity-types?names=a,b,c
+// Returns a name → type map for the requested entities. Lightweight lookup
+// used by the UI to render typed chips in fact lists.
+memoryRoutes.get("/entity-types", async (c) => {
+  const namesParam = c.req.query("names") || "";
+  const names = namesParam
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  if (names.length === 0) return c.json({ types: {} });
+  const qdrant = createQdrantClient();
+  const filter: QdrantFilter = { must: [
+    { key: "kind", match: { value: "entity_type" } },
+    { key: "entity_name", match: { any: names } },
+  ]};
+  try {
+    const scroll = await qdrant.scroll(filter, Math.min(names.length, 200));
+    const types: Record<string, string> = {};
+    for (const p of scroll.points) {
+      const payload = p.payload as unknown as { entity_name?: string; entity_type?: string };
+      if (payload.entity_name && payload.entity_type) {
+        types[payload.entity_name] = payload.entity_type;
+      }
+    }
+    return c.json({ types });
+  } catch {
+    return c.json({ types: {} });
+  }
+});
+
 // GET /api/memory/entities/:name?limit=&offset=&relationsLimit=
 memoryRoutes.get("/entities/:name", async (c) => {
   const name = c.req.param("name").toLowerCase();
@@ -226,15 +256,21 @@ memoryRoutes.get("/entities/:name", async (c) => {
     { is_null: { key: "superseded_by" } },
     { key: "to_entity", match: { value: name } },
   ]};
+  // Phase 5a: lookup the daemon-classified entity_type point, if any.
+  const typeFilter: QdrantFilter = { must: [
+    { key: "kind", match: { value: "entity_type" } },
+    { key: "entity_name", match: { value: name } },
+  ]};
 
   const safeCount = async (f: QdrantFilter) => {
     try { return await qdrant.count(f); } catch { return null; }
   };
 
-  const [scroll, fromRels, toRels, factsTotal, fromTotal, toTotal] = await Promise.all([
+  const [scroll, fromRels, toRels, typeScroll, factsTotal, fromTotal, toTotal] = await Promise.all([
     qdrant.scroll(filter, limit, offset),
     qdrant.scroll(fromFilter, relationsLimit),
     qdrant.scroll(toFilter, relationsLimit),
+    qdrant.scroll(typeFilter, 1),
     safeCount(filter),
     safeCount(fromFilter),
     safeCount(toFilter),
@@ -256,8 +292,16 @@ memoryRoutes.get("/entities/:name", async (c) => {
   const relationsTotal =
     fromTotal !== null && toTotal !== null ? fromTotal + toTotal : null;
 
+  const typePayload = typeScroll.points[0]?.payload as unknown as
+    | { entity_type?: string; entity_type_confidence?: number; entity_type_reasoning?: string; classified_at?: string }
+    | undefined;
+
   return c.json({
     entity: name,
+    entityType: typePayload?.entity_type ?? null,
+    entityTypeConfidence: typePayload?.entity_type_confidence ?? null,
+    entityTypeReasoning: typePayload?.entity_type_reasoning ?? null,
+    entityTypeClassifiedAt: typePayload?.classified_at ?? null,
     facts: points.map(formatPoint),
     relations,
     factCount: points.length,

@@ -12,6 +12,10 @@ interface Relation {
 
 interface EntityResponse {
   entity: string;
+  entityType: string | null;
+  entityTypeConfidence: number | null;
+  entityTypeReasoning: string | null;
+  entityTypeClassifiedAt: string | null;
   facts: Fact[];
   relations: Relation[];
   factCount: number;
@@ -101,6 +105,18 @@ export default function MemoryEntity() {
             <ArrowLeft size={16} />
           </button>
           <h2 className="text-2xl font-bold">{data.entity}</h2>
+          {data.entityType && (
+            <span
+              className="px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wide bg-zinc-800 text-zinc-300 border border-zinc-700"
+              title={
+                data.entityTypeReasoning
+                  ? `${data.entityTypeReasoning}${data.entityTypeConfidence !== null ? ` (confidence ${data.entityTypeConfidence})` : ""}`
+                  : undefined
+              }
+            >
+              {data.entityType}
+            </span>
+          )}
           <span className="text-sm text-zinc-500">
             {data.factsTotal !== null && data.factsTotal !== data.factCount
               ? `${data.factCount} of ${data.factsTotal} facts`
