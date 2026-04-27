@@ -294,6 +294,50 @@ export default function MemoryFact() {
             <p className="text-zinc-500 font-mono text-xs truncate">{fact.id}</p>
           </div>
         </div>
+
+        <ProvenanceSection fact={fact} />
+      </div>
+    </div>
+  );
+}
+
+function ProvenanceSection({ fact }: { fact: Fact }) {
+  const fields: { label: string; value: string; render?: JSX.Element }[] = [];
+  if (fact.workstream_key) fields.push({ label: "Workstream", value: fact.workstream_key });
+  if (fact.task_key) fields.push({ label: "Task", value: fact.task_key });
+  if (fact.repo) {
+    const isGhRepo = /^[\w.-]+\/[\w.-]+$/.test(fact.repo);
+    fields.push({
+      label: "Repo",
+      value: fact.repo,
+      render: isGhRepo ? (
+        <a
+          href={`https://github.com/${fact.repo}`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-blue-400 hover:underline font-mono text-xs"
+        >
+          {fact.repo}
+        </a>
+      ) : undefined,
+    });
+  }
+  if (fact.branch) fields.push({ label: "Branch", value: fact.branch });
+  if (fact.episode_id) fields.push({ label: "Episode", value: fact.episode_id });
+  if (fact.session_id) fields.push({ label: "Session", value: fact.session_id });
+
+  if (fields.length === 0) return null;
+
+  return (
+    <div className="mt-6 pt-4 border-t border-zinc-800">
+      <p className="text-xs text-zinc-500 mb-2">Provenance</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-sm">
+        {fields.map((f) => (
+          <div key={f.label}>
+            <p className="text-xs text-zinc-500">{f.label}</p>
+            {f.render ?? <p className="text-zinc-300 font-mono text-xs break-all">{f.value}</p>}
+          </div>
+        ))}
       </div>
     </div>
   );
