@@ -117,7 +117,10 @@ export const DEFAULT_CAPTURE_CONTEXT = {
   domain: DEFAULT_DOMAIN,
   source: "daemon",
   reviewStatus: "candidate",
-  volatility: "medium",
+  // Default fallback volatility when the LLM does not self-judge. Storage path
+  // overrides this with the LLM's value (or the volatility verifier's
+  // synthesised value) — see daemon/extraction.ts storeFacts.
+  volatility: "evolving",
 } as const;
 
 export function promptVersionForSubtype(subtype: MemorySubtype): string {
