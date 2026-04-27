@@ -62,6 +62,12 @@ export async function startDaemon(): Promise<void> {
   const ready = qdrantClient.init();
   if (!ready) {
     log("WARN", "Qdrant not configured — daemon will retry on each tick");
+  } else {
+    try {
+      await qdrantClient.ensureCollection();
+    } catch (e) {
+      log("WARN", `Qdrant collection/index readiness check failed: ${(e as Error).message}`);
+    }
   }
 
   running = true;
