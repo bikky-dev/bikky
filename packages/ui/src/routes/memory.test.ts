@@ -90,6 +90,19 @@ const sampleFact = (overrides: Record<string, unknown> = {}) => ({
   },
 });
 
+const sampleEntityType = (name: string, type: string, overrides: Record<string, unknown> = {}) => ({
+  id: `entity-type-${name}`,
+  payload: {
+    kind: "entity_type",
+    entity_name: name,
+    entity_type: type,
+    entity_type_confidence: 0.82,
+    entity_type_reasoning: `${name} is classified as ${type}`,
+    classified_at: "2024-01-02T00:00:00Z",
+    ...overrides,
+  },
+});
+
 describe("ui/routes/memory", () => {
   before(() => {
     for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
@@ -360,12 +373,14 @@ describe("ui/routes/memory", () => {
         qdrantHandler: (c) => {
           if (c.path.endsWith("/points/scroll")) {
             scrollCount++;
-            // First: facts. Second: from-relations. Third: to-relations.
+            // First: facts. Second: from-relations. Third: to-relations. Fourth: entity type.
             const points = scrollCount === 1
               ? [sampleFact()]
               : scrollCount === 2
                 ? [sampleFact({ from_entity: "alice", relation_type: "owns", to_entity: "bikky" })]
-                : [sampleFact({ from_entity: "bikky", relation_type: "uses", to_entity: "alice" })];
+                : scrollCount === 3
+                  ? [sampleFact({ from_entity: "bikky", relation_type: "uses", to_entity: "alice" })]
+                  : [];
             return { result: { points, next_page_offset: null } };
           }
           return { result: [] };
@@ -379,6 +394,70 @@ describe("ui/routes/memory", () => {
       assert.equal(body.entity, "alice");
       assert.equal(body.factCount, 1);
       assert.equal(body.relationCount, 2);
+    });
+
+    it("returns daemon-classified entity type metadata when present", async () => {
+      let scrollCount = 0;
+      installMock({
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/scroll")) {
+            scrollCount++;
+            const points = scrollCount === 1
+              ? [sampleFact()]
+              : scrollCount === 4
+                ? [sampleEntityType("alice", "person")]
+                : [];
+            return { result: { points, next_page_offset: null } };
+          }
+          if (c.path.endsWith("/points/count")) return { result: { count: 1 } };
+          return { result: [] };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/entities/Alice"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        entityType: string | null;
+        entityTypeConfidence: number | null;
+        entityTypeReasoning: string | null;
+        entityTypeClassifiedAt: string | null;
+      };
+      assert.equal(body.entityType, "person");
+      assert.equal(body.entityTypeConfidence, 0.82);
+      assert.equal(body.entityTypeReasoning, "alice is classified as person");
+      assert.equal(body.entityTypeClassifiedAt, "2024-01-02T00:00:00Z");
+    });
+  });
+
+  describe("GET /entity-types", () => {
+    it("returns a type map for requested entities", async () => {
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/scroll")) {
+            return {
+              result: {
+                points: [
+                  sampleEntityType("bikky", "project"),
+                  sampleEntityType("qdrant", "service"),
+                ],
+                next_page_offset: null,
+              },
+            };
+          }
+          return { result: [] };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/entity-types?names=BIKKY,qdrant"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as { types: Record<string, string> };
+      assert.deepEqual(body.types, { bikky: "project", qdrant: "service" });
+
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.ok(scroll);
+      assert.deepEqual(scroll!.body.filter.must[1].match.any, ["bikky", "qdrant"]);
     });
   });
 

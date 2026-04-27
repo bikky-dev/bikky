@@ -19,6 +19,13 @@ export interface WatcherPathIssue {
   canonicalDefault: string;
 }
 
+export interface WatcherPathRepair {
+  watcher: "copilot" | "claude";
+  previousPath: string;
+  repairedPath: string;
+  reason: string;
+}
+
 const TEMPDIR_PREFIXES = [
   os.tmpdir(),
   "/tmp/",
@@ -43,6 +50,32 @@ export function looksLikeTempdir(p: string): boolean {
 function canonicalDefault(watcher: "copilot" | "claude"): string {
   if (watcher === "copilot") return path.join(os.homedir(), ".copilot", "session-state");
   return path.join(os.homedir(), ".claude", "projects");
+}
+
+export function repairSuspiciousWatcherPaths(cfg: BikkyConfig): WatcherPathRepair[] {
+  const repairs: WatcherPathRepair[] = [];
+  const entries: Array<["copilot" | "claude", { enabled: boolean; path: string }]> = [
+    ["copilot", cfg.watchers.copilot],
+    ["claude", cfg.watchers.claude],
+  ];
+
+  for (const [name, w] of entries) {
+    if (!w.enabled) continue;
+    const def = canonicalDefault(name);
+    const isDefault = path.resolve(w.path) === path.resolve(def);
+    if (isDefault || !looksLikeTempdir(w.path)) continue;
+
+    const previousPath = w.path;
+    w.path = def;
+    repairs.push({
+      watcher: name,
+      previousPath,
+      repairedPath: def,
+      reason: "path is under an OS tempdir or test fixture",
+    });
+  }
+
+  return repairs;
 }
 
 export function inspectWatcherPaths(cfg: BikkyConfig): WatcherPathIssue[] {
