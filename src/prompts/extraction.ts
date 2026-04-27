@@ -15,8 +15,51 @@ import { buildOpts, wrapData, type PromptDescriptor, type RenderedPrompt } from 
 
 export const EXTRACTION_PROMPT_DESCRIPTOR: PromptDescriptor = {
   id: "extraction",
-  version: "2026-04-26-1",
+  version: "2026-04-27-1",
 };
+
+const SUBTYPE_REASONING = `## Subtype reasoning (think step-by-step BEFORE picking memory_subtype)
+For each candidate fact, walk these three buckets in order and pick the first that fits:
+
+  BUCKET A — STRUCTURAL (where things live):
+    codebase_map      → file paths, symbols, modules, repo structure
+    infra_topology    → clusters, services, queues, datastores, regions
+    access_pattern    → roles, permissions, auth flows, approval gates
+
+  BUCKET B — PROCEDURAL (how things are done):
+    operational_procedure  → runbook / deploy / rollout / maintenance / incident steps
+    troubleshooting_gotcha → stable failure mode, debugging quirk, surprising behaviour
+
+  BUCKET C — PRESCRIPTIVE (rules + choices + tastes):
+    architecture_decision  → an explicit choice with rationale ("we chose X over Y because…")
+    domain_rule            → product/business rule, workflow definition, SLA, metric
+    preference             → personal/team style, tooling default, interaction habit
+
+Disambiguation rules (apply in order; first match wins):
+  R1. If the fact describes a *failure* or *workaround* → troubleshooting_gotcha (NOT operational_procedure).
+  R2. If the fact names *files / modules / symbols* → codebase_map (NOT infra_topology).
+  R3. If the fact uses "must / required / shall / SLA / KPI" → domain_rule (NOT preference).
+  R4. If the fact starts with "I/we prefer", "tend to", "by convention" → preference.
+  R5. If the fact records an explicit choice with rationale → architecture_decision.
+
+Emit your reasoning in a brief \`subtype_reason\` field (one sentence) explaining the bucket walk.`;
+
+const FEW_SHOTS = `## Disambiguation examples (study these — confusion pairs)
+
+Example 1 — operational vs troubleshooting:
+  TEXT: "The WA cron silently skips suspended bots; clear the suspended flag manually to recover."
+  → memory_subtype: troubleshooting_gotcha (R1: describes a silent failure + workaround)
+  → subtype_reason: "Failure mode + workaround → BUCKET B → R1 wins → troubleshooting_gotcha."
+
+Example 2 — codebase vs infra:
+  TEXT: "Smoke tests for the alert pipeline live in packages/alerts/tests/smoke.spec.ts."
+  → memory_subtype: codebase_map (R2: names a file path)
+  → subtype_reason: "File path → BUCKET A → R2 wins → codebase_map."
+
+Example 3 — domain_rule vs preference:
+  TEXT: "I prefer kebab-case branch names; it's just my style."
+  → memory_subtype: preference (R4: 'I prefer' + 'my style')
+  → subtype_reason: "Personal style → BUCKET C → R4 wins → preference."`;
 
 const QUALITY_GATE = `## Quality gate (apply to EVERY candidate fact)
 A fact must pass AT LEAST ONE of these or it is noise — skip it:
@@ -58,6 +101,7 @@ const FORMAT = `## Output format (JSON only — no prose, no markdown fences)
     "domain":   "<one of: ${domainValues().join(" | ")}>",
     "kind":     "fact",
     "memory_subtype": "<one of: ${memorySubtypeValuesForKind("fact").join(" | ")}>",
+    "subtype_reason": "<one short sentence — the bucket walk + which disambiguation rule won>",
     "entities": ["lowercase", "identifiers"],
     "confidence": 0.9,
     "importance": 0.7
@@ -101,6 +145,10 @@ const buildSystem = (): string => {
     "",
     "## Categories (canonical taxonomy)",
     allCategoryPromptSections(),
+    "",
+    SUBTYPE_REASONING,
+    "",
+    FEW_SHOTS,
     "",
     ALWAYS_SKIP,
     "",

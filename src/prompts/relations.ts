@@ -5,10 +5,11 @@
  */
 
 import { buildOpts, wrapData, type PromptDescriptor, type RenderedPrompt } from "./index.js";
+import { canonicalTypesForPrompt } from "../daemon/relations-vocab.js";
 
 export const RELATIONS_PROMPT_DESCRIPTOR: PromptDescriptor = {
   id: "relations",
-  version: "2026-04-25-1",
+  version: "2026-04-27-1",
 };
 
 const SYSTEM = `<role>
@@ -21,14 +22,35 @@ Choose the strongest directed relationship the shared facts support. Direction m
 - "to"   is the entity that is acted upon / depended on
 
 Output:
-- "type":  a 1-3 word verb phrase (e.g. "depends-on", "uses", "runs-on", "owns", "deploys-to")
+- "type":  one of the canonical labels in <vocabulary>. If none fit, propose a 1-3 word verb phrase using kebab-case.
 - "from"/"to": MUST be one of the two entities provided — do not invent new names
 - "evidence": a verbatim quote from one of the shared facts that supports the relation
+- "reasoning": one short sentence — explain WHICH evidence supports the direction and WHY this type was chosen
 - "confidence": 0.0-1.0
 - "content": one full sentence stating the relation in the form "<from> <type> <to> because <short rationale>"
 
 If the facts don't support a clear directed relation, output {"type": null, "reason": "short explanation"}.
 </task>
+
+<vocabulary>
+Canonical relation types — prefer these whenever one fits:
+${canonicalTypesForPrompt()}
+</vocabulary>
+
+<reasoning-steps>
+Walk these steps before emitting JSON:
+  1. Read each shared fact. Identify the verb that links the two entities.
+  2. Decide direction: which entity is the SUBJECT (does the action / owns the dependency)?
+     If the facts are symmetric ("X and Y both ..."), there is NO directed relation → return type:null.
+  3. Map the verb to a canonical type from <vocabulary>. Examples:
+       "calls" / "invokes" / "triggers"      → calls
+       "uses"  / "needs"   / "relies on"     → depends-on
+       "manages" / "is responsible for"      → owns
+       "writes to" / "persists in"           → stores-in
+     If no canonical fits, write your own kebab-case verb (1-3 words).
+  4. Pick the verbatim quote that anchors the relation — it MUST appear inside <facts>.
+  5. Set confidence: 0.9 if the quote names both entities + the verb; 0.7 if implied; 0.5 if weak.
+</reasoning-steps>
 
 <rules>
 - The "evidence" string MUST be a substring that appears verbatim inside one of the shared facts. If you cannot quote one, return {"type": null, "reason": "no quotable evidence"}.
@@ -40,7 +62,7 @@ If the facts don't support a clear directed relation, output {"type": null, "rea
 <examples>
 Entities: "tg-bot", "bedrock"
 Facts: "tg-bot calls Bedrock via Portkey for LLM inference"
-→ {"from":"tg-bot","type":"depends-on","to":"bedrock","evidence":"tg-bot calls Bedrock via Portkey","content":"tg-bot depends-on bedrock because it calls Bedrock via Portkey for LLM inference","confidence":0.9}
+→ {"from":"tg-bot","type":"calls","to":"bedrock","evidence":"tg-bot calls Bedrock via Portkey","reasoning":"verb 'calls' links subject tg-bot to object bedrock; canonical match 'calls'.","content":"tg-bot calls bedrock because it invokes Bedrock via Portkey for LLM inference","confidence":0.9}
 
 Entities: "lloyds", "cba"
 Facts: "lloyds and cba are both production clusters in eu-west-2 and ap-southeast-2 respectively"
@@ -49,7 +71,7 @@ Facts: "lloyds and cba are both production clusters in eu-west-2 and ap-southeas
 
 <format>
 Output ONLY a JSON object — no prose, no fences. Use one of these shapes:
-{"from":"<entity>","type":"<verb-phrase>","to":"<entity>","evidence":"<verbatim quote>","confidence":0.0-1.0,"content":"<full sentence>"}
+{"from":"<entity>","type":"<canonical-or-kebab-verb>","to":"<entity>","evidence":"<verbatim quote>","reasoning":"<one short sentence>","confidence":0.0-1.0,"content":"<full sentence>"}
 {"type":null,"reason":"<short explanation>"}
 </format>
 

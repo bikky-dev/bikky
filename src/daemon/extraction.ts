@@ -38,6 +38,7 @@ import {
   subtypeForCategory,
 } from "./capture-policy.js";
 import { shouldSummarizeEvents, updateSessionSummary } from "./session-summary.js";
+import { compareSubtype } from "./extraction-rules.js";
 
 // ── Module state ─────────────────────────────────────────────────────────────
 
@@ -342,6 +343,7 @@ export interface ExtractedFact {
   content: string;
   category: string;
   memory_subtype?: string | null;
+  subtype_reason?: string | null;
   entities: string[];
   confidence: number;
   importance: number;
@@ -442,6 +444,7 @@ export const normalizeExtractedFact = (raw: Record<string, unknown>): ExtractedF
     content: raw.content.trim(),
     category,
     memory_subtype: memorySubtype,
+    subtype_reason: typeof raw.subtype_reason === "string" ? raw.subtype_reason.trim() : null,
     entities,
     confidence,
     importance,
@@ -589,6 +592,22 @@ const storeFacts = async (
       const subtype = validateMemorySubtype("fact", sanitizedFact.memory_subtype)
         ?? subtypeForCategory(normalizeCategory(sanitizedFact.category));
 
+      // Verifier: rule-table check on subtype. If rule table is confident in
+      // a *different* subtype with a margin >= 0.6, treat the LLM as suspect:
+      // keep its choice (LLM is still source of truth) but lower confidence
+      // and stash the disagreement in metadata for human review.
+      const subtypeAgreement = compareSubtype(sanitizedFact.content, subtype);
+      const factMeta: Record<string, string | number | boolean | null> = { ...baseMeta };
+      let effectiveConfidence = fact.confidence;
+      if (sanitizedFact.subtype_reason) {
+        factMeta.subtype_reason = sanitizedFact.subtype_reason;
+      }
+      if (subtypeAgreement.verdict === "disagree" && subtypeAgreement.ruleSubtype) {
+        factMeta.subtype_rule_disagreement = subtypeAgreement.ruleSubtype;
+        factMeta.subtype_rule_margin = Math.round(subtypeAgreement.margin * 100) / 100;
+        effectiveConfidence = clamp01(effectiveConfidence - 0.15);
+      }
+
       const storePayload: StoreFact = {
         content: sanitizedFact.content,
         category: sanitizedFact.category,
@@ -597,7 +616,7 @@ const storeFacts = async (
         entities: sanitizedFact.entities,
         source: "daemon",
         kind: "fact",
-        confidence: fact.confidence,
+        confidence: effectiveConfidence,
         importance: fact.importance,
         content_hash: hash,
         prompt_version: promptVersionForSubtype(subtype),
@@ -610,7 +629,7 @@ const storeFacts = async (
         branch: fact.branch,
         task_key: fact.task_key,
         workstream_key: fact.workstream_key,
-        metadata: baseMeta,
+        metadata: factMeta,
       };
 
       if (dedup.action === "supersede" && dedup.existingId) {
