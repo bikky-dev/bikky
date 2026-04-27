@@ -67,6 +67,7 @@ test("listPrompts returns all prompts", () => {
     "brief",
     "contradiction",
     "distill",
+    "entity-typing",
     "episode-summary",
     "extraction",
     "relations",
@@ -209,7 +210,7 @@ test("runRenderCli: --list prints JSON list of prompts", async () => {
   const result = await captureStdout(() => runRenderCli(["--list"]));
   assert.equal(result.code, 0);
   const parsed = JSON.parse(result.stdout) as Array<{ name: string }>;
-  assert.equal(parsed.length, 7);
+  assert.equal(parsed.length, 8);
   assert.ok(parsed.find((p) => p.name === "extraction"));
   assert.ok(parsed.find((p) => p.name === "episode-summary"));
   assert.ok(parsed.find((p) => p.name === "workstream-summary"));

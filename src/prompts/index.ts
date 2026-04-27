@@ -109,6 +109,7 @@ export { extractionPrompt, EXTRACTION_PROMPT_DESCRIPTOR } from "./extraction.js"
 export { distillPrompt, DISTILL_PROMPT_DESCRIPTOR } from "./distill.js";
 export { contradictionPrompt, CONTRADICTION_PROMPT_DESCRIPTOR } from "./contradiction.js";
 export { relationsPrompt, RELATIONS_PROMPT_DESCRIPTOR } from "./relations.js";
+export { entityTypingPrompt, ENTITY_TYPING_PROMPT_DESCRIPTOR } from "./entity-typing.js";
 export { briefPrompt, BRIEF_PROMPT_DESCRIPTOR, ALLOWED_BRIEF_HEADINGS } from "./brief.js";
 export {
   episodeSummaryPrompt,

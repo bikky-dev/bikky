@@ -893,6 +893,22 @@ export function registerTools(mcp: McpServer): void {
       const entityName = name.toLowerCase();
       const scope = resolveScope(workspace_id, include_legacy_workspace);
 
+      // Look up the daemon-classified entity type, if any.
+      let entityType: string | null = null;
+      try {
+        const typeFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+        typeFilter.must.push({ key: "kind", match: { value: "entity_type" } });
+        typeFilter.must.push({ key: "entity_name", match: { value: entityName } });
+        const typePoints = await qdrantScroll(typeFilter, 1);
+        const typePoint = typePoints.result?.points?.[0];
+        const payload = typePoint?.payload as unknown as Record<string, unknown> | undefined;
+        if (payload?.entity_type) {
+          entityType = String(payload.entity_type);
+        }
+      } catch {
+        // Type lookup is best-effort — never fails the request.
+      }
+
       const factsFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
       factsFilter.must.push({ key: "entities", match: { value: entityName } });
       const facts = await qdrantScroll(factsFilter, limit ?? 20);
@@ -909,12 +925,17 @@ export function registerTools(mcp: McpServer): void {
 
       const factPoints = facts.result?.points ?? [];
       if (factPoints.length > 0) {
-        output.push(`## Facts about ${name} (${factPoints.length})`);
+        const header = entityType
+          ? `## Facts about ${name} [type: ${entityType}] (${factPoints.length})`
+          : `## Facts about ${name} (${factPoints.length})`;
+        output.push(header);
         for (const p of factPoints) {
           if (p.payload.category !== "relation") {
             output.push(`- ${formatFact(p)}`);
           }
         }
+      } else if (entityType) {
+        output.push(`## ${name} [type: ${entityType}]`);
       }
 
       const allRelations = [

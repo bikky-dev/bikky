@@ -12,6 +12,7 @@ import * as qdrantClient from "./qdrant.js";
 import { tick as extractionTick, setLogger as setExtractionLogger } from "./extraction.js";
 import { tick as consolidationTick, setLogger as setConsolidationLogger } from "./consolidation.js";
 import { tick as relationsTick, setLogger as setRelationsLogger } from "./relations.js";
+import { tick as entityTypingTick, setLogger as setEntityTypingLogger } from "./entity-typing.js";
 import { scanStaleFacts, setLogger as setStalenessLogger } from "./staleness.js";
 
 // createLogger returns (LogLevel, ...args) but daemon modules accept (string, ...args).
@@ -31,6 +32,7 @@ export async function startDaemon(): Promise<void> {
   setExtractionLogger(log);
   setConsolidationLogger(log);
   setRelationsLogger(log);
+  setEntityTypingLogger(log);
   setStalenessLogger(log);
 
   // Initialize LLM client from config
@@ -79,6 +81,12 @@ export async function startDaemon(): Promise<void> {
       await relationsTick(cfg);
     } catch (e) {
       log("ERROR", `Relations tick failed: ${(e as Error).message}`);
+    }
+
+    try {
+      await entityTypingTick();
+    } catch (e) {
+      log("ERROR", `Entity typing tick failed: ${(e as Error).message}`);
     }
 
     // Staleness scans every 1000 ticks (~83 min at 5s interval)
