@@ -57,7 +57,7 @@ export interface RebalanceResult {
 export interface HealthReport {
   total: number;
   byCategory: Record<string, number>;
-  daemonExtracted: number;
+  systemCaptured: number;
   addedThisWeek: number;
   generatedAt: string;
 }
@@ -398,11 +398,11 @@ const generateHealthReport = async (): Promise<HealthReport | null> => {
       stats[kind] = (count.result as { count?: number })?.count || 0;
     }
 
-    // Count daemon-extracted
-    const daemonCount = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/count`, {
+    // Count system-captured facts, including legacy daemon source values.
+    const systemCount = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/count`, {
       filter: {
         must: [
-          { key: "source", match: { value: "daemon" } },
+          { key: "source", match: { any: ["system", "daemon"] } },
           { is_null: { key: "superseded_by" } },
         ],
       },
@@ -424,7 +424,7 @@ const generateHealthReport = async (): Promise<HealthReport | null> => {
     return {
       total,
       byCategory: stats,
-      daemonExtracted: (daemonCount.result as { count?: number })?.count || 0,
+      systemCaptured: (systemCount.result as { count?: number })?.count || 0,
       addedThisWeek: (recentCount.result as { count?: number })?.count || 0,
       generatedAt: new Date().toISOString(),
     };
@@ -445,7 +445,7 @@ const formatHealthReport = (report: HealthReport | null): string => {
     "",
     `Total facts: ${report.total}`,
     `Added this week: ${report.addedThisWeek}`,
-    `Daemon-extracted: ${report.daemonExtracted}`,
+    `System-captured: ${report.systemCaptured}`,
     "",
     "By category:",
   ];

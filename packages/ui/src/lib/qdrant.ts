@@ -70,6 +70,18 @@ interface CountResult {
   result: { count: number };
 }
 
+const SOURCE_FILTER_ALIASES: Record<string, string[]> = {
+  agent: ["agent", "cortex"],
+  system: ["system", "daemon"],
+  user: ["user", "ui", "portal"],
+  docs: ["docs"],
+};
+
+const sourceFilterValue = (source: string): { value?: string; any?: string[] } => {
+  const values = SOURCE_FILTER_ALIASES[source] ?? [source];
+  return values.length === 1 ? { value: values[0] } : { any: values };
+};
+
 // --- Client ---
 
 export class QdrantClient {
@@ -168,7 +180,7 @@ export function buildFilter(opts: {
   if (opts.domain) must.push({ key: "domain", match: { value: opts.domain } });
   if (opts.kind) must.push({ key: "kind", match: { value: opts.kind } });
   if (opts.entity) must.push({ key: "entities", match: { value: opts.entity.toLowerCase() } });
-  if (opts.source) must.push({ key: "source", match: { value: opts.source } });
+  if (opts.source) must.push({ key: "source", match: sourceFilterValue(opts.source) });
   if (opts.since) must.push({ key: "created_at", range: { gte: opts.since } });
   if (opts.until) must.push({ key: "created_at", range: { lte: opts.until } });
   // Phase 5a entity_type sidecar points are not user-facing facts; opt-in to exclude.

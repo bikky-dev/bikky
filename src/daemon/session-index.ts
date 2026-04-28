@@ -124,7 +124,7 @@ export const buildSessionIndexPayload = (input: {
     review_status: DEFAULT_CAPTURE_CONTEXT.reviewStatus,
     metadata: {
       ...(existingPayload.metadata ?? {}),
-      summary_source: "daemon",
+      summary_source: "system",
       summary_subtype: "session_index",
       summarized_from_session: input.sessionId,
       summary_event_count: String(input.eventCount),

@@ -8,7 +8,7 @@ import FactCard, { type Fact } from "../components/FactCard";
 const CATEGORIES = ["infrastructure", "decisions", "observation", "preferences", "projects", "team"];
 const DOMAINS = ["work", "personal"];
 const KINDS = ["fact", "summary", "distilled", "relation"];
-const SOURCES = ["agent", "cortex", "system", "user", "portal"];
+const SOURCES = ["agent", "system", "user", "docs"];
 const SORT_OPTIONS = [
   { value: "newest", label: "Newest first" },
   { value: "oldest", label: "Oldest first" },
@@ -97,6 +97,7 @@ export default function Memory() {
           if (category) params.set("category", category);
           if (domain) params.set("domain", domain);
           if (kind) params.set("kind", kind);
+          if (source) params.set("source", source);
           if (entity) params.set("entity", entity);
           params.set("limit", String(append ? results.length + PAGE_SIZE : PAGE_SIZE));
 

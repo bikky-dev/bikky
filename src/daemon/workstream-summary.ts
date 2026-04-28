@@ -208,7 +208,7 @@ export const buildWorkstreamSummaryPayload = (input: {
     blockers: redactedBlockers.map((blocker) => blocker.text),
     metadata: {
       ...(existingPayload.metadata ?? {}),
-      summary_source: "daemon",
+      summary_source: "system",
       summary_subtype: "workstream",
       workstream_key: input.workstreamKey,
       source_episode_ids: input.sourceEpisodeIds.join(","),
