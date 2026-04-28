@@ -79,7 +79,7 @@ describe("ontology values", () => {
 
   it("keeps stable kinds, sources, and layers", () => {
     assert.deepStrictEqual(kindValues(), ["fact", "summary", "distilled", "relation", "telemetry"]);
-    assert.deepStrictEqual(sourceValues(), ["agent", "daemon", "system", "user", "docs"]);
+    assert.deepStrictEqual(sourceValues(), ["agent", "system", "user", "docs"]);
     assert.deepStrictEqual(layerValues(), [
       "workspace",
       "domain",
@@ -182,7 +182,10 @@ describe("normalization", () => {
     assert.strictEqual(normalizeKind("distillation"), "distilled");
     assert.strictEqual(normalizeKind("edge"), "relation");
     assert.strictEqual(normalizeKind("feedback event"), "telemetry");
-    assert.strictEqual(normalizeSource("daemon"), "daemon");
+    assert.strictEqual(normalizeSource("daemon"), "system");
+    assert.strictEqual(normalizeSource("ui"), "user");
+    assert.strictEqual(normalizeSource("portal"), "user");
+    assert.strictEqual(normalizeSource("cortex"), "agent");
     assert.strictEqual(normalizeSource("user"), "user");
     assert.strictEqual(normalizeSource("unknown"), "agent");
     assert.strictEqual(normalizeLayer("memory-object"), "memory_object");

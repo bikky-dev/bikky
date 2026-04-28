@@ -144,7 +144,7 @@ describe("daemon/session-summary", () => {
       assert.deepEqual(payload.tasks_completed, ["issue #14"]);
       assert.deepEqual(payload.decisions_made, ["Daemon owns summaries"]);
       assert.deepEqual(payload.entities, ["bikky", "daemon"]);
-      assert.equal((payload.metadata as Record<string, string>).summary_source, "daemon");
+      assert.equal((payload.metadata as Record<string, string>).summary_source, "system");
       assert.equal((payload.metadata as Record<string, string>).summary_subtype, "session_index");
       assert.equal((payload.metadata as Record<string, string>).summary_event_count, "7");
       assert.equal(redaction.redacted, true);

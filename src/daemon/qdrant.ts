@@ -22,6 +22,7 @@ import {
   normalizeCategory,
   normalizeDomain,
   normalizeKind,
+  normalizeSource,
   validateMemorySubtype,
 } from "../mcp/taxonomy.js";
 import {
@@ -444,7 +445,7 @@ const storeFact = async (fact: StoreFact): Promise<string> => {
     ...(fact.workspace_id ? { workspace_id: fact.workspace_id } : {}),
     ...(fact.actor_id ? { actor_id: fact.actor_id } : {}),
     entities: redactedEntities.map((entity) => entity.text.toLowerCase()),
-    source: fact.source || "daemon",
+    source: normalizeSource(fact.source ?? "system"),
     confidence: fact.confidence ?? 0.7,
     importance: fact.importance ?? 0.5,
     content_hash: redactedContent.redacted

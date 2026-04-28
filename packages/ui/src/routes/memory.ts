@@ -65,6 +65,7 @@ memoryRoutes.get("/search", async (c) => {
     domain: c.req.query("domain"),
     kind: c.req.query("kind"),
     entity: c.req.query("entity"),
+    source: c.req.query("source"),
     excludeEntityType: true,
   });
 
@@ -227,7 +228,7 @@ memoryRoutes.post("/facts", async (c) => {
     domain: body.domain || "work",
     kind: body.kind || "fact",
     entities: redactedEntities.map((e) => e.text.toLowerCase()),
-    source: "ui",
+    source: "user",
     confidence: body.confidence ?? 0.9,
     content_hash: await hashContent(redactedContent.text),
     reinforcement_count: 0,
@@ -238,7 +239,7 @@ memoryRoutes.post("/facts", async (c) => {
     updated_at: now,
   };
 
-  if (body.metadata) payload.metadata = body.metadata;
+  payload.metadata = { ...(body.metadata ?? {}), created_via: "ui" };
   if (redactedFromEntity) payload.from_entity = redactedFromEntity.text;
   if (redactedRelationType) payload.relation_type = redactedRelationType.text;
   if (redactedToEntity) payload.to_entity = redactedToEntity.text;

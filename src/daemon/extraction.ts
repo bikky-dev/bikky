@@ -1,6 +1,6 @@
 /**
  * Events-based memory extraction — reads Copilot CLI events.jsonl transcripts,
- * extracts facts via LLM, and stores them in Qdrant with source: "daemon".
+ * extracts facts via LLM, and stores them in Qdrant with source: "system".
  *
  * Uses a JSON file for extraction state (high-water byte offsets) instead of SQLite.
  * Active session detection scans ~/.copilot/session-state/ for lock files.
@@ -743,7 +743,7 @@ const storeFacts = async (
         domain: DEFAULT_CAPTURE_CONTEXT.domain,
         memory_subtype: effectiveSubtype,
         entities: sanitizedFact.entities,
-        source: "daemon",
+        source: "system",
         kind: "fact",
         confidence: effectiveConfidence,
         importance: fact.importance,

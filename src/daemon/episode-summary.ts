@@ -238,7 +238,7 @@ export const buildEpisodeSummaryPayload = (input: {
     open_questions: redactedOpenQuestions.map((question) => question.text),
     metadata: {
       ...(existingPayload.metadata ?? {}),
-      summary_source: "daemon",
+      summary_source: "system",
       summary_subtype: "episode",
       summarized_from_session: input.sessionId,
       episode_id: input.segment.episode_id,

@@ -1483,13 +1483,13 @@ export function registerTools(mcp: McpServer): void {
   mcp.tool(
     "memory_review",
     [
-      "Triage facts that were extracted automatically by the bikky daemon (source='daemon').",
-      "Only useful when the daemon is running and capturing memories from logs/transcripts; otherwise this returns an empty list. Supports four actions: list (default — show recent daemon facts), approve (mark verified), reject (mark superseded with reason), correct (replace with edited content as a new fact).",
+      "Triage facts that were captured automatically by Bikky (source='system').",
+      "Only useful when the daemon is running and capturing memories from logs/transcripts; otherwise this returns an empty list. Supports four actions: list (default — show recent system-captured facts), approve (mark verified), reject (mark superseded with reason), correct (replace with edited content as a new fact).",
     ].join(" "),
     {
       limit: z.number().optional().default(10).describe("Max facts to return when action=list (default 10)."),
       action: z.enum(["list", "approve", "reject", "correct"]).optional().default("list").describe(
-        "What to do. list = show recent daemon-extracted facts (default). approve = confirm a fact is correct (bumps verification count). reject = mark a fact as wrong (requires 'reason'). correct = supersede with an edited version (requires 'corrected_content').",
+        "What to do. list = show recent system-captured facts (default). approve = confirm a fact is correct (bumps verification count). reject = mark a fact as wrong (requires 'reason'). correct = supersede with an edited version (requires 'corrected_content').",
       ),
       fact_id: z.string().optional().describe("Fact ID to act on. Required for approve / reject / correct."),
       reason: z.string().optional().describe("Required for action=reject. Short reason the fact is wrong."),
@@ -1508,7 +1508,7 @@ export function registerTools(mcp: McpServer): void {
 
       if (action === "list") {
         const filter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
-        filter.must.push({ key: "source", match: { value: "daemon" } });
+        filter.must.push({ key: "source", match: { any: ["system", "daemon"] } });
         const result = await qdrantScroll(filter, (limit ?? 10) * 2);
 
         const points = (result.result?.points ?? [])
@@ -1516,7 +1516,7 @@ export function registerTools(mcp: McpServer): void {
           .slice(0, limit ?? 10);
 
         if (points.length === 0) {
-          return { content: [{ type: "text", text: "No daemon-extracted facts found." }] };
+          return { content: [{ type: "text", text: "No system-captured facts found." }] };
         }
 
         const lines = points.map((pt) => {

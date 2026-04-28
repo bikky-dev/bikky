@@ -52,7 +52,7 @@ describe("ui/lib/qdrant", () => {
         { key: "category", match: { value: "infra" } },
         { key: "domain", match: { value: "work" } },
         { key: "kind", match: { value: "fact" } },
-        { key: "source", match: { value: "agent" } },
+        { key: "source", match: { any: ["agent", "cortex"] } },
       ]);
     });
 

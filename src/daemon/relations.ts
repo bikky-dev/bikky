@@ -119,7 +119,7 @@ const buildChangedCoOccurrenceCandidates = (facts: QdrantScrollResult[]): Change
 };
 
 /**
- * Get the set of entity pairs that already have a daemon-inferred relation.
+ * Get the set of entity pairs that already have a system-inferred relation.
  * Returns a Set of pairKeys.
  */
 const getExistingRelations = async (): Promise<Set<string>> => {
@@ -131,7 +131,7 @@ const getExistingRelations = async (): Promise<Set<string>> => {
       filter: {
         must: [
           { key: "kind", match: { value: "relation" } },
-          { key: "source", match: { value: "daemon" } },
+          { key: "source", match: { any: ["system", "daemon"] } },
           { is_null: { key: "superseded_by" } },
         ],
       },
@@ -361,7 +361,7 @@ const storeRelation = async (
     domain: DEFAULT_CAPTURE_CONTEXT.domain,
     kind: "relation",
     entities: [fromEntity, toEntity],
-    source: "daemon",
+    source: "system",
     confidence: extras.confidence ?? 0.7,
     importance: 0.6,
     content_hash: hash,

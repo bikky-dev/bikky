@@ -164,7 +164,7 @@ describe("ui/routes/memory", () => {
       });
       const app = buildApp();
 
-      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=hello&category=infrastructure&limit=5"));
+      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=hello&category=infrastructure&source=system&limit=5"));
       assert.equal(res.status, 200);
       const body = await res.json() as { results: any[]; count: number };
       assert.equal(body.count, 1);
@@ -175,6 +175,10 @@ describe("ui/routes/memory", () => {
       assert.ok(search);
       assert.equal(search!.body.limit, 5);
       assert.equal(search!.body.filter.must[0].match.value, "infrastructure");
+      assert.deepEqual(search!.body.filter.must[1], {
+        key: "source",
+        match: { any: ["system", "daemon"] },
+      });
     });
 
     it("clamps limit to 100", async () => {
@@ -340,6 +344,7 @@ describe("ui/routes/memory", () => {
           from_entity: "token=fromsecret",
           relation_type: "Owns",
           to_entity: "Bar",
+          metadata: { note: "manual add" },
         }),
       }));
       assert.equal(res.status, 201);
@@ -352,7 +357,8 @@ describe("ui/routes/memory", () => {
       assert.equal(point.payload.from_entity, "token=[REDACTED:secret]");
       assert.equal(point.payload.relation_type, "Owns");
       assert.equal(point.payload.to_entity, "Bar");
-      assert.equal(point.payload.source, "ui");
+      assert.equal(point.payload.source, "user");
+      assert.deepEqual(point.payload.metadata, { note: "manual add", created_via: "ui" });
       assert.equal(point.payload.kind, "fact");
       assert.equal(point.payload.domain, "work");
       assert.equal(typeof point.id, "string");

@@ -195,7 +195,7 @@ export const buildSessionSummaryPayload = (input: {
     metadata: {
       ...(existingPayload.metadata ?? {}),
       summarized_from_session: input.sessionId,
-      summary_source: "daemon",
+      summary_source: "system",
       summary_subtype: "session_index",
       summary_event_count: String(input.eventCount),
       summary_updated_at: input.now,
