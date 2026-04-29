@@ -282,9 +282,9 @@ export default function Graph() {
     }
     const visibleNodes = data.nodes.filter((n) => connectedIds.has(n.id));
 
-    // Clone for simulation (d3 mutates these). Seed positions in a small
-    // ring near the origin so the first frame already looks centered.
-    const ringRadius = Math.min(w, h) * 0.25;
+    // Clone for simulation (d3 mutates these). Seed positions in a wide
+    // ring so the first frame already looks centered and spread out.
+    const ringRadius = Math.min(w, h) * 0.4;
     const nodes: GraphNode[] = visibleNodes.map((n, i) => {
       const theta = (i / Math.max(visibleNodes.length, 1)) * Math.PI * 2;
       return {
@@ -307,25 +307,26 @@ export default function Graph() {
 
     let tickCount = 0;
     const sim = forceSimulation(nodes)
-      .alphaDecay(0.04)
+      .alphaDecay(0.03)
       .force(
         "link",
         forceLink<GraphNode, GraphEdge>(edges)
           .id((d) => d.id)
-          .distance((d) => Math.max(60, 120 - (d as GraphEdge).weight * 8))
-          .strength((d) => Math.min(0.1 + (d as GraphEdge).weight * 0.03, 0.5)),
+          .distance((d) => Math.max(110, 200 - (d as GraphEdge).weight * 10))
+          .strength((d) => Math.min(0.05 + (d as GraphEdge).weight * 0.02, 0.35)),
       )
-      .force("charge", forceManyBody().strength(-180))
+      .force("charge", forceManyBody<GraphNode>().strength((d) => -400 - d.factCount * 4).distanceMax(600))
       .force("center", forceCenter(0, 0))
-      .force("collide", forceCollide<GraphNode>().radius((d) => Math.sqrt(d.factCount) * 3 + 18))
+      .force("collide", forceCollide<GraphNode>().radius((d) => Math.sqrt(d.factCount) * 3 + 32).strength(0.9))
       .stop();
 
     // Warm-up ticks before first paint so the layout is roughly settled and
     // doesn't visibly jitter into place.
     for (let i = 0; i < SIMULATION_WARMUP_TICKS; i++) sim.tick();
 
-    // Fit warm-up result to viewport so the whole graph is visible on load.
-    const padding = 60;
+    // Fit warm-up result to viewport. We do NOT scale up beyond 1.0 — small
+    // graphs stay at natural size so nodes don't bunch near the center.
+    const padding = 80;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of nodes) {
       if (n.x == null || n.y == null) continue;
@@ -340,7 +341,7 @@ export default function Graph() {
       const scale = Math.min(
         (w - padding * 2) / graphW,
         (h - padding * 2) / graphH,
-        1.2,
+        1.0,
       );
       transformRef.current = {
         x: w / 2 - ((minX + maxX) / 2) * scale,
