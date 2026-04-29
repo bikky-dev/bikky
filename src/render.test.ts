@@ -118,8 +118,8 @@ test("renderPrompt: distill renders with summaries", () => {
 
 test("renderPrompt: contradiction renders", () => {
   const out = renderPrompt("contradiction", {
-    newFact: { content: "user lives in Berlin", category: "people" },
-    candidates: [{ id: "f1", content: "user lives in Paris", category: "people", score: 0.91 }],
+    newFact: { content: "user lives in Berlin", category: "human" },
+    candidates: [{ id: "f1", content: "user lives in Paris", category: "human", score: 0.91 }],
   });
   assert.match(out.promptName, /^contradiction@/);
   assert.ok(out.messages[1].content.includes("Berlin"));
@@ -130,7 +130,7 @@ test("renderPrompt: relations renders", () => {
   const out = renderPrompt("relations", {
     entityA: "alice",
     entityB: "platform",
-    sharedFacts: [{ content: "alice deployed platform v2", category: "projects" }],
+    sharedFacts: [{ content: "alice deployed platform v2", category: "system" }],
   });
   assert.match(out.promptName, /^relations@/);
   assert.ok(out.messages[1].content.includes("alice"));
@@ -140,7 +140,7 @@ test("renderPrompt: relations renders", () => {
 test("renderPrompt: brief renders", () => {
   const out = renderPrompt("brief", {
     generatedAt: "2026-04-25",
-    sections: { "Open threads": ["thread one", "thread two"] },
+    sections: { System: ["thread one", "thread two"] },
   });
   assert.match(out.promptName, /^brief@/);
   assert.ok(out.messages[1].content.includes("thread one"));

@@ -33,7 +33,7 @@ const defaultDeps: StaleDeps = {
  */
 export const scanStaleFacts = async (config: BikkyConfig, deps: StaleDeps = defaultDeps): Promise<void> => {
   const threshold = config.daemon.staleness_threshold_days || 30;
-  const categories = ["infrastructure", "projects", "decisions"];
+  const categories = ["engineering", "product", "human", "system"];
   const limit = 3;
 
   if (!deps.isReady()) {

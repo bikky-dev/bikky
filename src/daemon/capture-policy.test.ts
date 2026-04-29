@@ -36,15 +36,17 @@ describe("daemon/capture-policy", () => {
 
   it("maps each capture kind to approved subtypes", () => {
     assert.ok(CAPTURE_KIND_SUBTYPES.fact?.includes("codebase_map"));
+    assert.ok(CAPTURE_KIND_SUBTYPES.fact?.includes("product_decision"));
+    assert.ok(CAPTURE_KIND_SUBTYPES.fact?.includes("activity_event"));
     assert.ok(CAPTURE_KIND_SUBTYPES.summary?.includes("episode"));
     assert.ok(CAPTURE_KIND_SUBTYPES.distilled?.includes("convention"));
   });
 
   it("maps categories to deterministic default fact subtypes", () => {
-    assert.strictEqual(subtypeForCategory("codebase"), "codebase_map");
-    assert.strictEqual(subtypeForCategory("infrastructure"), "infra_topology");
-    assert.strictEqual(subtypeForCategory("people"), "preference");
-    assert.strictEqual(subtypeForCategory("preferences"), "preference");
+    assert.strictEqual(subtypeForCategory("engineering"), "codebase_map");
+    assert.strictEqual(subtypeForCategory("product"), "domain_rule");
+    assert.strictEqual(subtypeForCategory("human"), "preference");
+    assert.strictEqual(subtypeForCategory("system"), "codebase_map");
   });
 
   it("selects prompt versions by subtype lifecycle", () => {

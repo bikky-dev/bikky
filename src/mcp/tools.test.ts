@@ -179,7 +179,7 @@ describe("mcp/tools handlers", () => {
         result: {
           points: [{
             id: "existing-1",
-            payload: { content: "x", category: "infrastructure", reinforcement_count: 2 },
+            payload: { content: "x", category: "engineering", reinforcement_count: 2 },
           }],
         },
       }));
@@ -191,7 +191,7 @@ describe("mcp/tools handlers", () => {
 
       const result = await invoke("memory_store", {
         content: "qdrant runs on port 6333",
-        category: "infrastructure",
+        category: "engineering",
         entities: ["qdrant"],
       });
 
@@ -212,14 +212,14 @@ describe("mcp/tools handlers", () => {
         result: [{
           id: "near-dup",
           score: THRESHOLD_DUPLICATE + 0.01,
-          payload: { content: "near", category: "infrastructure", reinforcement_count: 1 },
+          payload: { content: "near", category: "engineering", reinforcement_count: 1 },
         }],
       }));
       on("/points/payload", () => ({ status: "ok" }));
 
       const result = await invoke("memory_store", {
         content: "qdrant listens on 6333",
-        category: "infrastructure",
+        category: "engineering",
         entities: ["qdrant"],
       });
 
@@ -243,7 +243,7 @@ describe("mcp/tools handlers", () => {
 
       const result = await invoke("memory_store", {
         content: "platform is on AWS",
-        category: "infrastructure",
+        category: "engineering",
         entities: ["Platform"],
         importance: 0.7,
       });
@@ -275,7 +275,7 @@ describe("mcp/tools handlers", () => {
 
       const result = await invoke("memory_store", {
         content: "platform deploy uses password=supersecretvalue",
-        category: "infrastructure",
+        category: "engineering",
         entities: ["platform"],
       });
 
@@ -304,7 +304,7 @@ describe("mcp/tools handlers", () => {
           score: related,
           payload: {
             content: "old fact about platform",
-            category: "infrastructure",
+            category: "engineering",
             entities: ["platform"],
           },
         }],
@@ -313,7 +313,7 @@ describe("mcp/tools handlers", () => {
 
       const result = await invoke("memory_store", {
         content: "new fact about platform",
-        category: "infrastructure",
+        category: "engineering",
         entities: ["platform"],
       });
 
@@ -344,7 +344,7 @@ describe("mcp/tools handlers", () => {
 
       const result = await invoke("memory_store", {
         content: "qdrant now on 7000",
-        category: "infrastructure",
+        category: "engineering",
         entities: ["qdrant"],
         supersedes: "old-fact-id",
       });
@@ -369,7 +369,7 @@ describe("mcp/tools handlers", () => {
 
       const result = await invoke("memory_store", {
         content: "saber owns platform",
-        category: "team",
+        category: "human",
         entities: ["saber", "platform"],
         relation: { from: "Saber", type: "Owns", to: "Platform" },
       });
@@ -398,7 +398,7 @@ describe("mcp/tools handlers", () => {
 
       const result = await invoke("memory_store", {
         content: "saber owns platform",
-        category: "team",
+        category: "human",
         entities: ["saber", "platform"],
         relation: { from: "api_key=relationsecret", type: "Owns", to: "Platform" },
       });
@@ -454,8 +454,8 @@ describe("mcp/tools handlers", () => {
 
       await invoke("memory_recall", {
         query: "q",
-        category: "infrastructure",
-        domain: "work",
+        category: "engineering",
+        domain: "software_engineering",
         kind: "fact",
         entity: "Qdrant",
         since: "2025-01-01T00:00:00Z",
@@ -487,9 +487,9 @@ describe("mcp/tools handlers", () => {
       // with three scores and limit=2.
       on("/points/search", () => ({
         result: [
-          { id: "a", score: 0.6, payload: { content: "A", category: "infrastructure", entities: [], reinforcement_count: 1, confidence: 0.9, importance: 0.5, created_at: new Date().toISOString() } },
-          { id: "b", score: 0.9, payload: { content: "B", category: "infrastructure", entities: [], reinforcement_count: 1, confidence: 0.9, importance: 0.5, created_at: new Date().toISOString() } },
-          { id: "c", score: 0.75, payload: { content: "C", category: "infrastructure", entities: [], reinforcement_count: 1, confidence: 0.9, importance: 0.5, created_at: new Date().toISOString() } },
+          { id: "a", score: 0.6, payload: { content: "A", category: "engineering", entities: [], reinforcement_count: 1, confidence: 0.9, importance: 0.5, created_at: new Date().toISOString() } },
+          { id: "b", score: 0.9, payload: { content: "B", category: "engineering", entities: [], reinforcement_count: 1, confidence: 0.9, importance: 0.5, created_at: new Date().toISOString() } },
+          { id: "c", score: 0.75, payload: { content: "C", category: "engineering", entities: [], reinforcement_count: 1, confidence: 0.9, importance: 0.5, created_at: new Date().toISOString() } },
         ],
       }));
 
@@ -510,8 +510,8 @@ describe("mcp/tools handlers", () => {
           score: 0.91,
           payload: {
             content: "JSON recall should be easy to parse",
-            category: "infrastructure",
-            domain: "work",
+            category: "engineering",
+            domain: "software_engineering",
             kind: "fact",
             source: "user",
             entities: ["mcp", "recall"],
@@ -539,7 +539,7 @@ describe("mcp/tools handlers", () => {
       assert.equal(parsed.results.length, 1);
       assert.equal(parsed.results[0].id, "fact-json");
       assert.equal(parsed.results[0].content, "JSON recall should be easy to parse");
-      assert.equal(parsed.results[0].category, "infrastructure");
+      assert.equal(parsed.results[0].category, "engineering");
       assert.deepEqual(parsed.results[0].entities, ["mcp", "recall"]);
       assert.equal(parsed.results[0].confidence, 0.88);
       assert.equal(parsed.results[0].score, 0.91);
@@ -555,7 +555,7 @@ describe("mcp/tools handlers", () => {
             score: 1 - i / 100,
             payload: {
               content: `fact ${i}`,
-              category: "infrastructure",
+              category: "engineering",
               entities: [],
               confidence: 0.9,
               reinforcement_count: 1,
@@ -583,7 +583,7 @@ describe("mcp/tools handlers", () => {
         result: [{
           id: "p1",
           score: 0.9,
-          payload: { content: "primary", category: "infrastructure", entities: ["a"], reinforcement_count: 1 },
+          payload: { content: "primary", category: "engineering", entities: ["a"], reinforcement_count: 1 },
         }],
       }));
       // Scroll mock dispatches based on filter shape inside the body.
@@ -598,7 +598,7 @@ describe("mcp/tools handlers", () => {
         if (fromCond?.match.value === "a") {
           return { result: { points: [{
             id: "rel1",
-            payload: { content: "a -> b", category: "team", entities: ["a", "b"], from_entity: "a", to_entity: "b", relation_type: "uses", reinforcement_count: 1 },
+            payload: { content: "a -> b", category: "human", entities: ["a", "b"], from_entity: "a", to_entity: "b", relation_type: "uses", reinforcement_count: 1 },
           }] } };
         }
         if (toCond?.match.value === "a") {
@@ -607,7 +607,7 @@ describe("mcp/tools handlers", () => {
         if (entitiesCond?.match.value === "b") {
           return { result: { points: [{
             id: "neighbor",
-            payload: { content: "b is interesting", category: "infrastructure", entities: ["b"], reinforcement_count: 1 },
+            payload: { content: "b is interesting", category: "engineering", entities: ["b"], reinforcement_count: 1 },
           }] } };
         }
         return { result: { points: [] } };
@@ -627,7 +627,7 @@ describe("mcp/tools handlers", () => {
           score: 0.9,
           payload: {
             content: "primary",
-            category: "infrastructure",
+            category: "engineering",
             entities: ["a"],
             confidence: 0.9,
             reinforcement_count: 1,
@@ -645,7 +645,7 @@ describe("mcp/tools handlers", () => {
         if (fromCond?.match.value === "a") {
           return { result: { points: [{
             id: "rel1",
-            payload: { content: "a -> b", category: "team", entities: ["a", "b"], from_entity: "a", to_entity: "b", relation_type: "uses", reinforcement_count: 1 },
+            payload: { content: "a -> b", category: "human", entities: ["a", "b"], from_entity: "a", to_entity: "b", relation_type: "uses", reinforcement_count: 1 },
           }] } };
         }
         if (toCond?.match.value === "a") {
@@ -657,7 +657,7 @@ describe("mcp/tools handlers", () => {
             score: 0.7,
             payload: {
               content: "b is interesting",
-              category: "infrastructure",
+              category: "engineering",
               entities: ["b"],
               confidence: 0.8,
               reinforcement_count: 1,
@@ -695,19 +695,19 @@ describe("mcp/tools handlers", () => {
 
         if (entityCond) {
           return { result: { points: [
-            { id: "f1", payload: { content: "platform fact", category: "infrastructure", entities: ["platform"], reinforcement_count: 1 } },
+            { id: "f1", payload: { content: "platform fact", category: "engineering", entities: ["platform"], reinforcement_count: 1 } },
           ] } };
         }
         if (fromCond) {
           return { result: { points: [
-            { id: "r1", payload: { content: "platform uses qdrant", category: "team", from_entity: "platform", to_entity: "qdrant", relation_type: "uses" } },
+            { id: "r1", payload: { content: "platform uses qdrant", category: "human", from_entity: "platform", to_entity: "qdrant", relation_type: "uses" } },
           ] } };
         }
         if (toCond) {
           // Same relation appears as 'to' lookup too — must be deduped by id.
           return { result: { points: [
-            { id: "r1", payload: { content: "platform uses qdrant", category: "team", from_entity: "platform", to_entity: "qdrant", relation_type: "uses" } },
-            { id: "r2", payload: { content: "saber owns platform", category: "team", from_entity: "saber", to_entity: "platform", relation_type: "owns" } },
+            { id: "r1", payload: { content: "platform uses qdrant", category: "human", from_entity: "platform", to_entity: "qdrant", relation_type: "uses" } },
+            { id: "r2", payload: { content: "saber owns platform", category: "human", from_entity: "saber", to_entity: "platform", relation_type: "owns" } },
           ] } };
         }
         return { result: { points: [] } };

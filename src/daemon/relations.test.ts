@@ -7,7 +7,7 @@ import type { QdrantScrollResult } from "./qdrant.js";
 const fact = (overrides: Partial<QdrantScrollResult>): QdrantScrollResult => ({
   id: "fact-1",
   content: "Bikky uses Qdrant for memory storage.",
-  category: "codebase",
+  category: "engineering",
   entities: [],
   confidence: 0.9,
   last_reinforced_at: "2026-04-27T09:00:00.000Z",

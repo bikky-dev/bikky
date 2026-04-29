@@ -357,7 +357,7 @@ const storeRelation = async (
 
   const id = await qdrant.storeFact({
     content,
-    category: "people",
+    category: "human",
     domain: DEFAULT_CAPTURE_CONTEXT.domain,
     kind: "relation",
     entities: [fromEntity, toEntity],

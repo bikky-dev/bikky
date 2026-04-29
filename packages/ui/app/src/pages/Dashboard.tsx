@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { ApiError } from "../lib/api";
 import { getStats, type MemoryStats } from "../lib/statsCache";
 import { CATEGORY_COLORS } from "../lib/format";
-import { ONTOLOGY_GROUPS, SUBTYPE_BY_VALUE, ontologyLabel } from "../lib/ontology";
+import { CATEGORY_OPTIONS, SUBTYPES_BY_CATEGORY, ontologyLabel } from "../lib/ontology";
 import Badge from "../components/Badge";
 
 type LoadState<T> = { loading: true } | { loading: false; data: T } | { loading: false; error: string };
@@ -147,20 +147,23 @@ export default function Dashboard() {
       {/* Subtype navigation */}
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5 mb-8">
         <div className="mb-4">
-          <h3 className="text-sm font-medium text-zinc-300">Browse by subtype</h3>
+          <h3 className="text-sm font-medium text-zinc-300">Browse by category and subtype</h3>
           <p className="mt-1 text-xs text-zinc-500">
-            Subtypes are narrower ontology buckets. Pick one to open Memory with only that subtype filter active.
+            Categories are the four top-level ontology areas. Subtypes are the concrete memory shapes inside each category.
           </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {ONTOLOGY_GROUPS.map((group) => (
-            <div key={group.id} className="rounded-md border border-zinc-800 bg-zinc-950/50 p-3">
-              <p className="text-sm font-medium text-zinc-200">{group.label}</p>
-              <p className="mt-1 text-xs text-zinc-500">{group.description}</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          {CATEGORY_OPTIONS.map((category) => (
+            <div key={category.value} className="rounded-md border border-zinc-800 bg-zinc-950/50 p-3">
+              <Link
+                to={`/memory?category=${category.value}`}
+                className="text-sm font-medium text-zinc-200 hover:text-white"
+              >
+                {category.label}
+              </Link>
+              <p className="mt-1 text-xs text-zinc-500">{category.description}</p>
               <div className="mt-3 flex flex-wrap gap-1.5">
-                {group.subtypes.map((subtypeValue) => {
-                  const subtype = SUBTYPE_BY_VALUE[subtypeValue];
-                  if (!subtype) return null;
+                {SUBTYPES_BY_CATEGORY[category.value].map((subtype) => {
                   const count = bySubtype?.[subtype.value] ?? 0;
                   return (
                     <Link

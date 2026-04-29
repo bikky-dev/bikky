@@ -20,6 +20,7 @@ import {
   redactStorageText,
   type RedactionSummary,
 } from "../privacy/redaction.js";
+import { resolveActorIdentity } from "../provenance/actor.js";
 
 export interface WorkspaceScope {
   workspaceId?: string;
@@ -168,7 +169,7 @@ export const buildSessionSummaryPayload = (input: {
   const payload: Record<string, unknown> = {
     ...existingPayload,
     content: redactedContent.text,
-    category: "projects",
+    category: "system",
     domain: DEFAULT_CAPTURE_CONTEXT.domain,
     kind: "summary",
     memory_subtype: "session_index",
@@ -225,7 +226,8 @@ export const updateSessionSummary = async (input: {
   }
 
   const config = input.config ?? loadConfig();
-  const scope: WorkspaceScope = {};
+  const actor = resolveActorIdentity({ config });
+  const scope: WorkspaceScope = actor.actor_id ? { actorId: actor.actor_id } : {};
   const segments = segmentTranscriptIntoEpisodes({
     sessionId: input.sessionId,
     transcript: input.transcript,

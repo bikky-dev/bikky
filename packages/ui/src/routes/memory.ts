@@ -11,15 +11,10 @@ import { addRedactionPayload, combineRedactions, redactStorageText } from "../li
 export const memoryRoutes = new Hono();
 
 const CATEGORY_VALUES = [
-  "codebase",
-  "infrastructure",
-  "operations",
-  "decisions",
-  "product_domain",
-  "projects",
-  "people",
-  "preferences",
-  "observations",
+  "engineering",
+  "product",
+  "human",
+  "system",
 ] as const;
 
 const KIND_VALUES = ["fact", "summary", "distilled", "relation", "telemetry"] as const;
@@ -31,8 +26,18 @@ const MEMORY_SUBTYPE_VALUES = [
   "access_pattern",
   "operational_procedure",
   "domain_rule",
+  "product_decision",
+  "product_requirement",
+  "user_workflow",
+  "roadmap_item",
+  "success_metric",
+  "market_insight",
   "troubleshooting_gotcha",
   "preference",
+  "person_profile",
+  "ownership_note",
+  "working_agreement",
+  "activity_event",
   "session_index",
   "episode",
   "workstream",
@@ -100,6 +105,7 @@ memoryRoutes.get("/search", async (c) => {
     memorySubtype: c.req.query("memory_subtype"),
     entity: c.req.query("entity"),
     source: c.req.query("source"),
+    actorId: c.req.query("actor_id"),
     excludeEntityType: true,
   });
 
@@ -121,6 +127,7 @@ memoryRoutes.get("/browse", async (c) => {
     memorySubtype: c.req.query("memory_subtype"),
     entity: c.req.query("entity"),
     source: c.req.query("source"),
+    actorId: c.req.query("actor_id"),
     since: c.req.query("since"),
     until: c.req.query("until"),
     excludeEntityType: true,
@@ -225,6 +232,7 @@ memoryRoutes.post("/facts", async (c) => {
     entities: string[];
     domain?: string;
     kind?: string;
+    actor_id?: string;
     confidence?: number;
     metadata?: Record<string, string>;
     from_entity?: string;
@@ -260,10 +268,11 @@ memoryRoutes.post("/facts", async (c) => {
   const payload: Record<string, unknown> = {
     content: redactedContent.text,
     category: body.category,
-    domain: body.domain || "work",
+    domain: body.domain || "software_engineering",
     kind: body.kind || "fact",
     entities: redactedEntities.map((e) => e.text.toLowerCase()),
     source: "user",
+    ...(body.actor_id ? { actor_id: body.actor_id } : {}),
     confidence: body.confidence ?? 0.9,
     content_hash: await hashContent(redactedContent.text),
     reinforcement_count: 0,
@@ -542,7 +551,7 @@ memoryRoutes.get("/graph", async (c) => {
   let nodes = Array.from(entityStats.entries()).map(([id, stat]) => ({
     id, label: id, factCount: stat.factCount,
     categories: Array.from(stat.categories),
-    primaryCategory: Array.from(stat.categories).sort((a, b) => a.localeCompare(b))[0] ?? "infrastructure",
+    primaryCategory: Array.from(stat.categories).sort((a, b) => a.localeCompare(b))[0] ?? "engineering",
   }));
 
   let edges = Array.from(edgeMap.values());

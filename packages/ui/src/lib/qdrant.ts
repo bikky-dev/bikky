@@ -13,6 +13,7 @@ export interface FactPayload {
   domain?: string;
   kind?: string;
   memory_subtype?: string | null;
+  actor_id?: string;
   entities: string[];
   source?: string;
   confidence: number;
@@ -170,6 +171,7 @@ export function buildFilter(opts: {
   memorySubtype?: string;
   entity?: string;
   source?: string;
+  actorId?: string;
   since?: string;
   until?: string;
   excludeSuperseded?: boolean;
@@ -184,6 +186,7 @@ export function buildFilter(opts: {
   if (opts.memorySubtype) must.push({ key: "memory_subtype", match: { value: opts.memorySubtype } });
   if (opts.entity) must.push({ key: "entities", match: { value: opts.entity.toLowerCase() } });
   if (opts.source) must.push({ key: "source", match: sourceFilterValue(opts.source) });
+  if (opts.actorId) must.push({ key: "actor_id", match: { value: opts.actorId } });
   if (opts.since) must.push({ key: "created_at", range: { gte: opts.since } });
   if (opts.until) must.push({ key: "created_at", range: { lte: opts.until } });
   // Phase 5a entity_type sidecar points are not user-facing facts; opt-in to exclude.

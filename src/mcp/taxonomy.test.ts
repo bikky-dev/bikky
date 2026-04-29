@@ -45,15 +45,10 @@ describe("ontology values", () => {
   it("defines canonical software-engineering categories", () => {
     const values = canonicalCategoryValues();
     assert.deepStrictEqual(values, [
-      "codebase",
-      "infrastructure",
-      "operations",
-      "decisions",
-      "product_domain",
-      "projects",
-      "people",
-      "preferences",
-      "observations",
+      "engineering",
+      "product",
+      "human",
+      "system",
     ]);
   });
 
@@ -133,6 +128,16 @@ describe("memory subtypes", () => {
     assert.deepStrictEqual(MEMORY_SUBTYPES.distilled, ["convention"]);
     assert.deepStrictEqual(MEMORY_SUBTYPES.relation, []);
     assert.ok(MEMORY_SUBTYPES.telemetry.includes("recall_event"));
+    assert.ok(MEMORY_SUBTYPES.fact.includes("product_decision"));
+    assert.ok(MEMORY_SUBTYPES.fact.includes("product_requirement"));
+    assert.ok(MEMORY_SUBTYPES.fact.includes("user_workflow"));
+    assert.ok(MEMORY_SUBTYPES.fact.includes("roadmap_item"));
+    assert.ok(MEMORY_SUBTYPES.fact.includes("success_metric"));
+    assert.ok(MEMORY_SUBTYPES.fact.includes("market_insight"));
+    assert.ok(MEMORY_SUBTYPES.fact.includes("person_profile"));
+    assert.ok(MEMORY_SUBTYPES.fact.includes("ownership_note"));
+    assert.ok(MEMORY_SUBTYPES.fact.includes("working_agreement"));
+    assert.ok(MEMORY_SUBTYPES.fact.includes("activity_event"));
     // Removed in taxonomy-slim cleanup:
     assert.ok(!MEMORY_SUBTYPES.fact.includes("deployment_procedure" as never));
     assert.ok(!MEMORY_SUBTYPES.fact.includes("ownership" as never));
@@ -150,8 +155,10 @@ describe("memory subtypes", () => {
   it("provides deterministic subtype defaults and category/layer hints", () => {
     assert.strictEqual(defaultMemorySubtypeForKind("fact"), "codebase_map");
     assert.strictEqual(defaultMemorySubtypeForKind("relation"), null);
-    assert.strictEqual(categoryForMemorySubtype("architecture_decision"), "decisions");
-    assert.strictEqual(categoryForMemorySubtype("preference"), "preferences");
+    assert.strictEqual(categoryForMemorySubtype("architecture_decision"), "engineering");
+    assert.strictEqual(categoryForMemorySubtype("product_decision"), "product");
+    assert.strictEqual(categoryForMemorySubtype("preference"), "human");
+    assert.strictEqual(categoryForMemorySubtype("session_index"), "system");
     assert.strictEqual(layerForMemorySubtype("workstream"), "workstream");
     assert.strictEqual(layerForMemorySubtype("episode"), "episode");
     assert.ok(memorySubtypeValues().includes("convention"));
@@ -162,10 +169,14 @@ describe("memory subtypes", () => {
 
 describe("normalization", () => {
   it("normalizes canonical categories and useful descriptive variants", () => {
-    assert.strictEqual(normalizeCategory("Infrastructure"), "infrastructure");
-    assert.strictEqual(normalizeCategory("infra-stuff"), "infrastructure");
-    assert.strictEqual(normalizeCategory("owner"), "people");
-    assert.strictEqual(normalizeCategory("something_random"), "observations");
+    assert.strictEqual(normalizeCategory("Engineering"), "engineering");
+    assert.strictEqual(normalizeCategory("Infrastructure"), "engineering");
+    assert.strictEqual(normalizeCategory("infra-stuff"), "engineering");
+    assert.strictEqual(normalizeCategory("product decision"), "product");
+    assert.strictEqual(normalizeCategory("owner"), "human");
+    assert.strictEqual(normalizeCategory("preferences"), "human");
+    assert.strictEqual(normalizeCategory("workstream"), "system");
+    assert.strictEqual(normalizeCategory("something_random"), "engineering");
   });
 
   it("normalizes canonical domain profiles only", () => {
@@ -195,14 +206,18 @@ describe("normalization", () => {
 
 describe("decay policy", () => {
   it("uses category + domain profile decay values", () => {
-    assert.strictEqual(getDecayHalfLife({ category: "codebase", domain: "software_engineering" }), 120);
-    assert.strictEqual(getDecayHalfLife({ category: "projects", domain: "software_engineering" }), 45);
-    assert.strictEqual(getDecayHalfLife({ category: "observations", domain: "research" }), 90);
+    assert.strictEqual(getDecayHalfLife({ category: "engineering", domain: "software_engineering" }), 120);
+    assert.strictEqual(getDecayHalfLife({ category: "system", domain: "software_engineering" }), 45);
+    assert.strictEqual(getDecayHalfLife({ category: "product", domain: "research" }), 120);
   });
 
-  it("does not special-case old category/domain inputs", () => {
-    assert.strictEqual(getDecayHalfLife({ category: "observation", domain: "work" }), DECAY_DEFAULT_HALF_LIFE);
-    assert.strictEqual(getDecayHalfLife({ category: "team", domain: "personal" }), DECAY_DEFAULT_HALF_LIFE);
+  it("maps legacy category aliases into the four-category ontology", () => {
+    assert.strictEqual(normalizeCategory("codebase"), "engineering");
+    assert.strictEqual(normalizeCategory("product_domain"), "product");
+    assert.strictEqual(normalizeCategory("people"), "human");
+    assert.strictEqual(normalizeCategory("observations"), "engineering");
+    assert.strictEqual(getDecayHalfLife({ category: "observation", domain: "work" }), 120);
+    assert.strictEqual(getDecayHalfLife({ category: "team", domain: "personal" }), 180);
   });
 
   it("does not decay relation or telemetry objects", () => {
@@ -226,6 +241,7 @@ describe("QDRANT_INDEXES", () => {
     assert.strictEqual(indexes.get("content_hash"), "keyword");
     assert.strictEqual(indexes.get("entities"), "keyword");
     assert.strictEqual(indexes.get("workspace_id"), "keyword");
+    assert.strictEqual(indexes.get("actor_id"), "keyword");
     assert.strictEqual(indexes.get("episode_id"), "keyword");
     assert.strictEqual(indexes.get("workstream_key"), "keyword");
     assert.strictEqual(indexes.get("task_key"), "keyword");

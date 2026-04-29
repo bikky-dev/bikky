@@ -27,8 +27,8 @@ import type { FactPayload, QdrantPoint } from "./types.js";
 function makePayload(overrides: Partial<FactPayload> = {}): FactPayload {
   return {
     content: "test content",
-    category: "infrastructure",
-    domain: "work",
+    category: "engineering",
+    domain: "software_engineering",
     kind: "fact",
     entities: ["test"],
     source: "agent",
@@ -60,43 +60,43 @@ function makePoint(overrides: Partial<QdrantPoint> = {}, payloadOverrides: Parti
 
 describe("contentHash", () => {
   it("returns a hex string", () => {
-    const hash = contentHash("infrastructure", "some content");
+    const hash = contentHash("engineering", "some content");
     assert.match(hash, /^[a-f0-9]{64}$/);
   });
 
   it("is deterministic — same input produces same hash", () => {
-    const a = contentHash("decisions", "we chose X");
-    const b = contentHash("decisions", "we chose X");
+    const a = contentHash("engineering", "we chose X");
+    const b = contentHash("engineering", "we chose X");
     assert.strictEqual(a, b);
   });
 
   it("is case-insensitive", () => {
-    const a = contentHash("infrastructure", "ClickHouse port 8123");
-    const b = contentHash("infrastructure", "clickhouse port 8123");
+    const a = contentHash("engineering", "ClickHouse port 8123");
+    const b = contentHash("engineering", "clickhouse port 8123");
     assert.strictEqual(a, b);
   });
 
   it("normalizes whitespace", () => {
-    const a = contentHash("observation", "hello   world");
-    const b = contentHash("observation", "hello world");
+    const a = contentHash("engineering", "hello   world");
+    const b = contentHash("engineering", "hello world");
     assert.strictEqual(a, b);
   });
 
   it("trims leading/trailing whitespace", () => {
-    const a = contentHash("observation", "  hello world  ");
-    const b = contentHash("observation", "hello world");
+    const a = contentHash("engineering", "  hello world  ");
+    const b = contentHash("engineering", "hello world");
     assert.strictEqual(a, b);
   });
 
   it("different categories produce different hashes", () => {
-    const a = contentHash("infrastructure", "content");
-    const b = contentHash("decisions", "content");
+    const a = contentHash("engineering", "content");
+    const b = contentHash("product", "content");
     assert.notStrictEqual(a, b);
   });
 
   it("different content produces different hashes", () => {
-    const a = contentHash("infrastructure", "content A");
-    const b = contentHash("infrastructure", "content B");
+    const a = contentHash("engineering", "content A");
+    const b = contentHash("engineering", "content B");
     assert.notStrictEqual(a, b);
   });
 });
@@ -166,7 +166,7 @@ describe("lastActivityDate", () => {
     // We need to actually use a payload where last_reinforced_at is missing.
     const payload: FactPayload = {
       content: "test",
-      category: "infrastructure",
+      category: "engineering",
       entities: [],
       confidence: 0.9,
       content_hash: "abc",
@@ -186,7 +186,7 @@ describe("lastActivityDate", () => {
   it("returns undefined when no dates are present", () => {
     const payload: FactPayload = {
       content: "test",
-      category: "infrastructure",
+      category: "engineering",
       entities: [],
       confidence: 0.9,
       content_hash: "abc",
@@ -218,7 +218,7 @@ describe("computeEffectiveConfidence", () => {
 
   it("decays confidence for old facts", () => {
     const payload = makePayload({
-      category: "infrastructure",
+      category: "engineering",
       confidence: 0.9,
       last_reinforced_at: new Date(Date.now() - 86400000 * 60).toISOString(), // 60 days ago
       last_verified_at: undefined,
@@ -229,11 +229,11 @@ describe("computeEffectiveConfidence", () => {
   });
 
   it("returns ~50% confidence at half-life", () => {
-    // infrastructure half-life is 60 days
+    // system half-life is 45 days
     const payload = makePayload({
-      category: "infrastructure",
+      category: "system",
       confidence: 1.0,
-      last_reinforced_at: new Date(Date.now() - 86400000 * 60).toISOString(),
+      last_reinforced_at: new Date(Date.now() - 86400000 * 45).toISOString(),
       last_verified_at: undefined,
     });
     const effective = computeEffectiveConfidence(payload);
@@ -244,27 +244,27 @@ describe("computeEffectiveConfidence", () => {
     const dayOffset = 86400000 * 90; // 90 days
     const pastDate = new Date(Date.now() - dayOffset).toISOString();
 
-    const infraPayload = makePayload({
-      category: "infrastructure",
+    const systemPayload = makePayload({
+      category: "system",
       confidence: 0.9,
       last_reinforced_at: pastDate,
       last_verified_at: undefined,
     });
 
-    const prefsPayload = makePayload({
-      category: "preferences",
+    const humanPayload = makePayload({
+      category: "human",
       confidence: 0.9,
       last_reinforced_at: pastDate,
       last_verified_at: undefined,
     });
 
-    const infraEffective = computeEffectiveConfidence(infraPayload);
-    const prefsEffective = computeEffectiveConfidence(prefsPayload);
+    const systemEffective = computeEffectiveConfidence(systemPayload);
+    const humanEffective = computeEffectiveConfidence(humanPayload);
 
-    // preferences decay slower (half-life 365) than infrastructure (half-life 60)
+    // human context decays slower than system lifecycle context.
     assert.ok(
-      prefsEffective > infraEffective,
-      `preferences (${prefsEffective}) should decay slower than infrastructure (${infraEffective})`,
+      humanEffective > systemEffective,
+      `human (${humanEffective}) should decay slower than system (${systemEffective})`,
     );
   });
 });
@@ -410,11 +410,11 @@ describe("buildFilter", () => {
   });
 
   it("adds category filter", () => {
-    const result = buildFilter({ category: "infrastructure" });
+    const result = buildFilter({ category: "engineering" });
     assert.ok(result);
     const catFilter = result.must.find((c) => c.key === "category");
     assert.ok(catFilter);
-    assert.deepStrictEqual(catFilter.match, { value: "infrastructure" });
+    assert.deepStrictEqual(catFilter.match, { value: "engineering" });
   });
 
   it("adds domain filter", () => {
@@ -519,8 +519,8 @@ describe("buildFilter", () => {
 
   it("combines all filters together", () => {
     const result = buildFilter({
-      category: "infrastructure",
-      domain: "work",
+      category: "engineering",
+      domain: "software_engineering",
       kind: "fact",
       workspace_id: "platform",
       entity: "redis",
@@ -539,9 +539,9 @@ describe("buildFilter", () => {
 
 describe("formatFact", () => {
   it("includes category and content", () => {
-    const point = makePoint({}, { category: "infrastructure", content: "Redis on port 6379" });
+    const point = makePoint({}, { category: "engineering", content: "Redis on port 6379" });
     const formatted = formatFact(point);
-    assert.ok(formatted.includes("[infrastructure]"));
+    assert.ok(formatted.includes("[engineering]"));
     assert.ok(formatted.includes("Redis on port 6379"));
   });
 

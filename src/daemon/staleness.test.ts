@@ -18,12 +18,12 @@ function makeConfig(overrides: Partial<BikkyConfig["daemon"]> = {}): BikkyConfig
   };
 }
 
-function makeFact(id: string, content = "x", category = "infrastructure"): QdrantScrollResult {
+function makeFact(id: string, content = "x", category = "engineering"): QdrantScrollResult {
   return {
     id,
     content,
     category,
-    domain: "work",
+    domain: "software_engineering",
     kind: "fact",
     entities: [],
     last_reinforced_at: "2020-01-01T00:00:00.000Z",

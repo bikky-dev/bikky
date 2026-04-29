@@ -9,16 +9,14 @@ import { buildOpts, wrapData, type PromptDescriptor, type RenderedPrompt } from 
 
 export const BRIEF_PROMPT_DESCRIPTOR: PromptDescriptor = {
   id: "brief",
-  version: "2026-04-25-1",
+  version: "2026-04-29-1",
 };
 
 const ALLOWED_HEADINGS = [
-  "Key People & Team",
-  "Active Projects",
-  "Infrastructure Overview",
-  "Recent Decisions",
-  "Known Gotchas",
-  "Preferences & Conventions",
+  "Engineering",
+  "Product",
+  "Human",
+  "System",
 ] as const;
 
 export interface BriefInput {

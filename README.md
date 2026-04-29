@@ -126,7 +126,7 @@ export QDRANT_URL="http://localhost:6333"
 
 ## Memory ontology
 
-New daemon captures use a layered memory ontology. At a high level, bikky structures memory like this:
+bikky separates what a memory is about from where it came from. New captures use four top-level categories, concrete subtypes, small object kinds, activity domains, and provenance fields:
 
 ```text
 Workspace
@@ -134,7 +134,7 @@ Workspace
     Project / repo / surface
       Workstream
         Episodes
-          Facts, decisions, preferences, operational notes
+          Facts, decisions, preferences, activity events, operational notes
         Current-state summaries
           What matters now, open questions, blockers
     Cross-cutting memory
@@ -142,6 +142,24 @@ Workspace
 ```
 
 This gives each memory enough context to be recalled precisely without forcing every note into a rigid project hierarchy.
+
+`category` is the broad subject area:
+
+| Category | Captures |
+|----------|----------|
+| `engineering` | Codebase maps, architecture decisions, infrastructure topology, access patterns, operational procedures, troubleshooting gotchas, and engineering conventions |
+| `product` | Domain rules, product decisions, requirements, user workflows, roadmap items, success metrics, and market insight |
+| `human` | Preferences, person profiles, ownership notes, working agreements, and durable actor-action activity events |
+| `system` | Bikky lifecycle memory: session indexes, episodes, workstreams, recall/feedback/outcome telemetry, and aggregate rollups |
+
+`memory_subtype` is the precise capture shape inside a category:
+
+| Category | Subtypes |
+|----------|----------|
+| `engineering` | `codebase_map`, `architecture_decision`, `infra_topology`, `access_pattern`, `operational_procedure`, `troubleshooting_gotcha`, `convention` |
+| `product` | `domain_rule`, `product_decision`, `product_requirement`, `user_workflow`, `roadmap_item`, `success_metric`, `market_insight` |
+| `human` | `preference`, `person_profile`, `ownership_note`, `working_agreement`, `activity_event` |
+| `system` | `session_index`, `episode`, `workstream`, `recall_event`, `feedback_event`, `outcome_event`, `aggregate_rollup` |
 
 `domain` is an activity/knowledge profile. The initial canonical domains are:
 
@@ -153,9 +171,7 @@ This gives each memory enough context to be recalled precisely without forcing e
 | `research` | Source-backed investigation, hypotheses, contradictions, synthesis |
 | `personal_productivity` | Individual goals, routines, preferences, projects, habits |
 
-For `software_engineering`, canonical categories are `codebase`, `infrastructure`, `operations`, `decisions`, `product_domain`, `projects`, `people`, `preferences`, and `observations`.
-
-`kind` stays small (`fact`, `summary`, `distilled`, `relation`, `telemetry`). More specific shape lives in `memory_subtype`, such as `codebase_map`, `architecture_decision`, `episode`, `workstream`, or `failure_mode`.
+`kind` stays small (`fact`, `summary`, `distilled`, `relation`, `telemetry`). `source` is the creator class (`agent`, `system`, `user`, or `docs`). `actor_id` records the stable person or agent associated with a capture/action, and `workspace_id` scopes shared team memory. Legacy stored categories are read through compatibility aliases; this release does not migrate existing stored memories in place.
 
 ---
 

@@ -8,8 +8,8 @@ import {
   CATEGORY_OPTIONS,
   DOMAIN_OPTIONS,
   KIND_OPTIONS,
-  ONTOLOGY_GROUPS,
   SOURCE_OPTIONS,
+  SUBTYPES_BY_CATEGORY,
   SUBTYPE_BY_VALUE,
   ontologyLabel,
 } from "../lib/ontology";
@@ -68,6 +68,7 @@ export default function Memory() {
   const [kind, setKind] = useState(searchParams.get("kind") ?? "");
   const [memorySubtype, setMemorySubtype] = useState(searchParams.get("memory_subtype") ?? "");
   const [source, setSource] = useState(searchParams.get("source") ?? "");
+  const [actorId, setActorId] = useState(searchParams.get("actor_id") ?? "");
   const [entity, setEntity] = useState(searchParams.get("entity") ?? "");
   const [sort, setSort] = useState(searchParams.get("sort") ?? "newest");
   const [since, setSince] = useState(searchParams.get("since") ?? "");
@@ -93,12 +94,13 @@ export default function Memory() {
     if (kind) p.kind = kind;
     if (memorySubtype) p.memory_subtype = memorySubtype;
     if (source) p.source = source;
+    if (actorId) p.actor_id = actorId;
     if (entity) p.entity = entity;
     if (sort) p.sort = sort;
     if (since) p.since = since;
     if (until) p.until = until;
     return p;
-  }, [query, category, domain, kind, memorySubtype, source, entity, sort, since, until]);
+  }, [query, category, domain, kind, memorySubtype, source, actorId, entity, sort, since, until]);
 
   const fetchResults = useCallback(
     async (append = false, offset = 0) => {
@@ -113,6 +115,7 @@ export default function Memory() {
           if (kind) params.set("kind", kind);
           if (memorySubtype) params.set("memory_subtype", memorySubtype);
           if (source) params.set("source", source);
+          if (actorId) params.set("actor_id", actorId);
           if (entity) params.set("entity", entity);
           params.set("limit", String(append ? results.length + PAGE_SIZE : PAGE_SIZE));
 
@@ -130,6 +133,7 @@ export default function Memory() {
           if (kind) params.set("kind", kind);
           if (memorySubtype) params.set("memory_subtype", memorySubtype);
           if (source) params.set("source", source);
+          if (actorId) params.set("actor_id", actorId);
           if (entity) params.set("entity", entity);
           if (sort) params.set("sort", sort);
           if (since) params.set("since", new Date(since).toISOString());
@@ -148,7 +152,7 @@ export default function Memory() {
         setLoading(false);
       }
     },
-    [query, category, domain, kind, memorySubtype, source, entity, sort, since, until, results],
+    [query, category, domain, kind, memorySubtype, source, actorId, entity, sort, since, until, results],
   );
 
   // Initial load and filter changes
@@ -156,7 +160,7 @@ export default function Memory() {
     fetchResults();
     setSearchParams(buildParams(), { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, domain, kind, memorySubtype, source, entity, sort, since, until]);
+  }, [category, domain, kind, memorySubtype, source, actorId, entity, sort, since, until]);
 
   const handleSearch = () => {
     setSearchParams(buildParams(), { replace: true });
@@ -198,6 +202,7 @@ export default function Memory() {
     setKind("");
     setMemorySubtype("");
     setSource("");
+    setActorId("");
   };
 
   const clearAdvancedFilters = () => {
@@ -205,6 +210,7 @@ export default function Memory() {
     setDomain("");
     setKind("");
     setSource("");
+    setActorId("");
   };
 
   const clearAllFilters = () => {
@@ -234,6 +240,7 @@ export default function Memory() {
       onClear: () => setMemorySubtype(""),
     } : null,
     source ? { key: "source", label: "Source", value: ontologyLabel(source), onClear: () => setSource("") } : null,
+    actorId ? { key: "actor_id", label: "Actor", value: actorId, onClear: () => setActorId("") } : null,
     entity ? { key: "entity", label: "Entity", value: entity, onClear: () => setEntity("") } : null,
     since ? { key: "since", label: "From", value: since, onClear: () => setSince("") } : null,
     until ? { key: "until", label: "Until", value: until, onClear: () => setUntil("") } : null,
@@ -305,7 +312,7 @@ export default function Memory() {
           <div>
             <h3 className="text-sm font-medium text-zinc-200">Browse by category and subtype</h3>
             <p className="text-xs text-zinc-500 mt-0.5">
-              Categories are broad ontology buckets. Subtypes are narrower ontology buckets for specific memory shapes.
+              Pick a top-level category or a concrete subtype. There are no extra groups or sub-tabs.
             </p>
           </div>
           {memorySubtype && (
@@ -326,31 +333,27 @@ export default function Memory() {
             <p className="mt-0.5 text-xs text-blue-200/70">{selectedSubtype.description}</p>
           </div>
         )}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {ONTOLOGY_GROUPS.map((group) => (
-            <div key={group.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-              <p className="text-sm font-medium text-zinc-200">{group.label}</p>
-              <p className="text-xs text-zinc-500 mt-1 min-h-8">{group.description}</p>
-              <p className="mt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">Categories</p>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {group.categories.map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => applyCategory(cat)}
-                    className={pillCls(category === cat && !memorySubtype)}
-                    title={`${categoryCount(cat).toLocaleString()} facts`}
-                  >
-                    {ontologyLabel(cat)}
-                    {stats && <span className="ml-1 text-zinc-500">{categoryCount(cat).toLocaleString()}</span>}
-                  </button>
-                ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {CATEGORY_OPTIONS.map((cat) => (
+            <div key={cat.value} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-zinc-200">{cat.label}</p>
+                  <p className="text-xs text-zinc-500 mt-1 min-h-8">{cat.description}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => applyCategory(cat.value)}
+                  className={pillCls(category === cat.value && !memorySubtype)}
+                  title={`${categoryCount(cat.value).toLocaleString()} facts`}
+                >
+                  Browse
+                  {stats && <span className="ml-1 text-zinc-500">{categoryCount(cat.value).toLocaleString()}</span>}
+                </button>
               </div>
               <p className="mt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">Subtypes</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {group.subtypes.map((subtypeValue) => {
-                  const subtype = SUBTYPE_BY_VALUE[subtypeValue];
-                  if (!subtype) return null;
+                {(SUBTYPES_BY_CATEGORY[cat.value] ?? []).map((subtype) => {
                   return (
                     <button
                       key={subtype.value}
@@ -371,10 +374,10 @@ export default function Memory() {
       </div>
 
       {/* Advanced filters */}
-      <details className="mb-6 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3" defaultOpen={Boolean(category || domain || kind || source)}>
+      <details className="mb-6 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3" defaultOpen={Boolean(category || domain || kind || source || actorId)}>
         <summary className="cursor-pointer text-sm font-medium text-zinc-300">
           Advanced filters
-          <span className="ml-2 text-xs font-normal text-zinc-500">category, domain, kind, and source</span>
+          <span className="ml-2 text-xs font-normal text-zinc-500">category, domain, kind, source, and actor</span>
         </summary>
         <div className="mt-3 flex flex-wrap gap-2">
           <select value={category} onChange={(e) => applyCategory(e.target.value)} className={selectCls}>
@@ -401,7 +404,14 @@ export default function Memory() {
               <option key={s.value} value={s.value}>{s.label}</option>
             ))}
           </select>
-          {(category || domain || kind || source) && (
+          <input
+            type="text"
+            value={actorId}
+            onChange={(e) => setActorId(e.target.value)}
+            placeholder="Actor ID"
+            className="bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-300 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
+          />
+          {(category || domain || kind || source || actorId) && (
             <button
               type="button"
               onClick={clearAdvancedFilters}

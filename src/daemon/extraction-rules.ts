@@ -1,12 +1,14 @@
 /**
  * Subtype rule table.
  *
- * The extraction LLM picks a `memory_subtype` from 8 fact subtypes. A few
+ * The extraction LLM picks a `memory_subtype` from the fact ontology. A few
  * subtype pairs are easy to confuse:
  *
  *   - operational_procedure  vs  troubleshooting_gotcha
  *   - codebase_map           vs  infra_topology
- *   - domain_rule            vs  preference
+ *   - domain_rule            vs  product_requirement
+ *   - product_decision       vs  architecture_decision
+ *   - preference             vs  working_agreement
  *
  * This module backstops the LLM with a lightweight keyword scorer. It returns a
  * deterministic top-1 subtype + score for a fact's content, so the daemon can:
@@ -26,8 +28,18 @@ export type FactSubtype =
   | "access_pattern"
   | "operational_procedure"
   | "domain_rule"
+  | "product_decision"
+  | "product_requirement"
+  | "user_workflow"
+  | "roadmap_item"
+  | "success_metric"
+  | "market_insight"
   | "troubleshooting_gotcha"
-  | "preference";
+  | "preference"
+  | "person_profile"
+  | "ownership_note"
+  | "working_agreement"
+  | "activity_event";
 
 export interface SubtypeRuleScore {
   subtype: FactSubtype | null;
@@ -79,15 +91,58 @@ const RULES: Record<FactSubtype, RuleTerm[]> = {
   ],
   domain_rule: [
     { re: /\b(?:must|shall|required|mandatory|invalid\s+if|only\s+if|unless)\b/i, weight: 0.8 },
-    { re: /\b(?:business\s+rule|policy|regulation|sla|slo|kpi|metric)\b/i, weight: 1.0 },
-    { re: /\b(?:workflow|lifecycle|stage|status\s+transition)\b/i, weight: 0.6 },
+    { re: /\b(?:business\s+rule|domain\s+rule|policy|regulation|constraint|vocabulary|definition)\b/i, weight: 1.0 },
     { re: /\b(?:eligible|ineligible|allowed|forbidden|prohibited)\b/i, weight: 0.7 },
+  ],
+  product_decision: [
+    { re: /\b(?:product\s+decision|ux\s+decision|positioning\s+decision|pricing\s+decision)\b/i, weight: 1.0 },
+    { re: /\b(?:prioriti[sz](?:e|ed|ation)|packaging|pricing|positioning|go[-\s]?to[-\s]?market|gtm)\b/i, weight: 0.8 },
+    { re: /\b(?:we\s+(?:chose|decided|picked)|trade[\s-]*off|rationale|because)\b/i, weight: 0.5 },
+  ],
+  product_requirement: [
+    { re: /\b(?:requirement|acceptance\s+criteria|should\s+show|should\s+allow|must\s+show|must\s+allow)\b/i, weight: 1.0 },
+    { re: /\b(?:feature|ux|ui|behavior|behaviour|expected\s+behavior|expected\s+behaviour)\b/i, weight: 0.6 },
+    { re: /\b(?:user\s+can|users\s+can|needs?\s+to|needs?\s+to\s+support)\b/i, weight: 0.7 },
+  ],
+  user_workflow: [
+    { re: /\b(?:user\s+(?:journey|workflow|flow)|job\s+to\s+be\s+done|jtbd|onboarding)\b/i, weight: 1.0 },
+    { re: /\b(?:step\s+\d|then\s+the\s+user|from\s+.+\s+to\s+.+)\b/i, weight: 0.7 },
+    { re: /\b(?:browse|filter|review|approve|merge|export|import)\b/i, weight: 0.4 },
+  ],
+  roadmap_item: [
+    { re: /\b(?:roadmap|planned|next\s+slice|future\s+work|deferred|backlog|milestone|release\s+theme)\b/i, weight: 1.0 },
+    { re: /\b(?:priority|priorities|phase|epic|initiative)\b/i, weight: 0.7 },
+  ],
+  success_metric: [
+    { re: /\b(?:success\s+metric|kpi|metric|slo|sla|activation|retention|adoption|quality\s+metric)\b/i, weight: 1.0 },
+    { re: /\b(?:measure(?:d|ment)?|target|goal|threshold|conversion|usage)\b/i, weight: 0.6 },
+  ],
+  market_insight: [
+    { re: /\b(?:market|audience|customer|community|competitor|competitive|positioning|gtm|launch)\b/i, weight: 1.0 },
+    { re: /\b(?:feedback|persona|segment|differentiator|open[-\s]?source\s+adoption)\b/i, weight: 0.7 },
   ],
   preference: [
     { re: /\b(?:prefer(?:s|red|ence)?|like(?:s|d)?\s+to|tend(?:s|ed)?\s+to)\b/i, weight: 1.0 },
     { re: /\b(?:my|our|team['']?s|user['']?s)\s+(?:style|convention|habit)\b/i, weight: 0.8 },
     { re: /\b(?:always|never|usually|by\s+default)\b/i, weight: 0.4 },
     { re: /\b(?:opinion|taste|personal)\b/i, weight: 0.6 },
+  ],
+  person_profile: [
+    { re: /\b(?:person|profile|role|expertise|background|responsible\s+for)\b/i, weight: 0.9 },
+    { re: /\b(?:is\s+(?:the|a|an)\s+(?:maintainer|engineer|designer|pm|product\s+manager|owner|lead))\b/i, weight: 1.0 },
+  ],
+  ownership_note: [
+    { re: /\b(?:owner|owns|ownership|responsible|approver|approval|escalat(?:e|ion)|accountable)\b/i, weight: 1.0 },
+    { re: /\b(?:maintainer|reviewer|sign[\s-]*off|decision\s+maker)\b/i, weight: 0.7 },
+  ],
+  working_agreement: [
+    { re: /\b(?:working\s+agreement|approval\s+expectation|collaboration\s+norm|operating\s+rule)\b/i, weight: 1.0 },
+    { re: /\b(?:before\s+merg(?:e|ing)|ask\s+before|do\s+not\s+merge|requires\s+approval|expectation)\b/i, weight: 0.8 },
+  ],
+  activity_event: [
+    { re: /\b(?:approved|merged|published|released|closed|opened|created|assigned|reviewed|deployed)\b/i, weight: 0.8 },
+    { re: /\b(?:did|completed|changed|updated|implemented|decided)\b/i, weight: 0.5 },
+    { re: /\b(?:pr|issue|release|deployment|migration|approval)\s*#?\d*\b/i, weight: 0.7 },
   ],
 };
 
@@ -170,7 +225,7 @@ export const compareSubtype = (
 //
 //   - typed token shape (path, URL, code-formatted span, identifier shape)
 //   - subject resolution against the entities array
-//   - structural coherence (transient ⇒ as_of present, ephemeral ⇒ observations)
+//   - structural coherence (transient ⇒ as_of present, short-lived expiry)
 //
 // The LLM remains source of truth — we only DOWNGRADE/REJECT/FLAG, never
 // silently rewrite content.
@@ -348,7 +403,7 @@ export interface VolatilityInput {
 export interface VolatilityCoherenceResult {
   /** Effective volatility after coherence checks (may be downgraded). */
   effective: Volatility;
-  /** Effective category after coherence checks (may be forced to observations). */
+  /** Effective category after coherence checks. Transient facts stay in the four-category ontology. */
   forcedCategory: string | null;
   /** Computed expires_at ISO timestamp, or null for stable/evolving. */
   expiresAt: string | null;
@@ -372,10 +427,8 @@ const addDaysIso = (anchor: string, days: number): string => {
 
 /**
  * Translate the LLM's self-judged volatility into structural decisions:
- *   - transient  → expires_at = as_of + 30d, force category=observations,
- *                  half-life × 0.25
- *   - ephemeral  → expires_at = as_of + 7d, force category=observations,
- *                  half-life × 0.1
+ *   - transient  → expires_at = as_of + 30d, half-life × 0.25
+ *   - ephemeral  → expires_at = as_of + 7d, half-life × 0.1
  *   - stable     → no expiry, half-life × 1.0
  *   - evolving   → no expiry, half-life × 1.0 (default)
  *
@@ -406,18 +459,18 @@ export const verifyVolatilityCoherence = (input: VolatilityInput): VolatilityCoh
   if (effective === "transient") {
     expiresAt = addDaysIso(asOf ?? isoDateOnly(new Date()), 30);
     halfLifeMultiplier = 0.25;
-    if (input.category !== "observations") {
-      forcedCategory = "observations";
+    if (!input.category) {
+      forcedCategory = "engineering";
       const wasNote = input.category ? `was ${input.category}` : "category was unset";
-      notes.push(`category forced to observations (${wasNote}) — volatility=transient`);
+      notes.push(`category defaulted to engineering (${wasNote}) — volatility=transient`);
     }
   } else if (effective === "ephemeral") {
     expiresAt = addDaysIso(asOf ?? isoDateOnly(new Date()), 7);
     halfLifeMultiplier = 0.1;
-    if (input.category !== "observations") {
-      forcedCategory = "observations";
+    if (!input.category) {
+      forcedCategory = "engineering";
       const wasNote = input.category ? `was ${input.category}` : "category was unset";
-      notes.push(`category forced to observations (${wasNote}) — volatility=ephemeral`);
+      notes.push(`category defaulted to engineering (${wasNote}) — volatility=ephemeral`);
     }
   }
 

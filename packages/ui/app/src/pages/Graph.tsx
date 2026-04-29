@@ -56,6 +56,11 @@ interface SharedResponse {
 }
 
 const CATEGORY_HEX: Record<string, string> = {
+  engineering: "#3b82f6",
+  product: "#6366f1",
+  human: "#ec4899",
+  system: "#f59e0b",
+  // Legacy facts may still carry pre-ontology category values.
   codebase: "#3b82f6",
   infrastructure: "#3b82f6",
   operations: "#f97316",

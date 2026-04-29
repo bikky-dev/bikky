@@ -120,9 +120,9 @@ describe("distillPrompt", () => {
 
 describe("contradictionPrompt", () => {
   const rendered = contradictionPrompt({
-    newFact: { content: "Server runs on port 9090", category: "infrastructure" },
+    newFact: { content: "Server runs on port 9090", category: "engineering" },
     candidates: [
-      { id: "c1", content: "Server runs on port 8080", category: "infrastructure", score: 0.91 },
+      { id: "c1", content: "Server runs on port 8080", category: "engineering", score: 0.91 },
     ],
   });
 
@@ -145,7 +145,7 @@ describe("relationsPrompt", () => {
     entityA: "platform",
     entityB: "qdrant",
     sharedFacts: [
-      { content: "platform uses qdrant for vector storage", category: "infrastructure" },
+      { content: "platform uses qdrant for vector storage", category: "engineering" },
     ],
   });
 
@@ -165,7 +165,7 @@ describe("briefPrompt", () => {
   const rendered = briefPrompt({
     generatedAt: "2026-04-25",
     sections: {
-      "Infrastructure Overview": ["Use eu-west-1 for all production workloads"],
+      Engineering: ["Use eu-west-1 for all production workloads"],
     },
   });
 

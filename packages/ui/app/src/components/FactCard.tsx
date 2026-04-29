@@ -10,6 +10,7 @@ export interface Fact {
   domain?: string;
   kind?: string;
   memory_subtype?: string | null;
+  actor_id?: string;
   entities: string[];
   source?: string;
   confidence: number;
@@ -67,6 +68,7 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
         {fact.task_key && <ProvChip label="task" value={fact.task_key} />}
         {fact.repo && <ProvChip label="repo" value={fact.repo} />}
         {fact.branch && <ProvChip label="branch" value={fact.branch} />}
+        {fact.actor_id && <ProvChip label="actor" value={fact.actor_id} />}
         {fact.session_id && <ProvChip label="session" value={fact.session_id.slice(0, 8)} />}
         {fact.episode_id && <ProvChip label="episode" value={fact.episode_id.slice(0, 8)} />}
       </div>

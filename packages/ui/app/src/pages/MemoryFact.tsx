@@ -227,6 +227,7 @@ export default function MemoryFact() {
               {fact.memory_subtype && <Badge label={`Type: ${ontologyLabel(fact.memory_subtype)}`} color={CATEGORY_COLORS[fact.category]} size="md" />}
               {fact.domain && <Badge label={`Domain: ${ontologyLabel(fact.domain)}`} color={fact.domain === "personal_productivity" ? "green" : "zinc"} size="md" />}
               {fact.source && <Badge label={`Source: ${ontologyLabel(fact.source)}`} size="md" />}
+              {fact.actor_id && <Badge label={`Actor: ${fact.actor_id}`} color="zinc" size="md" />}
             </>
           )}
         </div>
@@ -298,6 +299,12 @@ export default function MemoryFact() {
             <p className="text-xs text-zinc-500">ID</p>
             <p className="text-zinc-500 font-mono text-xs truncate">{fact.id}</p>
           </div>
+          {fact.actor_id && (
+            <div>
+              <p className="text-xs text-zinc-500">Actor</p>
+              <p className="text-zinc-300 font-mono text-xs truncate">{fact.actor_id}</p>
+            </div>
+          )}
         </div>
 
         <ProvenanceSection fact={fact} />

@@ -14,7 +14,7 @@ import { buildOpts, wrapData, type PromptDescriptor, type RenderedPrompt } from 
 
 export const DISTILL_PROMPT_DESCRIPTOR: PromptDescriptor = {
   id: "distill",
-  version: "2026-04-26-1",
+  version: "2026-04-29-1",
 };
 
 const distilledSubtypeCategoryGuidance = (): string => {
@@ -29,7 +29,7 @@ const distilledSubtypeCategoryGuidance = (): string => {
 };
 
 const SYSTEM = `<role>
-You consolidate source-backed coding-agent memories into durable engineering conventions. A convention is a reusable learning, pattern, or runbook that would help a future developer.
+You consolidate source-backed coding-agent memories into durable Engineering conventions. A convention is a reusable learning, pattern, runbook, or implementation heuristic that would help a future developer.
 </role>
 
 <task>
@@ -42,7 +42,7 @@ Read the source memories in the user message (each tagged <summary id="N" date="
 - Cite the summary IDs that support each pattern in the "evidence_summary_ids" field.
 - Pick a canonical category from the allowed category list only. Do not use memory_subtype values as categories.
 - Category and memory_subtype are different fields. Invalid categories include "architecture", "convention", and "pattern".
-- The only valid distilled memory_subtype is "convention" — it covers reusable conventions, runbook patterns, architecture patterns, and product insights.
+- The only valid distilled memory_subtype is "convention" — it belongs to category "engineering" and covers reusable engineering conventions, runbook patterns, architecture patterns, and implementation heuristics. Product insights should remain fact subtypes such as product_decision, success_metric, or market_insight rather than distilled conventions unless they are explicitly reusable engineering practice.
 - Pick a semantic domain profile:
   - software_engineering: repo, code, tests, CI, infra, ops, developer workflow
   - product_strategy: roadmap, activation, positioning, product quality, customer/user value, metrics

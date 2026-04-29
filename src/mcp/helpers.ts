@@ -16,6 +16,7 @@ export interface StructuredFact {
   kind?: string;
   memory_subtype?: string | null;
   workspace_id?: string;
+  actor_id?: string;
   source?: string;
   entities: string[];
   confidence?: number;
@@ -257,6 +258,7 @@ export function formatFact(point: QdrantPoint): string {
   if (p.kind && p.kind !== "fact") parts.push(`kind: ${p.kind}`);
   if (p.memory_subtype) parts.push(`subtype: ${p.memory_subtype}`);
   if (p.workspace_id && p.workspace_id !== "default") parts.push(`workspace: ${p.workspace_id}`);
+  if (p.actor_id) parts.push(`actor: ${p.actor_id}`);
   if (p.workstream_key) parts.push(`workstream: ${p.workstream_key}`);
   if (p.episode_id) parts.push(`episode: ${p.episode_id}`);
   if (p.entities?.length) parts.push(`entities: ${p.entities.join(", ")}`);
@@ -308,6 +310,7 @@ export function structuredFact(point: QdrantPoint): StructuredFact {
     ...(p.kind ? { kind: p.kind } : {}),
     ...(p.memory_subtype ? { memory_subtype: p.memory_subtype } : {}),
     ...(p.workspace_id ? { workspace_id: p.workspace_id } : {}),
+    ...(p.actor_id ? { actor_id: p.actor_id } : {}),
     ...(p.source ? { source: p.source } : {}),
     entities: p.entities ?? [],
     ...(confidence !== undefined ? { confidence } : {}),

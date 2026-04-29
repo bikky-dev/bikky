@@ -74,8 +74,8 @@ const sampleFact = (overrides: Record<string, unknown> = {}) => ({
   id: "11111111-1111-1111-1111-111111111111",
   payload: {
     content: "Bikky uses Qdrant",
-    category: "infrastructure",
-    domain: "work",
+    category: "engineering",
+    domain: "software_engineering",
     kind: "fact",
     entities: ["bikky", "qdrant"],
     confidence: 0.9,
@@ -164,7 +164,7 @@ describe("ui/routes/memory", () => {
       });
       const app = buildApp();
 
-      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=hello&category=infrastructure&memory_subtype=codebase_map&source=system&limit=5"));
+      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=hello&category=engineering&memory_subtype=codebase_map&source=system&actor_id=agent-1&limit=5"));
       assert.equal(res.status, 200);
       const body = await res.json() as { results: any[]; count: number };
       assert.equal(body.count, 1);
@@ -174,7 +174,7 @@ describe("ui/routes/memory", () => {
       const search = log.calls.find((c) => c.path.endsWith("/points/search"));
       assert.ok(search);
       assert.equal(search!.body.limit, 5);
-      assert.equal(search!.body.filter.must[0].match.value, "infrastructure");
+      assert.equal(search!.body.filter.must[0].match.value, "engineering");
       assert.deepEqual(search!.body.filter.must[1], {
         key: "memory_subtype",
         match: { value: "codebase_map" },
@@ -182,6 +182,10 @@ describe("ui/routes/memory", () => {
       assert.deepEqual(search!.body.filter.must[2], {
         key: "source",
         match: { any: ["system", "daemon"] },
+      });
+      assert.deepEqual(search!.body.filter.must[3], {
+        key: "actor_id",
+        match: { value: "agent-1" },
       });
     });
 
@@ -356,7 +360,8 @@ describe("ui/routes/memory", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           content: "Hello password=supersecretvalue",
-          category: "infrastructure",
+          category: "engineering",
+          actor_id: "agent-1",
           entities: ["FOO", "api_key=entitysecret"],
           from_entity: "token=fromsecret",
           relation_type: "Owns",
@@ -375,9 +380,10 @@ describe("ui/routes/memory", () => {
       assert.equal(point.payload.relation_type, "Owns");
       assert.equal(point.payload.to_entity, "Bar");
       assert.equal(point.payload.source, "user");
+      assert.equal(point.payload.actor_id, "agent-1");
       assert.deepEqual(point.payload.metadata, { note: "manual add", created_via: "ui" });
       assert.equal(point.payload.kind, "fact");
-      assert.equal(point.payload.domain, "work");
+      assert.equal(point.payload.domain, "software_engineering");
       assert.equal(typeof point.id, "string");
       assert.equal(typeof point.payload.content_hash, "string");
       assert.deepEqual(point.payload.redaction, {
@@ -532,8 +538,8 @@ describe("ui/routes/memory", () => {
         qdrantHandler: () => ({
           result: {
             points: [
-              sampleFact({ entities: ["a", "b"], category: "infrastructure" }),
-              sampleFact({ entities: ["b", "c"], category: "decisions" }),
+              sampleFact({ entities: ["a", "b"], category: "engineering" }),
+              sampleFact({ entities: ["b", "c"], category: "product" }),
             ],
             next_page_offset: null,
           },
@@ -584,7 +590,7 @@ describe("ui/routes/memory", () => {
       assert.equal(body.total, 100);
       assert.equal(body.active, 90);
       assert.equal(body.superseded, 10);
-      assert.equal(body.byCategory.codebase, 10);
+      assert.equal(body.byCategory.engineering, 10);
       assert.equal(body.byKind.fact, 10);
       assert.equal(body.bySubtype.codebase_map, 10);
     });

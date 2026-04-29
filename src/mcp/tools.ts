@@ -65,6 +65,7 @@ import {
 import { saveConfig, loadConfig, EXTRACTION_HEALTH_PATH } from "../config.js";
 import { existsSync, readFileSync } from "node:fs";
 import { inspectWatcherPaths, formatIssue, repairSuspiciousWatcherPaths } from "../daemon/watcher-health.js";
+import { normalizeActorId, resolveActorIdentity, type ActorIdentity } from "../provenance/actor.js";
 import {
   addRedactionPayload,
   combineRedactions,
@@ -99,9 +100,10 @@ interface WorkspaceScope {
   includeLegacy: boolean;
 }
 
-function resolveScope(workspaceId?: string, includeLegacyWorkspace = false): WorkspaceScope {
+function resolveScope(workspaceId?: string, includeLegacyWorkspace = false, actorId?: string): WorkspaceScope {
   return {
     workspaceId: workspaceId?.trim() || undefined,
+    actorId: normalizeActorId(actorId),
     includeLegacy: includeLegacyWorkspace,
   };
 }
@@ -114,9 +116,18 @@ function scopedFilter(scope: WorkspaceScope, extra: Parameters<typeof buildFilte
   });
 }
 
-function addWorkspacePayload(payload: Record<string, unknown>, scope: WorkspaceScope): void {
+function addWorkspacePayload(payload: Record<string, unknown>, scope: WorkspaceScope, actor?: ActorIdentity): void {
   if (scope.workspaceId) payload["workspace_id"] = scope.workspaceId;
-  if (scope.actorId) payload["actor_id"] = scope.actorId;
+  const actorId = actor?.actor_id ?? scope.actorId;
+  if (actorId) payload["actor_id"] = actorId;
+  if (actor?.actor_label) {
+    const metadata = payload["metadata"] && typeof payload["metadata"] === "object" && !Array.isArray(payload["metadata"])
+      ? payload["metadata"] as Record<string, unknown>
+      : {};
+    metadata["actor_label"] = actor.actor_label;
+    if (actor.source) metadata["actor_source"] = actor.source;
+    payload["metadata"] = metadata;
+  }
 }
 
 async function getPointForWorkspaceWrite(factId: string, _scope: WorkspaceScope): Promise<{ point?: QdrantPoint; error?: Record<string, unknown> }> {
@@ -164,10 +175,10 @@ function buildMemoryNudge(): string | null {
   // session typically produces. The agent picks the best fit.
   return `🧠 Memory nudge: No memory_store calls in ${mins} minutes. ` +
     "Reflect on what's worth persisting:\n" +
-    "  • infrastructure — new services, ports, configs touched?\n" +
-    "  • decisions — architectural choices made (with rationale)?\n" +
-    "  • observation — debugging findings, gotchas, workarounds?\n" +
-    "  • projects — work-in-progress, blockers, completions?\n" +
+    "  • engineering — codebase maps, architecture, infra, ops, troubleshooting?\n" +
+    "  • product — requirements, decisions, workflows, roadmap, metrics, market insight?\n" +
+    "  • human — preferences, owners, working agreements, durable activity events?\n" +
+    "  • system — session, episode, workstream, or quality-rollup memory?\n" +
     "If yes, call memory_store now so future sessions inherit the knowledge.";
 }
 
@@ -475,6 +486,9 @@ export function registerTools(mcp: McpServer): void {
       workspace_id: z.string().optional().describe(
         "Workspace namespace for team-shared memory. Omit to use the default workspace from config.",
       ),
+      actor_id: z.string().optional().describe(
+        "Stable actor/person/agent identity associated with this capture. Overrides identity config/env/Git-derived fallback for this write.",
+      ),
       episode_id: z.string().optional().describe(
         "Coherent activity-segment ID. Group facts captured during the same coherent task or transcript.",
       ),
@@ -516,6 +530,7 @@ export function registerTools(mcp: McpServer): void {
       kind,
       memory_subtype,
       workspace_id,
+      actor_id,
       episode_id,
       workstream_key,
       task_key,
@@ -534,6 +549,7 @@ export function registerTools(mcp: McpServer): void {
       lastStoreTime = Date.now();
       const now = nowISO();
       const scope = resolveScope(workspace_id);
+      const actor = resolveActorIdentity({ actorId: actor_id, config: loadConfig() });
       const normalizedKind = normalizeKind(kind);
       let normalizedSubtype: string | null = null;
       try {
@@ -717,12 +733,12 @@ export function registerTools(mcp: McpServer): void {
       if (task_key) payload["task_key"] = task_key;
       if (repo) payload["repo"] = repo;
       if (branch) payload["branch"] = branch;
-      if (review_status) payload["review_status"] = review_status;
-      addWorkspacePayload(payload, scope);
-      addRedactionPayload(payload, factRedactionSummary);
       if (metadata && Object.keys(metadata).length > 0) {
         payload["metadata"] = metadata;
       }
+      if (review_status) payload["review_status"] = review_status;
+      addWorkspacePayload(payload, scope, actor);
+      addRedactionPayload(payload, factRedactionSummary);
       await qdrantUpsert(factId, vector, payload);
 
       // 7. Insert relation point if provided
@@ -751,7 +767,7 @@ export function registerTools(mcp: McpServer): void {
           relation_type: sanitizedRelation.type.toLowerCase(),
           to_entity: sanitizedRelation.to.toLowerCase(),
         };
-        addWorkspacePayload(relPayload, scope);
+        addWorkspacePayload(relPayload, scope, actor);
         addRedactionPayload(relPayload, relationRedactionSummary);
         await qdrantUpsert(relationId, relVector, relPayload);
       }
@@ -761,6 +777,7 @@ export function registerTools(mcp: McpServer): void {
         fact_id: factId,
         workspace_id: scope.workspaceId,
       };
+      if (actor.actor_id) result["actor_id"] = actor.actor_id;
       if (relationId) result["relation_id"] = relationId;
       if (redactionSummary.redacted) result["redaction"] = redactionSummary;
       if (similarFacts.length > 0) result["similar_facts"] = similarFacts;
@@ -808,6 +825,9 @@ export function registerTools(mcp: McpServer): void {
       workspace_id: z.string().optional().describe(
         "Filter to facts in this workspace namespace. Omit to use the default workspace from config.",
       ),
+      actor_id: z.string().optional().describe(
+        "Filter to facts captured by or associated with this stable actor identity. Optional.",
+      ),
       include_legacy_workspace: z.boolean().optional().describe(
         "Backwards-compatibility flag: also include legacy facts that have no workspace_id. Default false. Only set this if you suspect pre-migration data is missing from results.",
       ),
@@ -844,6 +864,7 @@ export function registerTools(mcp: McpServer): void {
       kind,
       memory_subtype,
       workspace_id,
+      actor_id,
       include_legacy_workspace,
       entity,
       episode_id,
@@ -863,7 +884,8 @@ export function registerTools(mcp: McpServer): void {
       if (guard) return guard;
       const requestedLimit = limit ?? MEMORY_RECALL_DEFAULT_LIMIT;
       const effectiveLimit = clampRecallLimit(limit);
-      const scope = resolveScope(workspace_id, include_legacy_workspace);
+      const actorFilter = resolveActorIdentity({ actorId: actor_id, useGitFallback: false });
+      const scope = resolveScope(workspace_id, include_legacy_workspace, actorFilter.actor_id);
       const redactedQuery = redactStorageText(query);
       const vector = await embed(redactedQuery.text);
       const normalizedKind = kind ? normalizeKind(kind) : undefined;
@@ -1143,9 +1165,10 @@ export function registerTools(mcp: McpServer): void {
     async ({ fact_id, reason, workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
-      const now = nowISO();
-      try {
-        const scope = resolveScope(workspace_id);
+        const now = nowISO();
+        try {
+          const scope = resolveScope(workspace_id);
+          const actor = resolveActorIdentity({ config: loadConfig() });
         const existing = await getPointForWorkspaceWrite(fact_id, scope);
         if (existing.error) {
           return { content: [{ type: "text", text: JSON.stringify(existing.error, null, 2) }], isError: true };
@@ -1194,6 +1217,7 @@ export function registerTools(mcp: McpServer): void {
       const now = nowISO();
       try {
         const scope = resolveScope(workspace_id);
+        const actor = resolveActorIdentity({ config: loadConfig() });
         const writable = await getPointForWorkspaceWrite(fact_id, scope);
         if (writable.error) {
           return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
@@ -1246,6 +1270,7 @@ export function registerTools(mcp: McpServer): void {
       const now = nowISO();
       try {
         const scope = resolveScope(workspace_id);
+        const actor = resolveActorIdentity({ config: loadConfig() });
         const writable = await getPointForWorkspaceWrite(fact_id, scope);
         if (writable.error) {
           return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
@@ -1268,7 +1293,7 @@ export function registerTools(mcp: McpServer): void {
         const redactedEvent = redactStorageText(eventContent);
         const eventPayload: Record<string, unknown> = {
           content: redactedEvent.text,
-          category: "observations",
+          category: categoryForMemorySubtype("feedback_event") ?? "system",
           domain: "software_engineering",
           kind: "telemetry",
           memory_subtype: "feedback_event",
@@ -1283,7 +1308,7 @@ export function registerTools(mcp: McpServer): void {
           created_at: now,
           updated_at: now,
         };
-        addWorkspacePayload(eventPayload, scope);
+        addWorkspacePayload(eventPayload, scope, actor);
         addRedactionPayload(eventPayload, redactedEvent);
         try {
           const eventVector = await embed(redactedEvent.text);
@@ -1331,6 +1356,7 @@ export function registerTools(mcp: McpServer): void {
       const now = nowISO();
       try {
         const scope = resolveScope(workspace_id);
+        const actor = resolveActorIdentity({ config: loadConfig() });
         const target = await getPointForWorkspaceWrite(fact_id, scope);
         if (target.error) {
           return { content: [{ type: "text", text: JSON.stringify(target.error, null, 2) }], isError: true };
@@ -1343,7 +1369,7 @@ export function registerTools(mcp: McpServer): void {
         const redactedEvent = redactStorageText(eventContent);
         const eventPayload: Record<string, unknown> = {
           content: redactedEvent.text,
-          category: "observations",
+          category: categoryForMemorySubtype("outcome_event") ?? "system",
           domain: "software_engineering",
           kind: "telemetry",
           memory_subtype: "outcome_event",
@@ -1358,7 +1384,7 @@ export function registerTools(mcp: McpServer): void {
           created_at: now,
           updated_at: now,
         };
-        addWorkspacePayload(eventPayload, scope);
+        addWorkspacePayload(eventPayload, scope, actor);
         addRedactionPayload(eventPayload, redactedEvent);
         const eventVector = await embed(redactedEvent.text);
         await qdrantUpsert(eventId, eventVector, eventPayload);
@@ -1398,21 +1424,25 @@ export function registerTools(mcp: McpServer): void {
       task_key: z.string().optional().describe("Task or issue key (e.g. GitHub issue number, JIRA key)."),
       repo: z.string().optional().describe("Repository or project surface this summary relates to."),
       workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+      actor_id: z.string().optional().describe(
+        "Stable actor identity associated with this session summary. Overrides identity config/env/Git fallback.",
+      ),
     },
-    async ({ content, entities, episode_id, workstream_key, task_key, repo, workspace_id }): Promise<McpToolResult> => {
+    async ({ content, entities, episode_id, workstream_key, task_key, repo, workspace_id, actor_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       lastStoreTime = Date.now();
       const now = nowISO();
       try {
         const scope = resolveScope(workspace_id);
+        const actor = resolveActorIdentity({ actorId: actor_id, config: loadConfig() });
         const normalizedEntities = (entities ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean);
         const summaryId = newId();
         const redactedContent = redactStorageText(content);
         const vector = await embed(redactedContent.text);
         const payload: Record<string, unknown> = {
           content: redactedContent.text,
-          category: categoryForMemorySubtype("session_index") ?? "projects",
+          category: categoryForMemorySubtype("session_index") ?? "system",
           domain: "software_engineering",
           kind: "summary",
           memory_subtype: "session_index",
@@ -1433,7 +1463,7 @@ export function registerTools(mcp: McpServer): void {
         if (workstream_key) payload["workstream_key"] = workstream_key;
         if (task_key) payload["task_key"] = task_key;
         if (repo) payload["repo"] = repo;
-        addWorkspacePayload(payload, scope);
+        addWorkspacePayload(payload, scope, actor);
         addRedactionPayload(payload, redactedContent);
         await qdrantUpsert(summaryId, vector, payload);
 
@@ -1442,6 +1472,7 @@ export function registerTools(mcp: McpServer): void {
             status: "summary_stored",
             summary_id: summaryId,
             workspace_id: scope.workspaceId,
+            actor_id: actor.actor_id,
           }) }],
         };
       } catch (e) {
@@ -1472,14 +1503,18 @@ export function registerTools(mcp: McpServer): void {
       task_key: z.string().optional().describe("Task or issue key associated with this learning, if relevant."),
       repo: z.string().optional().describe("Repository or project surface this learning applies to."),
       workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+      actor_id: z.string().optional().describe(
+        "Stable actor identity associated with this distillation. Overrides identity config/env/Git fallback.",
+      ),
     },
-    async ({ content, entities, supersedes, task_key, repo, workspace_id }): Promise<McpToolResult> => {
+    async ({ content, entities, supersedes, task_key, repo, workspace_id, actor_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       lastStoreTime = Date.now();
       const now = nowISO();
       try {
         const scope = resolveScope(workspace_id);
+        const actor = resolveActorIdentity({ actorId: actor_id, config: loadConfig() });
         const normalizedEntities = entities.map((e) => e.trim().toLowerCase()).filter(Boolean);
         const distilledId = newId();
         const redactedContent = redactStorageText(content);
@@ -1498,7 +1533,7 @@ export function registerTools(mcp: McpServer): void {
 
         const payload: Record<string, unknown> = {
           content: redactedContent.text,
-          category: categoryForMemorySubtype("convention") ?? "observations",
+          category: categoryForMemorySubtype("convention") ?? "engineering",
           domain: "software_engineering",
           kind: "distilled",
           memory_subtype: "convention",
@@ -1517,7 +1552,7 @@ export function registerTools(mcp: McpServer): void {
         };
         if (task_key) payload["task_key"] = task_key;
         if (repo) payload["repo"] = repo;
-        addWorkspacePayload(payload, scope);
+        addWorkspacePayload(payload, scope, actor);
         addRedactionPayload(payload, redactedContent);
         await qdrantUpsert(distilledId, vector, payload);
 
@@ -1527,6 +1562,7 @@ export function registerTools(mcp: McpServer): void {
             distilled_id: distilledId,
             supersedes: supersedes ?? null,
             workspace_id: scope.workspaceId,
+            actor_id: actor.actor_id,
           }) }],
         };
       } catch (e) {
@@ -1642,6 +1678,7 @@ export function registerTools(mcp: McpServer): void {
         const correctionScope = origPayload?.workspace_id
           ? resolveScope(origPayload.workspace_id, false)
           : scope;
+        const actor = resolveActorIdentity({ config: loadConfig() });
 
         const vector = await embed(redactedCorrected.text);
         const correctedId = crypto.randomUUID();
@@ -1672,7 +1709,7 @@ export function registerTools(mcp: McpServer): void {
           updated_at: now,
           metadata: { ...(origPayload?.metadata ?? {}), corrected_from: fact_id },
         };
-        addWorkspacePayload(correctedPayload, correctionScope);
+        addWorkspacePayload(correctedPayload, correctionScope, actor);
         addRedactionPayload(correctedPayload, redactedCorrected);
         await qdrantUpsert(correctedId, vector, correctedPayload);
 
@@ -1710,7 +1747,7 @@ export function registerTools(mcp: McpServer): void {
           const staleThreshold = new Date(Date.now() - STALENESS_DAYS * 86400000).toISOString();
           const scope = resolveScope();
           const staleFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
-          staleFilter.must.push({ key: "category", match: { any: ["infrastructure", "projects", "decisions"] } });
+          staleFilter.must.push({ key: "category", match: { any: ["engineering", "product", "human", "system"] } });
           staleFilter.should = [
             { key: "last_reinforced_at", range: { lte: staleThreshold } },
             { is_null: { key: "last_reinforced_at" } },
@@ -1741,10 +1778,10 @@ export function registerTools(mcp: McpServer): void {
 
       sections.push(
         "🔍 Reflect: think about the LAST 10 minutes of work and answer in your head:\n" +
-        "  1. Did you touch a service, port, config, or file path you hadn't seen before?\n" +
-        "  2. Did you make a choice (library, pattern, approach) you'd want a future session to know about?\n" +
-        "  3. Did you hit an error and find a workaround?\n" +
-        "  4. Did the user state a preference or constraint?\n" +
+        "  1. Did you touch engineering context: code, infra, ops, access, troubleshooting, or conventions?\n" +
+        "  2. Did you capture product context: a requirement, decision, workflow, roadmap item, metric, or market insight?\n" +
+        "  3. Did you learn human context: a preference, owner, working agreement, person profile, or durable activity event?\n" +
+        "  4. Did the work produce system context: session, episode, workstream, recall, feedback, outcome, or rollup state?\n" +
         "If any answer is yes, call memory_store now — one atomic fact per item, with category/domain/entities.",
       );
 
