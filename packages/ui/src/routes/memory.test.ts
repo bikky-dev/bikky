@@ -146,16 +146,40 @@ describe("ui/routes/memory", () => {
       assert.equal(res.status, 400);
     });
 
-    it("returns 501 when embedding provider is bedrock", async () => {
+    it("falls back to keyword search when embedding provider is bedrock", async () => {
       fs.writeFileSync(CONFIG_PATH, JSON.stringify({
         qdrant_url: "https://q.test", qdrant_api_key: "k",
         embedding: { provider: "bedrock" },
       }));
       _resetConfig();
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/scroll")) {
+            return {
+              result: {
+                points: [
+                  sampleFact({ content: "Bikky stores local memory facts", entities: ["needle-entity"] }),
+                  sampleFact({ id: "22222222-2222-2222-2222-222222222222", content: "local other content", entities: ["qdrant"] }),
+                ],
+                next_page_offset: null,
+              },
+            };
+          }
+          return { result: [] };
+        },
+      });
       const app = buildApp();
 
-      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=hello"));
-      assert.equal(res.status, 501);
+      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=local%20needle-entity&category=engineering"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as { results: any[]; count: number };
+      assert.equal(body.count, 1);
+      assert.equal(body.results[0].content, "Bikky stores local memory facts");
+      assert.equal(log.embedCalls, 0);
+      const scrollCall = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.ok(scrollCall);
+      assert.ok(scrollCall.body.filter);
+      assert.equal(log.calls.some((c) => c.path.endsWith("/points/search")), false);
     });
 
     it("embeds the query, calls Qdrant search, and returns formatted results", async () => {

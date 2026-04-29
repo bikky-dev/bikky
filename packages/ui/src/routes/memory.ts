@@ -99,19 +99,78 @@ function cacheSet<T>(key: string, value: T, ttlMs: number): void {
 
 const STATS_TTL_MS = 30_000;
 const GRAPH_TTL_MS = 60_000;
+const KEYWORD_SEARCH_PAGE_SIZE = 100;
+const KEYWORD_SEARCH_SCAN_LIMIT = 5_000;
+
+const keywordValueText = (value: unknown): string[] => {
+  if (value === undefined || value === null || value === "") return [];
+  if (Array.isArray(value)) return value.flatMap(keywordValueText);
+  if (typeof value === "object") return Object.values(value as Record<string, unknown>).flatMap(keywordValueText);
+  return [String(value)];
+};
+
+const keywordHaystack = (payload: FactPayload): string => {
+  const parts: unknown[] = [
+    payload.content,
+    payload.category,
+    payload.domain,
+    payload.kind,
+    payload.memory_subtype ?? undefined,
+    payload.actor_id,
+    payload.source,
+    payload.from_entity,
+    payload.relation_type,
+    payload.to_entity,
+    payload.session_id,
+    payload.entities,
+    payload.tasks_completed,
+    payload.decisions_made,
+    payload.distilled_from,
+    payload.metadata,
+    payload.redaction,
+  ];
+  return parts.flatMap(keywordValueText).join(" ").toLowerCase();
+};
+
+const keywordMatches = (payload: FactPayload, terms: string[]): boolean => {
+  const haystack = keywordHaystack(payload);
+  return terms.every((term) => haystack.includes(term));
+};
+
+const keywordSearch = async (
+  qdrant: ReturnType<typeof createQdrantClient>,
+  query: string,
+  filter: QdrantFilter,
+  limit: number,
+): Promise<{ results: ReturnType<typeof formatPoint>[]; count: number }> => {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const matches: QdrantPoint[] = [];
+  let offset: string | null | undefined;
+  let scanned = 0;
+
+  do {
+    const batchLimit = Math.min(KEYWORD_SEARCH_PAGE_SIZE, KEYWORD_SEARCH_SCAN_LIMIT - scanned);
+    if (batchLimit <= 0) break;
+    const batch = await qdrant.scroll(filter, batchLimit, offset, { key: "created_at", direction: "desc" });
+    scanned += batch.points.length;
+    for (const point of batch.points) {
+      if (keywordMatches(point.payload, terms)) matches.push(point);
+    }
+    offset = batch.nextOffset;
+  } while (offset && scanned < KEYWORD_SEARCH_SCAN_LIMIT);
+
+  return {
+    results: matches.slice(0, limit).map(formatPoint),
+    count: matches.length,
+  };
+};
 
 // GET /api/memory/search?q=...&category=...&entity=...&domain=...&kind=...&memory_subtype=...&limit=...
 memoryRoutes.get("/search", async (c) => {
-  const q = c.req.query("q");
+  const q = c.req.query("q")?.trim();
   if (!q) return c.json({ error: "Missing query parameter 'q'" }, 400);
 
-  if (!isEmbeddingAvailable()) {
-    return c.json({ error: "Semantic search unavailable — the configured embedding provider is not browser-compatible. Configure ollama, openai, or portkey." }, 501);
-  }
-
   const qdrant = createQdrantClient();
-  const vector = await embed(q);
-
   const filter = buildFilter({
     ...ontologyFilters(c.req.query("category"), c.req.query("memory_subtype")),
     domain: c.req.query("domain"),
@@ -124,6 +183,11 @@ memoryRoutes.get("/search", async (c) => {
 
   const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 100);
   const hasFilter = filter.must.length > 0 || (filter.should?.length ?? 0) > 0 || (filter.must_not?.length ?? 0) > 0;
+  if (!isEmbeddingAvailable()) {
+    return c.json(await keywordSearch(qdrant, q, filter, limit));
+  }
+
+  const vector = await embed(q);
   const points = await qdrant.search(vector, hasFilter ? filter : undefined, limit);
 
   return c.json({ results: points.map(formatPoint), count: points.length });
