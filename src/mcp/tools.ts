@@ -1168,7 +1168,7 @@ export function registerTools(mcp: McpServer): void {
         const now = nowISO();
         try {
           const scope = resolveScope(workspace_id);
-          const actor = resolveActorIdentity({ config: loadConfig() });
+          const _actor = resolveActorIdentity({ config: loadConfig() });
         const existing = await getPointForWorkspaceWrite(fact_id, scope);
         if (existing.error) {
           return { content: [{ type: "text", text: JSON.stringify(existing.error, null, 2) }], isError: true };
@@ -1217,7 +1217,7 @@ export function registerTools(mcp: McpServer): void {
       const now = nowISO();
       try {
         const scope = resolveScope(workspace_id);
-        const actor = resolveActorIdentity({ config: loadConfig() });
+        const _actor = resolveActorIdentity({ config: loadConfig() });
         const writable = await getPointForWorkspaceWrite(fact_id, scope);
         if (writable.error) {
           return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
