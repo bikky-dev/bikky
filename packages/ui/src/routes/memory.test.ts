@@ -74,8 +74,8 @@ const sampleFact = (overrides: Record<string, unknown> = {}) => ({
   id: "11111111-1111-1111-1111-111111111111",
   payload: {
     content: "Bikky uses Qdrant",
-    category: "infrastructure",
-    domain: "work",
+    category: "engineering",
+    domain: "software_engineering",
     kind: "fact",
     entities: ["bikky", "qdrant"],
     confidence: 0.9,
@@ -146,16 +146,40 @@ describe("ui/routes/memory", () => {
       assert.equal(res.status, 400);
     });
 
-    it("returns 501 when embedding provider is bedrock", async () => {
+    it("falls back to keyword search when embedding provider is bedrock", async () => {
       fs.writeFileSync(CONFIG_PATH, JSON.stringify({
         qdrant_url: "https://q.test", qdrant_api_key: "k",
         embedding: { provider: "bedrock" },
       }));
       _resetConfig();
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/scroll")) {
+            return {
+              result: {
+                points: [
+                  sampleFact({ content: "Bikky stores local memory facts", entities: ["needle-entity"] }),
+                  sampleFact({ id: "22222222-2222-2222-2222-222222222222", content: "local other content", entities: ["qdrant"] }),
+                ],
+                next_page_offset: null,
+              },
+            };
+          }
+          return { result: [] };
+        },
+      });
       const app = buildApp();
 
-      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=hello"));
-      assert.equal(res.status, 501);
+      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=local%20needle-entity&category=engineering"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as { results: any[]; count: number };
+      assert.equal(body.count, 1);
+      assert.equal(body.results[0].content, "Bikky stores local memory facts");
+      assert.equal(log.embedCalls, 0);
+      const scrollCall = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.ok(scrollCall);
+      assert.ok(scrollCall.body.filter);
+      assert.equal(log.calls.some((c) => c.path.endsWith("/points/search")), false);
     });
 
     it("embeds the query, calls Qdrant search, and returns formatted results", async () => {
@@ -164,7 +188,7 @@ describe("ui/routes/memory", () => {
       });
       const app = buildApp();
 
-      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=hello&category=infrastructure&memory_subtype=codebase_map&source=system&limit=5"));
+      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=hello&category=engineering&memory_subtype=codebase_map&source=system&actor_id=agent-1&limit=5"));
       assert.equal(res.status, 200);
       const body = await res.json() as { results: any[]; count: number };
       assert.equal(body.count, 1);
@@ -174,15 +198,24 @@ describe("ui/routes/memory", () => {
       const search = log.calls.find((c) => c.path.endsWith("/points/search"));
       assert.ok(search);
       assert.equal(search!.body.limit, 5);
-      assert.equal(search!.body.filter.must[0].match.value, "infrastructure");
-      assert.deepEqual(search!.body.filter.must[1], {
-        key: "memory_subtype",
-        match: { value: "codebase_map" },
-      });
-      assert.deepEqual(search!.body.filter.must[2], {
+      assert.deepEqual(search!.body.filter.must[0], {
         key: "source",
         match: { any: ["system", "daemon"] },
       });
+      assert.deepEqual(search!.body.filter.must[1], {
+        key: "actor_id",
+        match: { value: "agent-1" },
+      });
+      assert.deepEqual(search!.body.filter.should, [
+        {
+          key: "category",
+          match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] },
+        },
+        {
+          key: "memory_subtype",
+          match: { value: "codebase_map" },
+        },
+      ]);
     });
 
     it("clamps limit to 100", async () => {
@@ -198,13 +231,18 @@ describe("ui/routes/memory", () => {
   describe("GET /browse", () => {
     it("calls scroll with order_by when sort=newest", async () => {
       const log = installMock({
-        qdrantHandler: () => ({ result: { points: [sampleFact()], next_page_offset: "abc" } }),
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/count")) return { result: { count: 42 } };
+          return { result: { points: [sampleFact()], next_page_offset: "abc" } };
+        },
       });
       const app = buildApp();
 
       const res = await app.fetch(new Request("http://localhost/api/memory/browse?sort=newest&limit=10"));
       assert.equal(res.status, 200);
-      const body = await res.json() as { results: any[]; nextOffset: string };
+      const body = await res.json() as { results: any[]; count: number; nextOffset: string };
+      assert.equal(body.results.length, 1);
+      assert.equal(body.count, 42);
       assert.equal(body.nextOffset, "abc");
 
       const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
@@ -233,6 +271,58 @@ describe("ui/routes/memory", () => {
       assert.ok(scroll!.body.filter.must.some((cond: any) =>
         cond.key === "memory_subtype" && cond.match?.value === "workstream",
       ));
+    });
+
+    it("uses legacy category aliases for canonical category browse filters", async () => {
+      const log = installMock({
+        qdrantHandler: () => ({ result: { points: [], next_page_offset: null } }),
+      });
+      const app = buildApp();
+
+      await app.fetch(new Request("http://localhost/api/memory/browse?category=engineering"));
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.ok(scroll);
+      assert.deepEqual(scroll!.body.filter.must[0], {
+        key: "category",
+        match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] },
+      });
+    });
+
+    it("uses legacy distilled aliases for convention subtype browse filters", async () => {
+      const log = installMock({
+        qdrantHandler: () => ({ result: { points: [], next_page_offset: null } }),
+      });
+      const app = buildApp();
+
+      await app.fetch(new Request("http://localhost/api/memory/browse?memory_subtype=convention"));
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.ok(scroll);
+      assert.deepEqual(scroll!.body.filter.must, []);
+      assert.deepEqual(scroll!.body.filter.should, [
+        { key: "memory_subtype", match: { value: "convention" } },
+        { key: "kind", match: { value: "distilled" } },
+      ]);
+    });
+
+    it("combines multiple category and subtype selections with OR", async () => {
+      const log = installMock({
+        qdrantHandler: () => ({ result: { points: [], next_page_offset: null } }),
+      });
+      const app = buildApp();
+
+      await app.fetch(new Request("http://localhost/api/memory/browse?category=engineering,product&memory_subtype=codebase_map,convention&entity=bikky"));
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.ok(scroll);
+      assert.deepEqual(scroll!.body.filter.must, [
+        { key: "entities", match: { value: "bikky" } },
+      ]);
+      assert.deepEqual(scroll!.body.filter.should, [
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
+        { key: "category", match: { any: ["product", "product_domain", "projects"] } },
+        { key: "memory_subtype", match: { value: "codebase_map" } },
+        { key: "memory_subtype", match: { value: "convention" } },
+        { key: "kind", match: { value: "distilled" } },
+      ]);
     });
   });
 
@@ -356,7 +446,8 @@ describe("ui/routes/memory", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           content: "Hello password=supersecretvalue",
-          category: "infrastructure",
+          category: "engineering",
+          actor_id: "agent-1",
           entities: ["FOO", "api_key=entitysecret"],
           from_entity: "token=fromsecret",
           relation_type: "Owns",
@@ -375,9 +466,10 @@ describe("ui/routes/memory", () => {
       assert.equal(point.payload.relation_type, "Owns");
       assert.equal(point.payload.to_entity, "Bar");
       assert.equal(point.payload.source, "user");
+      assert.equal(point.payload.actor_id, "agent-1");
       assert.deepEqual(point.payload.metadata, { note: "manual add", created_via: "ui" });
       assert.equal(point.payload.kind, "fact");
-      assert.equal(point.payload.domain, "work");
+      assert.equal(point.payload.domain, "software_engineering");
       assert.equal(typeof point.id, "string");
       assert.equal(typeof point.payload.content_hash, "string");
       assert.deepEqual(point.payload.redaction, {
@@ -532,8 +624,8 @@ describe("ui/routes/memory", () => {
         qdrantHandler: () => ({
           result: {
             points: [
-              sampleFact({ entities: ["a", "b"], category: "infrastructure" }),
-              sampleFact({ entities: ["b", "c"], category: "decisions" }),
+              sampleFact({ entities: ["a", "b"], category: "engineering" }),
+              sampleFact({ entities: ["b", "c"], category: "product" }),
             ],
             next_page_offset: null,
           },
@@ -549,6 +641,74 @@ describe("ui/routes/memory", () => {
       assert.equal(body.edges.length, 2);
       const b = body.nodes.find((n) => n.id === "b");
       assert.equal(b.factCount, 2);
+    });
+
+    it("enforces node and edge budgets before returning graph data", async () => {
+      installMock({
+        qdrantHandler: () => ({
+          result: {
+            points: [
+              sampleFact({ entities: ["a", "b"], category: "engineering" }),
+              sampleFact({ entities: ["a", "c"], category: "product" }),
+              sampleFact({ entities: ["a", "d"], category: "human" }),
+            ],
+            next_page_offset: null,
+          },
+        }),
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/graph?maxNodes=4&maxEdges=1&minWeight=1&refresh=true"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as { nodes: any[]; edges: any[]; totalEdges: number; edgesPruned: number; maxNodes: number; maxEdges: number };
+      assert.equal(body.maxNodes, 4);
+      assert.equal(body.maxEdges, 1);
+      assert.equal(body.nodes.length, 4);
+      assert.equal(body.edges.length, 1);
+      assert.equal(body.totalEdges, 3);
+      assert.equal(body.edgesPruned, 2);
+      assert.equal(body.edges[0].source, "a");
+    });
+
+    it("skips dense co-occurrence expansion while retaining entities", async () => {
+      const denseEntities = Array.from({ length: 25 }, (_, i) => `entity-${i}`);
+      installMock({
+        qdrantHandler: () => ({
+          result: {
+            points: [sampleFact({ entities: denseEntities, category: "engineering" })],
+            next_page_offset: null,
+          },
+        }),
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/graph?maxNodes=30&maxEdges=10&minWeight=1&refresh=true"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as { nodes: any[]; edges: any[]; denseFactsSkipped: number; coOccurrenceEdgesSkipped: number };
+      assert.equal(body.nodes.length, 25);
+      assert.equal(body.edges.length, 0);
+      assert.equal(body.denseFactsSkipped, 1);
+      assert.equal(body.coOccurrenceEdgesSkipped, 300);
+    });
+
+    it("includes typed relation endpoints even when they are not listed as entities", async () => {
+      installMock({
+        qdrantHandler: () => ({
+          result: {
+            points: [sampleFact({ entities: [], from_entity: "alice", to_entity: "bob", relation_type: "owns" })],
+            next_page_offset: null,
+          },
+        }),
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/graph?maxNodes=10&maxEdges=10&minWeight=1&refresh=true"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as { nodes: any[]; edges: any[] };
+      assert.ok(body.nodes.some((n) => n.id === "alice"));
+      assert.ok(body.nodes.some((n) => n.id === "bob"));
+      assert.equal(body.edges.length, 1);
+      assert.equal(body.edges[0].type, "owns");
     });
   });
 
@@ -584,9 +744,103 @@ describe("ui/routes/memory", () => {
       assert.equal(body.total, 100);
       assert.equal(body.active, 90);
       assert.equal(body.superseded, 10);
-      assert.equal(body.byCategory.codebase, 10);
+      assert.equal(body.byCategory.engineering, 10);
       assert.equal(body.byKind.fact, 10);
       assert.equal(body.bySubtype.codebase_map, 10);
+    });
+
+    it("scopes category and subtype counts to source and kind filters", async () => {
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path === "/collections/test") {
+            return { result: { points_count: 100, vectors_count: 100 } };
+          }
+          if (c.path.endsWith("/points/count")) {
+            const must = c.body?.filter?.must ?? [];
+            if (must.some((cond: any) => cond.key === "category" && cond.match?.any?.includes("engineering"))) return { result: { count: 7 } };
+            if (must.some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "codebase_map")) return { result: { count: 3 } };
+            return { result: { count: 11 } };
+          }
+          return { result: {} };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/stats?kind=fact&source=system"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        active: number;
+        byCategory: Record<string, number>;
+        byKind: Record<string, number>;
+        bySubtype: Record<string, number>;
+      };
+      assert.equal(body.active, 11);
+      assert.equal(body.byCategory.engineering, 7);
+      assert.equal(body.bySubtype.codebase_map, 3);
+      assert.equal(body.byKind.fact, 11);
+
+      const countCalls = log.calls.filter((c) => c.path.endsWith("/points/count"));
+      const engineeringCount = countCalls.find((c) =>
+        (c.body?.filter?.must ?? []).some((cond: any) => cond.key === "category" && cond.match?.any?.includes("engineering")),
+      );
+      assert.ok(engineeringCount);
+      assert.deepEqual(engineeringCount!.body.filter.must, [
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
+        { key: "kind", match: { value: "fact" } },
+        { key: "source", match: { any: ["system", "daemon"] } },
+      ]);
+
+      const subtypeCount = countCalls.find((c) =>
+        (c.body?.filter?.must ?? []).some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "codebase_map"),
+      );
+      assert.ok(subtypeCount);
+      assert.deepEqual(subtypeCount!.body.filter.must, [
+        { key: "kind", match: { value: "fact" } },
+        { key: "memory_subtype", match: { value: "codebase_map" } },
+        { key: "source", match: { any: ["system", "daemon"] } },
+      ]);
+    });
+
+    it("counts legacy distilled memories under the convention subtype", async () => {
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path === "/collections/test") {
+            return { result: { points_count: 200, vectors_count: 200 } };
+          }
+          if (c.path.endsWith("/points/count")) {
+            const must = c.body?.filter?.must ?? [];
+            const should = c.body?.filter?.should ?? [];
+            const isConventionSubtype = should.some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "convention") &&
+              should.some((cond: any) => cond.key === "kind" && cond.match?.value === "distilled");
+            if (isConventionSubtype) return { result: { count: 153 } };
+            if (must.some((cond: any) => cond.key === "kind" && cond.match?.value === "distilled")) return { result: { count: 153 } };
+            return { result: { count: 0 } };
+          }
+          return { result: {} };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/stats?kind=distilled"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        active: number;
+        bySubtype: Record<string, number>;
+      };
+      assert.equal(body.active, 153);
+      assert.equal(body.bySubtype.convention, 153);
+
+      const conventionCount = log.calls
+        .filter((c) => c.path.endsWith("/points/count"))
+        .find((c) => (c.body?.filter?.should ?? []).some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "convention"));
+      assert.ok(conventionCount);
+      assert.deepEqual(conventionCount!.body.filter.must, [
+        { key: "kind", match: { value: "distilled" } },
+      ]);
+      assert.deepEqual(conventionCount!.body.filter.should, [
+        { key: "memory_subtype", match: { value: "convention" } },
+        { key: "kind", match: { value: "distilled" } },
+      ]);
     });
   });
 });

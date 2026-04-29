@@ -204,7 +204,7 @@ describe("daemon/qdrant", () => {
     it("accepts minimal required fields", () => {
       const fact: StoreFact = {
         content: "test content",
-        category: "infrastructure",
+        category: "engineering",
         entities: ["test"],
         content_hash: "abc123",
       };
@@ -217,10 +217,10 @@ describe("daemon/qdrant", () => {
     it("accepts all optional fields", () => {
       const fact: StoreFact = {
         content: "test content",
-        category: "decisions",
+        category: "engineering",
         entities: ["redis", "cache"],
         content_hash: "def456",
-        domain: "work",
+        domain: "software_engineering",
         kind: "fact",
         source: "agent",
         confidence: 0.9,
@@ -228,7 +228,7 @@ describe("daemon/qdrant", () => {
         metadata: { session_id: "abc" },
         relation: { from: "redis", type: "uses", to: "cache" },
       };
-      assert.strictEqual(fact.domain, "work");
+      assert.strictEqual(fact.domain, "software_engineering");
       assert.strictEqual(fact.kind, "fact");
       assert.strictEqual(fact.source, "agent");
       assert.strictEqual(fact.confidence, 0.9);
@@ -240,7 +240,7 @@ describe("daemon/qdrant", () => {
     it("accepts null relation", () => {
       const fact: StoreFact = {
         content: "test",
-        category: "observation",
+        category: "engineering",
         entities: [],
         content_hash: "ghi789",
         relation: null,
@@ -285,7 +285,7 @@ describe("daemon/qdrant", () => {
 
       await storeFact({
         content: "daemon extracted token=supersecretvalue",
-        category: "infrastructure",
+        category: "engineering",
         entities: ["daemon"],
         content_hash: "raw-hash",
       });

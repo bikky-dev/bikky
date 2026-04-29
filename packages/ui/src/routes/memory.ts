@@ -11,15 +11,10 @@ import { addRedactionPayload, combineRedactions, redactStorageText } from "../li
 export const memoryRoutes = new Hono();
 
 const CATEGORY_VALUES = [
-  "codebase",
-  "infrastructure",
-  "operations",
-  "decisions",
-  "product_domain",
-  "projects",
-  "people",
-  "preferences",
-  "observations",
+  "engineering",
+  "product",
+  "human",
+  "system",
 ] as const;
 
 const KIND_VALUES = ["fact", "summary", "distilled", "relation", "telemetry"] as const;
@@ -31,8 +26,18 @@ const MEMORY_SUBTYPE_VALUES = [
   "access_pattern",
   "operational_procedure",
   "domain_rule",
+  "product_decision",
+  "product_requirement",
+  "user_workflow",
+  "roadmap_item",
+  "success_metric",
+  "market_insight",
   "troubleshooting_gotcha",
   "preference",
+  "person_profile",
+  "ownership_note",
+  "working_agreement",
+  "activity_event",
   "session_index",
   "episode",
   "workstream",
@@ -55,11 +60,18 @@ function parseLimit(raw: string | undefined, def: number, max: number): number {
   return Math.min(n, max);
 }
 
-function parseTopN(raw: string | undefined, max: number): number | null {
-  if (!raw) return null;
-  const n = parseInt(raw, 10);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.min(n, max);
+function parseList(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw.split(",").map((value) => value.trim()).filter(Boolean);
+}
+
+function ontologyFilters(category: string | undefined, memorySubtype: string | undefined) {
+  const categories = parseList(category);
+  const memorySubtypes = parseList(memorySubtype);
+  if (categories.length > 1 || memorySubtypes.length > 1 || (categories.length > 0 && memorySubtypes.length > 0)) {
+    return { categories, memorySubtypes };
+  }
+  return { category: categories[0], memorySubtype: memorySubtypes[0] };
 }
 
 // --- TTL cache (module-scope, per-process) ---
@@ -80,31 +92,102 @@ function cacheSet<T>(key: string, value: T, ttlMs: number): void {
 
 const STATS_TTL_MS = 30_000;
 const GRAPH_TTL_MS = 60_000;
+const GRAPH_DEFAULT_MAX_NODES = 75;
+const GRAPH_MAX_NODES_LIMIT = 500;
+const GRAPH_DEFAULT_MAX_EDGES = 300;
+const GRAPH_MAX_EDGES_LIMIT = 2_000;
+const GRAPH_DEFAULT_MIN_WEIGHT = 1;
+const GRAPH_MAX_MIN_WEIGHT = 20;
+const GRAPH_MAX_FACT_ENTITIES_FOR_CO_OCCURRENCE = 20;
+const KEYWORD_SEARCH_PAGE_SIZE = 100;
+const KEYWORD_SEARCH_SCAN_LIMIT = 5_000;
+
+const keywordValueText = (value: unknown): string[] => {
+  if (value === undefined || value === null || value === "") return [];
+  if (Array.isArray(value)) return value.flatMap(keywordValueText);
+  if (typeof value === "object") return Object.values(value as Record<string, unknown>).flatMap(keywordValueText);
+  return [String(value)];
+};
+
+const keywordHaystack = (payload: FactPayload): string => {
+  const parts: unknown[] = [
+    payload.content,
+    payload.category,
+    payload.domain,
+    payload.kind,
+    payload.memory_subtype ?? undefined,
+    payload.actor_id,
+    payload.source,
+    payload.from_entity,
+    payload.relation_type,
+    payload.to_entity,
+    payload.session_id,
+    payload.entities,
+    payload.tasks_completed,
+    payload.decisions_made,
+    payload.distilled_from,
+    payload.metadata,
+    payload.redaction,
+  ];
+  return parts.flatMap(keywordValueText).join(" ").toLowerCase();
+};
+
+const keywordMatches = (payload: FactPayload, terms: string[]): boolean => {
+  const haystack = keywordHaystack(payload);
+  return terms.every((term) => haystack.includes(term));
+};
+
+const keywordSearch = async (
+  qdrant: ReturnType<typeof createQdrantClient>,
+  query: string,
+  filter: QdrantFilter,
+  limit: number,
+): Promise<{ results: ReturnType<typeof formatPoint>[]; count: number }> => {
+  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const matches: QdrantPoint[] = [];
+  let offset: string | null | undefined;
+  let scanned = 0;
+
+  do {
+    const batchLimit = Math.min(KEYWORD_SEARCH_PAGE_SIZE, KEYWORD_SEARCH_SCAN_LIMIT - scanned);
+    if (batchLimit <= 0) break;
+    const batch = await qdrant.scroll(filter, batchLimit, offset, { key: "created_at", direction: "desc" });
+    scanned += batch.points.length;
+    for (const point of batch.points) {
+      if (keywordMatches(point.payload, terms)) matches.push(point);
+    }
+    offset = batch.nextOffset;
+  } while (offset && scanned < KEYWORD_SEARCH_SCAN_LIMIT);
+
+  return {
+    results: matches.slice(0, limit).map(formatPoint),
+    count: matches.length,
+  };
+};
 
 // GET /api/memory/search?q=...&category=...&entity=...&domain=...&kind=...&memory_subtype=...&limit=...
 memoryRoutes.get("/search", async (c) => {
-  const q = c.req.query("q");
+  const q = c.req.query("q")?.trim();
   if (!q) return c.json({ error: "Missing query parameter 'q'" }, 400);
 
-  if (!isEmbeddingAvailable()) {
-    return c.json({ error: "Semantic search unavailable — the configured embedding provider is not browser-compatible. Configure ollama, openai, or portkey." }, 501);
-  }
-
   const qdrant = createQdrantClient();
-  const vector = await embed(q);
-
   const filter = buildFilter({
-    category: c.req.query("category"),
+    ...ontologyFilters(c.req.query("category"), c.req.query("memory_subtype")),
     domain: c.req.query("domain"),
     kind: c.req.query("kind"),
-    memorySubtype: c.req.query("memory_subtype"),
     entity: c.req.query("entity"),
     source: c.req.query("source"),
+    actorId: c.req.query("actor_id"),
     excludeEntityType: true,
   });
 
   const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 100);
-  const hasFilter = filter.must.length > 0 || (filter.must_not?.length ?? 0) > 0;
+  const hasFilter = filter.must.length > 0 || (filter.should?.length ?? 0) > 0 || (filter.must_not?.length ?? 0) > 0;
+  if (!isEmbeddingAvailable()) {
+    return c.json(await keywordSearch(qdrant, q, filter, limit));
+  }
+
+  const vector = await embed(q);
   const points = await qdrant.search(vector, hasFilter ? filter : undefined, limit);
 
   return c.json({ results: points.map(formatPoint), count: points.length });
@@ -115,12 +198,12 @@ memoryRoutes.get("/browse", async (c) => {
   const qdrant = createQdrantClient();
 
   const filter = buildFilter({
-    category: c.req.query("category"),
+    ...ontologyFilters(c.req.query("category"), c.req.query("memory_subtype")),
     domain: c.req.query("domain"),
     kind: c.req.query("kind"),
-    memorySubtype: c.req.query("memory_subtype"),
     entity: c.req.query("entity"),
     source: c.req.query("source"),
+    actorId: c.req.query("actor_id"),
     since: c.req.query("since"),
     until: c.req.query("until"),
     excludeEntityType: true,
@@ -136,9 +219,12 @@ memoryRoutes.get("/browse", async (c) => {
       ? { key: "created_at", direction: "desc" as const }
       : undefined;
 
-  const { points, nextOffset } = await qdrant.scroll(filter, limit, offset, orderBy);
+  const [{ points, nextOffset }, totalCount] = await Promise.all([
+    qdrant.scroll(filter, limit, offset, orderBy),
+    qdrant.count(filter),
+  ]);
 
-  return c.json({ results: points.map(formatPoint), count: points.length, nextOffset });
+  return c.json({ results: points.map(formatPoint), count: totalCount, nextOffset });
 });
 
 // GET /api/memory/facts/:id
@@ -225,6 +311,7 @@ memoryRoutes.post("/facts", async (c) => {
     entities: string[];
     domain?: string;
     kind?: string;
+    actor_id?: string;
     confidence?: number;
     metadata?: Record<string, string>;
     from_entity?: string;
@@ -260,10 +347,11 @@ memoryRoutes.post("/facts", async (c) => {
   const payload: Record<string, unknown> = {
     content: redactedContent.text,
     category: body.category,
-    domain: body.domain || "work",
+    domain: body.domain || "software_engineering",
     kind: body.kind || "fact",
     entities: redactedEntities.map((e) => e.text.toLowerCase()),
     source: "user",
+    ...(body.actor_id ? { actor_id: body.actor_id } : {}),
     confidence: body.confidence ?? 0.9,
     content_hash: await hashContent(redactedContent.text),
     reinforcement_count: 0,
@@ -479,13 +567,15 @@ memoryRoutes.get("/relations", async (c) => {
   });
 });
 
-// GET /api/memory/graph?limit=&topN=&refresh=
+// GET /api/memory/graph?limit=&maxNodes=&maxEdges=&minWeight=&refresh=
 memoryRoutes.get("/graph", async (c) => {
   const limit = parseLimit(c.req.query("limit"), 2000, 5000);
-  const topN = parseTopN(c.req.query("topN"), 1000);
+  const maxNodes = parseLimit(c.req.query("maxNodes") ?? c.req.query("topN"), GRAPH_DEFAULT_MAX_NODES, GRAPH_MAX_NODES_LIMIT);
+  const maxEdges = parseLimit(c.req.query("maxEdges"), GRAPH_DEFAULT_MAX_EDGES, GRAPH_MAX_EDGES_LIMIT);
+  const minWeight = parseLimit(c.req.query("minWeight"), GRAPH_DEFAULT_MIN_WEIGHT, GRAPH_MAX_MIN_WEIGHT);
   const refresh = c.req.query("refresh") === "true";
 
-  const cacheKey = `graph:limit=${limit}:topN=${topN ?? ""}`;
+  const cacheKey = `graph:limit=${limit}:maxNodes=${maxNodes}:maxEdges=${maxEdges}:minWeight=${minWeight}`;
   if (!refresh) {
     const hit = cacheGet<unknown>(cacheKey);
     if (hit) return c.json(hit);
@@ -506,34 +596,52 @@ memoryRoutes.get("/graph", async (c) => {
 
   const entityStats = new Map<string, { factCount: number; categories: Set<string> }>();
   const edgeMap = new Map<string, { source: string; target: string; weight: number; type: string }>();
+  let denseFactsSkipped = 0;
+  let coOccurrenceEdgesSkipped = 0;
+
+  const addEntityStat = (entity: string | undefined, category?: string) => {
+    if (!entity) return;
+    const stat = entityStats.get(entity) ?? { factCount: 0, categories: new Set() };
+    stat.factCount++;
+    if (category) stat.categories.add(category);
+    entityStats.set(entity, stat);
+  };
 
   for (const fact of allFacts) {
-    const entities = fact.payload.entities ?? [];
+    const entities = Array.from(new Set(fact.payload.entities ?? []));
+    const entitySet = new Set(entities);
     const category = fact.payload.category;
 
     for (const e of entities) {
-      const stat = entityStats.get(e) ?? { factCount: 0, categories: new Set() };
-      stat.factCount++;
-      if (category) stat.categories.add(category);
-      entityStats.set(e, stat);
+      addEntityStat(e, category);
     }
 
-    for (let i = 0; i < entities.length; i++) {
-      for (let j = i + 1; j < entities.length; j++) {
-        const [a, b] = [entities[i]!, entities[j]!].sort();
-        const key = `${a}||${b}`;
-        const existing = edgeMap.get(key);
-        if (existing) { existing.weight++; }
-        else { edgeMap.set(key, { source: a, target: b, weight: 1, type: "co-occurrence" }); }
+    if (entities.length > GRAPH_MAX_FACT_ENTITIES_FOR_CO_OCCURRENCE) {
+      denseFactsSkipped++;
+      coOccurrenceEdgesSkipped += (entities.length * (entities.length - 1)) / 2;
+    } else {
+      for (let i = 0; i < entities.length; i++) {
+        for (let j = i + 1; j < entities.length; j++) {
+          const [a, b] = [entities[i]!, entities[j]!].sort();
+          const key = `${a}||${b}`;
+          const existing = edgeMap.get(key);
+          if (existing) { existing.weight++; }
+          else { edgeMap.set(key, { source: a, target: b, weight: 1, type: "co-occurrence" }); }
+        }
       }
     }
 
     if (fact.payload.from_entity && fact.payload.to_entity && fact.payload.relation_type) {
       const from = fact.payload.from_entity;
       const to = fact.payload.to_entity;
+      if (!entitySet.has(from)) addEntityStat(from, category);
+      if (!entitySet.has(to)) addEntityStat(to, category);
       const [a, b] = [from, to].sort();
       const key = `rel:${a}||${b}||${fact.payload.relation_type}`;
-      if (!edgeMap.has(key)) {
+      const existing = edgeMap.get(key);
+      if (existing) {
+        existing.weight += 2;
+      } else {
         edgeMap.set(key, { source: from, target: to, weight: 2, type: fact.payload.relation_type });
       }
     }
@@ -542,19 +650,27 @@ memoryRoutes.get("/graph", async (c) => {
   let nodes = Array.from(entityStats.entries()).map(([id, stat]) => ({
     id, label: id, factCount: stat.factCount,
     categories: Array.from(stat.categories),
-    primaryCategory: Array.from(stat.categories).sort((a, b) => a.localeCompare(b))[0] ?? "infrastructure",
+    primaryCategory: Array.from(stat.categories).sort((a, b) => a.localeCompare(b))[0] ?? "engineering",
   }));
 
-  let edges = Array.from(edgeMap.values());
   const totalNodes = nodes.length;
-  let nodesPruned = 0;
+  nodes = [...nodes].sort((a, b) => b.factCount - a.factCount || a.id.localeCompare(b.id)).slice(0, maxNodes);
+  const nodesPruned = Math.max(totalNodes - nodes.length, 0);
+  const keep = new Set(nodes.map((n) => n.id));
 
-  if (topN !== null && nodes.length > topN) {
-    nodes = [...nodes].sort((a, b) => b.factCount - a.factCount).slice(0, topN);
-    const keep = new Set(nodes.map((n) => n.id));
-    edges = edges.filter((e) => keep.has(e.source) && keep.has(e.target));
-    nodesPruned = totalNodes - nodes.length;
-  }
+  const nodeScopedEdges = Array.from(edgeMap.values()).filter((e) => keep.has(e.source) && keep.has(e.target));
+  const weightScopedEdges = nodeScopedEdges.filter((e) => e.type !== "co-occurrence" || e.weight >= minWeight);
+  const totalEdges = weightScopedEdges.length;
+  const edgesFilteredByWeight = nodeScopedEdges.length - weightScopedEdges.length;
+  const edges = [...weightScopedEdges]
+    .sort((a, b) => {
+      const aTyped = a.type !== "co-occurrence";
+      const bTyped = b.type !== "co-occurrence";
+      if (aTyped !== bTyped) return aTyped ? -1 : 1;
+      return b.weight - a.weight || a.source.localeCompare(b.source) || a.target.localeCompare(b.target);
+    })
+    .slice(0, maxEdges);
+  const edgesPruned = Math.max(totalEdges - edges.length, 0);
 
   const payload = {
     nodes,
@@ -563,18 +679,29 @@ memoryRoutes.get("/graph", async (c) => {
     factsScanned,
     truncated,
     limit,
-    topN,
+    topN: maxNodes,
+    maxNodes,
+    maxEdges,
+    minWeight,
     nodesPruned,
     totalNodes,
+    edgesPruned,
+    totalEdges,
+    edgesFilteredByWeight,
+    denseFactsSkipped,
+    coOccurrenceEdgesSkipped,
   };
   cacheSet(cacheKey, payload, GRAPH_TTL_MS);
   return c.json(payload);
 });
 
-// GET /api/memory/stats?refresh=
+// GET /api/memory/stats?kind=...&source=...&refresh=
 memoryRoutes.get("/stats", async (c) => {
   const refresh = c.req.query("refresh") === "true";
-  const cacheKey = "stats";
+  const kind = c.req.query("kind") || undefined;
+  const source = c.req.query("source") || undefined;
+  const statsFilter = { kind, source };
+  const cacheKey = `stats:kind=${kind ?? ""}:source=${source ?? ""}`;
   if (!refresh) {
     const hit = cacheGet<unknown>(cacheKey);
     if (hit) return c.json(hit);
@@ -590,10 +717,10 @@ memoryRoutes.get("/stats", async (c) => {
   // All counts in one Promise.all instead of several sequential awaits.
   const [info, catCounts, kindCounts, subtypeCounts, allCount] = await Promise.all([
     qdrant.collectionInfo(),
-    Promise.all(CATEGORY_VALUES.map(async (cat) => [cat, await safeCount(buildFilter({ category: cat }))] as const)),
-    Promise.all(KIND_VALUES.map(async (k) => [k, await safeCount(buildFilter({ kind: k }))] as const)),
-    Promise.all(MEMORY_SUBTYPE_VALUES.map(async (subtype) => [subtype, await safeCount(buildFilter({ memorySubtype: subtype }))] as const)),
-    safeCount({ must: [] }),
+    Promise.all(CATEGORY_VALUES.map(async (cat) => [cat, await safeCount(buildFilter({ ...statsFilter, category: cat }))] as const)),
+    Promise.all(KIND_VALUES.map(async (k) => [k, await safeCount(buildFilter({ source, kind: k }))] as const)),
+    Promise.all(MEMORY_SUBTYPE_VALUES.map(async (subtype) => [subtype, await safeCount(buildFilter({ ...statsFilter, memorySubtype: subtype }))] as const)),
+    safeCount(buildFilter(statsFilter)),
   ]);
 
   const payload = {

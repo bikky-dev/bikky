@@ -13,6 +13,7 @@ export interface FactPayload {
   domain?: string;
   kind?: string;
   memory_subtype?: string | null;
+  actor_id?: string;
   entities: string[];
   source?: string;
   confidence: number;
@@ -56,6 +57,7 @@ export interface FilterCondition {
 
 export interface QdrantFilter {
   must: FilterCondition[];
+  should?: FilterCondition[];
   must_not?: FilterCondition[];
 }
 
@@ -78,9 +80,42 @@ const SOURCE_FILTER_ALIASES: Record<string, string[]> = {
   docs: ["docs"],
 };
 
-const sourceFilterValue = (source: string): { value?: string; any?: string[] } => {
-  const values = SOURCE_FILTER_ALIASES[source] ?? [source];
+const CATEGORY_FILTER_ALIASES: Record<string, string[]> = {
+  engineering: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"],
+  product: ["product", "product_domain", "projects"],
+  human: ["human", "people", "preferences", "team"],
+  system: ["system"],
+};
+
+const aliasedFilterValue = (aliases: Record<string, string[]>, value: string): { value?: string; any?: string[] } => {
+  const values = aliases[value] ?? [value];
   return values.length === 1 ? { value: values[0] } : { any: values };
+};
+
+const sourceFilterValue = (source: string): { value?: string; any?: string[] } => {
+  return aliasedFilterValue(SOURCE_FILTER_ALIASES, source);
+};
+
+const categoryFilterValue = (category: string): { value?: string; any?: string[] } => {
+  return aliasedFilterValue(CATEGORY_FILTER_ALIASES, category);
+};
+
+const MEMORY_SUBTYPE_FILTER_ALIASES: Record<string, FilterCondition[]> = {
+  convention: [
+    { key: "memory_subtype", match: { value: "convention" } },
+    { key: "kind", match: { value: "distilled" } },
+  ],
+};
+
+const categoryFilterConditions = (categories: string[]): FilterCondition[] => {
+  return categories.map((category) => ({ key: "category", match: categoryFilterValue(category) }));
+};
+
+const memorySubtypeFilterConditions = (subtypes: string[]): FilterCondition[] => {
+  return subtypes.flatMap((subtype) => {
+    const aliases = MEMORY_SUBTYPE_FILTER_ALIASES[subtype];
+    return aliases ?? [{ key: "memory_subtype", match: { value: subtype } }];
+  });
 };
 
 // --- Client ---
@@ -165,32 +200,50 @@ export class QdrantClient {
 
 export function buildFilter(opts: {
   category?: string;
+  categories?: string[];
   domain?: string;
   kind?: string;
   memorySubtype?: string;
+  memorySubtypes?: string[];
   entity?: string;
   source?: string;
+  actorId?: string;
   since?: string;
   until?: string;
   excludeSuperseded?: boolean;
   excludeEntityType?: boolean;
 }): QdrantFilter {
   const must: FilterCondition[] = [];
+  const should: FilterCondition[] = [];
   const must_not: FilterCondition[] = [];
   if (opts.excludeSuperseded === true) must.push({ is_null: { key: "superseded_by" } });
-  if (opts.category) must.push({ key: "category", match: { value: opts.category } });
+  if (opts.category) must.push({ key: "category", match: categoryFilterValue(opts.category) });
   if (opts.domain) must.push({ key: "domain", match: { value: opts.domain } });
   if (opts.kind) must.push({ key: "kind", match: { value: opts.kind } });
-  if (opts.memorySubtype) must.push({ key: "memory_subtype", match: { value: opts.memorySubtype } });
+  if (opts.memorySubtype) {
+    const aliases = memorySubtypeFilterConditions([opts.memorySubtype]);
+    if (MEMORY_SUBTYPE_FILTER_ALIASES[opts.memorySubtype]) should.push(...aliases);
+    else must.push(...aliases);
+  }
+  if (opts.categories?.length || opts.memorySubtypes?.length) {
+    should.push(
+      ...categoryFilterConditions(opts.categories ?? []),
+      ...memorySubtypeFilterConditions(opts.memorySubtypes ?? []),
+    );
+  }
   if (opts.entity) must.push({ key: "entities", match: { value: opts.entity.toLowerCase() } });
   if (opts.source) must.push({ key: "source", match: sourceFilterValue(opts.source) });
+  if (opts.actorId) must.push({ key: "actor_id", match: { value: opts.actorId } });
   if (opts.since) must.push({ key: "created_at", range: { gte: opts.since } });
   if (opts.until) must.push({ key: "created_at", range: { lte: opts.until } });
   // Phase 5a entity_type sidecar points are not user-facing facts; opt-in to exclude.
   if (opts.excludeEntityType === true && opts.kind !== "entity_type") {
     must_not.push({ key: "kind", match: { value: "entity_type" } });
   }
-  return must_not.length > 0 ? { must, must_not } : { must };
+  const filter: QdrantFilter = { must };
+  if (should.length > 0) filter.should = should;
+  if (must_not.length > 0) filter.must_not = must_not;
+  return filter;
 }
 
 // --- Factory ---

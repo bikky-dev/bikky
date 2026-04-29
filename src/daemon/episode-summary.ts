@@ -208,7 +208,7 @@ export const buildEpisodeSummaryPayload = (input: {
   const payload: Record<string, unknown> = {
     ...existingPayload,
     content: redactedContent.text,
-    category: "projects",
+    category: "system",
     domain: DEFAULT_CAPTURE_CONTEXT.domain,
     kind: "summary",
     memory_subtype: "episode",

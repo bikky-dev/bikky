@@ -17,6 +17,9 @@ describe("daemon/extraction prompt", () => {
     assert.ok(!DEFAULT_EXTRACTION_PROMPT.includes("work or personal"));
     assert.ok(!DEFAULT_EXTRACTION_PROMPT.includes("Telegram"));
     assert.ok(!DEFAULT_EXTRACTION_PROMPT.includes("WhatsApp"));
+    assert.ok(DEFAULT_EXTRACTION_PROMPT.includes("engineering | product | human | system"));
+    assert.ok(DEFAULT_EXTRACTION_PROMPT.includes("product_decision"));
+    assert.ok(DEFAULT_EXTRACTION_PROMPT.includes("activity_event"));
   });
 });
 
@@ -32,7 +35,7 @@ describe("normalizeExtractedFact", () => {
     });
 
     assert.ok(fact);
-    assert.strictEqual(fact.category, "people");
+    assert.strictEqual(fact.category, "human");
     assert.strictEqual(fact.memory_subtype, "preference");
     assert.deepStrictEqual(fact.entities, ["node", "npm-test"]);
   });
@@ -79,13 +82,37 @@ describe("normalizeExtractedFact", () => {
     assert.ok(fact);
     assert.strictEqual(fact.memory_subtype, "operational_procedure");
   });
+
+  it("parses durable activity-event metadata", () => {
+    const fact = normalizeExtractedFact({
+      content: "Saber merged PR #85 after approving the subtype UX changes.",
+      category: "human",
+      memory_subtype: "activity_event",
+      entities: ["saber", "pr-85"],
+      confidence: 0.9,
+      importance: 0.8,
+      quality_score: 0.8,
+      action_actor: "Saber",
+      action_type: "merged",
+      action_object: "PR #85",
+      action_outcome: "Subtype UX copy changes were approved and merged.",
+    });
+
+    assert.ok(fact);
+    assert.strictEqual(fact.category, "human");
+    assert.strictEqual(fact.memory_subtype, "activity_event");
+    assert.strictEqual(fact.action_actor, "Saber");
+    assert.strictEqual(fact.action_type, "merged");
+    assert.strictEqual(fact.action_object, "PR #85");
+    assert.strictEqual(fact.action_outcome, "Subtype UX copy changes were approved and merged.");
+  });
 });
 
 describe("isHighQualityExtractedFact", () => {
   function makeFact(overrides: Partial<ExtractedFact> = {}): ExtractedFact {
     return {
       content: "The UI smoke tests live in packages/ui/tests/smoke.spec.ts and run with npm run test:e2e.",
-      category: "codebase",
+      category: "engineering",
       memory_subtype: "codebase_map",
       entities: ["packages/ui", "playwright"],
       confidence: 0.9,
@@ -128,7 +155,7 @@ describe("normalizeExtractedFact — self-judgment fields (prompt v2026-04-28-1)
   it("parses subject, subject_specificity, volatility, self_contained, as_of", () => {
     const fact = normalizeExtractedFact({
       content: "The bikky-dev/bikky CI workflow .github/workflows/release.yml builds Docker images and pushes to ECR.",
-      category: "infrastructure",
+      category: "engineering",
       memory_subtype: "infra_topology",
       entities: ["bikky-dev/bikky", "ecr"],
       confidence: 0.9,
@@ -155,7 +182,7 @@ describe("normalizeExtractedFact — self-judgment fields (prompt v2026-04-28-1)
   it("clamps subject_specificity to [0,1] and rejects unknown volatility values", () => {
     const fact = normalizeExtractedFact({
       content: "The dbt-run-cronjob-v100-29617080 cronjob is currently running the old image.",
-      category: "observations",
+      category: "engineering",
       memory_subtype: "troubleshooting_gotcha",
       entities: ["dbt-run-cronjob-v100-29617080"],
       confidence: 0.8,
@@ -177,7 +204,7 @@ describe("normalizeExtractedFact — self-judgment fields (prompt v2026-04-28-1)
   it("ignores malformed as_of and missing self-judgment fields without dropping the fact", () => {
     const fact = normalizeExtractedFact({
       content: "The UI smoke tests live in packages/ui/tests/smoke.spec.ts and run with npm run test:e2e.",
-      category: "codebase",
+      category: "engineering",
       memory_subtype: "codebase_map",
       entities: ["packages/ui"],
       confidence: 0.9,
@@ -199,7 +226,7 @@ describe("factQualitySignals — self-judgment integration", () => {
   function baseFact(overrides: Partial<ExtractedFact> = {}): ExtractedFact {
     return {
       content: "The UI smoke tests live in packages/ui/tests/smoke.spec.ts and run with npm run test:e2e.",
-      category: "codebase",
+      category: "engineering",
       memory_subtype: "codebase_map",
       entities: ["packages/ui"],
       confidence: 0.9,

@@ -75,6 +75,8 @@ const ENV_KEYS = [
   "BIKKY_DAEMON_ENTITY_TYPING_ENABLED",
   "BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC",
   "BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN",
+  "BIKKY_ACTOR_ID",
+  "BIKKY_ACTOR_LABEL",
 ];
 
 let savedEnv: Record<string, string | undefined> = {};
@@ -234,6 +236,13 @@ describe("config", () => {
       if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
       const cfg = loadConfig();
       assert.strictEqual(cfg.watchers.claude.enabled, true);
+    });
+
+    it("identity defaults to no configured actor", () => {
+      if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
+      const cfg = loadConfig();
+      assert.strictEqual(cfg.identity.actor_id, null);
+      assert.strictEqual(cfg.identity.actor_label, null);
     });
   });
 
@@ -402,6 +411,17 @@ describe("config", () => {
       assert.strictEqual(cfg.daemon.entity_typing_interval_sec, 1200);
       assert.strictEqual(cfg.daemon.entity_typing_max_entities_per_run, 4);
     });
+
+    it("BIKKY_ACTOR_* env vars override identity", () => {
+      if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
+      process.env.BIKKY_ACTOR_ID = "saber-local";
+      process.env.BIKKY_ACTOR_LABEL = "Saber";
+
+      const cfg = loadConfig();
+
+      assert.strictEqual(cfg.identity.actor_id, "saber-local");
+      assert.strictEqual(cfg.identity.actor_label, "Saber");
+    });
   });
 
   // ── URL trailing slash stripping ──────────────────────────────────────────
@@ -480,6 +500,24 @@ describe("config", () => {
       assert.strictEqual(cfg.embedding.dimensions, 1536);
       // base_url should still be default
       assert.strictEqual(cfg.embedding.base_url, "http://localhost:11434");
+    });
+
+    it("nested identity config merges correctly", () => {
+      fs.mkdirSync(BIKKY_DIR, { recursive: true });
+      fs.writeFileSync(
+        CONFIG_PATH,
+        JSON.stringify({
+          identity: {
+            actor_id: "configured-actor",
+            actor_label: "Configured Actor",
+          },
+        }),
+      );
+
+      const cfg = loadConfig();
+
+      assert.strictEqual(cfg.identity.actor_id, "configured-actor");
+      assert.strictEqual(cfg.identity.actor_label, "Configured Actor");
     });
 
     it("env vars override file config", () => {

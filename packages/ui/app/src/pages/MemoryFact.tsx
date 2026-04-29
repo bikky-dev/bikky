@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from "react-router";
 import { ArrowLeft, Pencil, Trash2, Loader2, Save, X } from "lucide-react";
 import { apiFetch, ApiError } from "../lib/api";
 import { relativeTime, CATEGORY_COLORS, KIND_COLORS } from "../lib/format";
-import { CATEGORY_OPTIONS, DOMAIN_OPTIONS, ontologyLabel } from "../lib/ontology";
+import { BROWSABLE_CATEGORY_OPTIONS, DOMAIN_OPTIONS, ontologyLabel } from "../lib/ontology";
 import Badge from "../components/Badge";
 import { EntityChip } from "../components/EntityChip";
 import type { Fact } from "../components/FactCard";
@@ -111,9 +111,9 @@ export default function MemoryFact() {
 
   const selectCls =
     "bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500";
-  const categoryOptions = CATEGORY_OPTIONS.some((c) => c.value === editCategory) || !editCategory
-    ? CATEGORY_OPTIONS
-    : [{ value: editCategory, label: `Legacy: ${editCategory}` }, ...CATEGORY_OPTIONS];
+  const categoryOptions = BROWSABLE_CATEGORY_OPTIONS.some((c) => c.value === editCategory) || !editCategory
+    ? BROWSABLE_CATEGORY_OPTIONS
+    : [{ value: editCategory, label: `Legacy: ${editCategory}` }, ...BROWSABLE_CATEGORY_OPTIONS];
   const domainOptions = DOMAIN_OPTIONS.some((d) => d.value === editDomain) || !editDomain
     ? DOMAIN_OPTIONS
     : [{ value: editDomain, label: `Legacy: ${editDomain}` }, ...DOMAIN_OPTIONS];
@@ -222,11 +222,12 @@ export default function MemoryFact() {
             </>
           ) : (
             <>
-              <Badge label={ontologyLabel(fact.category)} color={CATEGORY_COLORS[fact.category]} size="md" />
-              {fact.kind && <Badge label={ontologyLabel(fact.kind)} color={KIND_COLORS[fact.kind]} size="md" />}
-              {fact.memory_subtype && <Badge label={ontologyLabel(fact.memory_subtype)} color={CATEGORY_COLORS[fact.category]} size="md" />}
-              {fact.domain && <Badge label={ontologyLabel(fact.domain)} color={fact.domain === "personal_productivity" ? "green" : "zinc"} size="md" />}
-              {fact.source && <Badge label={ontologyLabel(fact.source)} size="md" />}
+              <Badge label={`Category: ${ontologyLabel(fact.category)}`} color={CATEGORY_COLORS[fact.category]} size="md" />
+              {fact.kind && <Badge label={`Kind: ${ontologyLabel(fact.kind)}`} color={KIND_COLORS[fact.kind]} size="md" />}
+              {fact.memory_subtype && <Badge label={`Type: ${ontologyLabel(fact.memory_subtype)}`} color={CATEGORY_COLORS[fact.category]} size="md" />}
+              {fact.domain && <Badge label={`Domain: ${ontologyLabel(fact.domain)}`} color={fact.domain === "personal_productivity" ? "green" : "zinc"} size="md" />}
+              {fact.source && <Badge label={`Source: ${ontologyLabel(fact.source)}`} size="md" />}
+              {fact.actor_id && <Badge label={`Actor: ${fact.actor_id}`} color="zinc" size="md" />}
             </>
           )}
         </div>
@@ -298,6 +299,12 @@ export default function MemoryFact() {
             <p className="text-xs text-zinc-500">ID</p>
             <p className="text-zinc-500 font-mono text-xs truncate">{fact.id}</p>
           </div>
+          {fact.actor_id && (
+            <div>
+              <p className="text-xs text-zinc-500">Actor</p>
+              <p className="text-zinc-300 font-mono text-xs truncate">{fact.actor_id}</p>
+            </div>
+          )}
         </div>
 
         <ProvenanceSection fact={fact} />

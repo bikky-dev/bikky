@@ -132,7 +132,7 @@ describe("daemon/session-summary", () => {
         redactionOptions: { enabled: true, redactPii: true },
       });
 
-      assert.equal(payload.category, "projects");
+      assert.equal(payload.category, "system");
       assert.equal(payload.domain, "software_engineering");
       assert.equal(payload.kind, "summary");
       assert.equal(payload.memory_subtype, "session_index");
@@ -168,7 +168,7 @@ describe("daemon/session-summary", () => {
           id: "existing-id",
           payload: {
             content: "Old summary",
-            category: "projects",
+            category: "system",
             entities: [],
             confidence: 1,
             content_hash: "old",

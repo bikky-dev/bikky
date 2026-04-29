@@ -23,6 +23,7 @@ import {
   normalizeEntities,
   normalizeMemorySubtype,
   validateMemorySubtype,
+  type MemorySubtype,
 } from "../mcp/taxonomy.js";
 import {
   extractionPrompt,
@@ -40,6 +41,7 @@ import {
 import { shouldSummarizeEvents, updateSessionSummary } from "./session-summary.js";
 import { redactStorageText } from "../privacy/redaction.js";
 import { compareSubtype, hasTypedToken, verifyGrounding, verifyVolatilityCoherence } from "./extraction-rules.js";
+import { resolveActorIdentity } from "../provenance/actor.js";
 
 // ── Module state ─────────────────────────────────────────────────────────────
 
@@ -73,17 +75,19 @@ Every fact must pass at least one gate:
 
 ## Ontology
 - domain is the activity profile. For coding-agent captures use "software_engineering".
-- category is subject matter: codebase | infrastructure | operations | decisions | product_domain | projects | people | preferences | observations.
+- category is subject matter: engineering | product | human | system.
 - kind is object shape. For this prompt, emit only kind="fact".
 - memory_subtype must be one of:
-  codebase_map | architecture_decision | infra_topology | access_pattern | operational_procedure | domain_rule | troubleshooting_gotcha | preference.
+  codebase_map | architecture_decision | infra_topology | access_pattern | operational_procedure | domain_rule | product_decision | product_requirement | user_workflow | roadmap_item | success_metric | market_insight | troubleshooting_gotcha | preference | person_profile | ownership_note | working_agreement | activity_event.
 
 ## Examples
 GOOD:
 - "The UI smoke tests live in packages/ui/tests/smoke.spec.ts and run through npm run test:e2e with mocked /api/memory/* responses."
 - "Use workspace_id as the tenancy/access boundary; domain is reserved for activity profile such as software_engineering."
 - "If Qdrant order_by fails with a missing index error, create a datetime payload index for the sorted field before retrying."
-- "Prefer Node's built-in test runner for root tests; do not add Jest just for daemon unit tests."
+- "The memory page should show categories and concrete subtype chips directly; a sub-tab layer makes the ontology harder to understand."
+- "Saber prefers Node's built-in test runner for root tests; do not add Jest just for daemon unit tests."
+- "Saber merged PR #85 after approving the subtype UX copy changes."
 
 BAD:
 - "The tests were fixed." (status only)
@@ -97,8 +101,12 @@ Return strict JSON:
 {"facts":[
   {
     "content":"One self-contained durable fact.",
-    "category":"codebase",
+    "category":"engineering",
     "memory_subtype":"codebase_map",
+    "action_actor":"optional actor for activity_event only",
+    "action_type":"optional action verb for activity_event only",
+    "action_object":"optional durable object for activity_event only",
+    "action_outcome":"optional durable outcome for activity_event only",
     "entities":["repo-or-tool","specific-module"],
     "confidence":0.9,
     "importance":0.7,
@@ -113,7 +121,7 @@ Return strict JSON:
 
 Scoring:
 - confidence: 0.9 explicit, 0.7 strong inference, 0.55 weak but useful inference.
-- importance: 0.8+ for decisions, infra, procedures, access, recurring failures; 0.6+ for useful codebase maps/preferences.
+- importance: 0.8+ for decisions, infra, procedures, access, recurring failures, product requirements, ownership, and state-changing activity events; 0.6+ for useful codebase maps/preferences.
 - quality_score: 0.8+ passes multiple gates, 0.6+ passes one strong gate, below 0.6 should usually be omitted.
 
 If nothing passes the quality gate, return {"facts":[]}.`;
@@ -372,6 +380,10 @@ export interface ExtractedFact {
   volatility_reason?: string | null;
   self_contained?: boolean | null;
   as_of?: string | null;
+  action_actor?: string | null;
+  action_type?: string | null;
+  action_object?: string | null;
+  action_outcome?: string | null;
 }
 
 export interface FactQualitySignals {
@@ -408,15 +420,17 @@ export const factQualitySignals = (fact: ExtractedFact): FactQualitySignals => {
   const wordCount = textWordCount(content);
   const durableAnchor = hasDurableAnchor(content, entities);
   const statusOnly = isStatusOnlyContent(content, entities);
-  const isPreferenceLike = subtype === "preference" || subtype === "domain_rule";
-  const isDecisionLike = subtype === "architecture_decision" || subtype === "troubleshooting_gotcha";
-  const shortUseful = wordCount >= 7 && wordCount <= 22 && (isPreferenceLike || isDecisionLike) && (entities.length > 0 || durableAnchor);
+  const isPreferenceLike = subtype === "preference" || subtype === "domain_rule" || subtype === "working_agreement";
+  const isDecisionLike = subtype === "architecture_decision" || subtype === "product_decision" || subtype === "troubleshooting_gotcha";
+  const isProductLike = subtype === "product_requirement" || subtype === "user_workflow" || subtype === "roadmap_item" || subtype === "success_metric" || subtype === "market_insight";
+  const isHumanLike = subtype === "person_profile" || subtype === "ownership_note" || subtype === "activity_event";
+  const shortUseful = wordCount >= 7 && wordCount <= 22 && (isPreferenceLike || isDecisionLike || isProductLike || isHumanLike) && (entities.length > 0 || durableAnchor);
 
   let score = 0.25;
   if (wordCount >= 8) score += 0.1;
   if (wordCount >= 14) score += 0.1;
   if (durableAnchor) score += 0.25;
-  if (isPreferenceLike || isDecisionLike) score += 0.15;
+  if (isPreferenceLike || isDecisionLike || isProductLike || isHumanLike) score += 0.15;
   if ((fact.confidence ?? 0) >= 0.75) score += 0.1;
   if ((fact.importance ?? 0) >= 0.7) score += 0.1;
   if (statusOnly) score -= 0.4;
@@ -439,20 +453,31 @@ export const factQualitySignals = (fact: ExtractedFact): FactQualitySignals => {
   };
 };
 
+const subtypeForRawCategoryHint = (rawCategory: string | null, category: string): MemorySubtype => {
+  const hint = (rawCategory || "").trim().toLowerCase();
+  if (hint.includes("infra")) return "infra_topology";
+  if (hint.includes("operation") || hint.includes("runbook")) return "operational_procedure";
+  if (hint.includes("decision")) return "architecture_decision";
+  if (hint.includes("people") || hint.includes("preference") || hint.includes("owner")) return "preference";
+  if (hint.includes("product") || hint.includes("domain")) return "domain_rule";
+  return subtypeForCategory(normalizeCategory(category));
+};
+
 export const normalizeExtractedFact = (raw: Record<string, unknown>): ExtractedFact | null => {
   if (!raw.content || typeof raw.content !== "string") return null;
 
-  const category = normalizeCategory(typeof raw.category === "string" ? raw.category : "observations");
+  const rawCategory = typeof raw.category === "string" ? raw.category : null;
+  const category = normalizeCategory(rawCategory ?? "engineering");
   const requestedSubtype = typeof raw.memory_subtype === "string" ? raw.memory_subtype : null;
   let memorySubtype = requestedSubtype ? normalizeMemorySubtype("fact", requestedSubtype) : null;
   if (!memorySubtype) {
-    memorySubtype = subtypeForCategory(category);
+    memorySubtype = subtypeForRawCategoryHint(rawCategory, category);
   }
 
   try {
     validateMemorySubtype("fact", memorySubtype);
   } catch {
-    memorySubtype = subtypeForCategory(category);
+    memorySubtype = subtypeForRawCategoryHint(rawCategory, category);
   }
 
   const confidence = typeof raw.confidence === "number" ? clamp01(raw.confidence) : 0.7;
@@ -500,6 +525,10 @@ export const normalizeExtractedFact = (raw: Record<string, unknown>): ExtractedF
     volatility_reason: volatilityReason,
     self_contained: selfContained,
     as_of: asOf,
+    action_actor: typeof raw.action_actor === "string" && raw.action_actor.trim().length > 0 ? raw.action_actor.trim() : null,
+    action_type: typeof raw.action_type === "string" && raw.action_type.trim().length > 0 ? raw.action_type.trim() : null,
+    action_object: typeof raw.action_object === "string" && raw.action_object.trim().length > 0 ? raw.action_object.trim() : null,
+    action_outcome: typeof raw.action_outcome === "string" && raw.action_outcome.trim().length > 0 ? raw.action_outcome.trim() : null,
   };
 
   return isHighQualityExtractedFact(fact) ? fact : null;
@@ -605,6 +634,9 @@ const storeFacts = async (
     capture_policy_version: CAPTURE_POLICY_VERSION,
     extracted_by_prompt: `${EXTRACTION_PROMPT_DESCRIPTOR.id}@${EXTRACTION_PROMPT_DESCRIPTOR.version}`,
   };
+  const actor = resolveActorIdentity({ config });
+  if (actor.actor_label) baseMeta.actor_label = actor.actor_label;
+  if (actor.source) baseMeta.actor_source = actor.source;
   let stored = 0;
 
   for (const fact of facts) {
@@ -700,6 +732,10 @@ const storeFacts = async (
         factMeta.self_contained = sanitizedFact.self_contained;
       }
       if (sanitizedFact.as_of) factMeta.as_of = sanitizedFact.as_of;
+      if (sanitizedFact.action_actor) factMeta.action_actor = sanitizedFact.action_actor;
+      if (sanitizedFact.action_type) factMeta.action_type = sanitizedFact.action_type;
+      if (sanitizedFact.action_object) factMeta.action_object = sanitizedFact.action_object;
+      if (sanitizedFact.action_outcome) factMeta.action_outcome = sanitizedFact.action_outcome;
       factMeta.has_typed_token = grounding.hasTypedToken;
       factMeta.subject_resolves = grounding.subjectResolves;
       factMeta.half_life_multiplier = volatility.halfLifeMultiplier;
@@ -762,6 +798,9 @@ const storeFacts = async (
         workstream_key: fact.workstream_key,
         metadata: factMeta,
       };
+      if (actor.actor_id) {
+        storePayload.actor_id = actor.actor_id;
+      }
 
       if (dedup.action === "supersede" && dedup.existingId) {
         const newId = await qdrant.storeFact(storePayload);

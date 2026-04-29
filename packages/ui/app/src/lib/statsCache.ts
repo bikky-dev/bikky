@@ -9,37 +9,64 @@ export interface MemoryStats {
   bySubtype: Record<string, number>;
 }
 
+export interface MemoryStatsFilters {
+  kind?: string;
+  source?: string;
+}
+
 const TTL_MS = 30_000;
 
-let cached: { data: MemoryStats; expiresAt: number } | null = null;
-let inflight: Promise<MemoryStats> | null = null;
+const cached = new Map<string, { data: MemoryStats; expiresAt: number }>();
+const inflight = new Map<string, Promise<MemoryStats>>();
+
+function normalizeArgs(filtersOrRefresh: MemoryStatsFilters | boolean, refresh: boolean) {
+  if (typeof filtersOrRefresh === "boolean") {
+    return { filters: {}, refresh: filtersOrRefresh };
+  }
+  return { filters: filtersOrRefresh, refresh };
+}
+
+function statsQuery(filters: MemoryStatsFilters, refresh: boolean): { key: string; query: string } {
+  const params = new URLSearchParams();
+  if (filters.kind) params.set("kind", filters.kind);
+  if (filters.source) params.set("source", filters.source);
+  if (refresh) params.set("refresh", "true");
+  const key = `kind=${filters.kind ?? ""}&source=${filters.source ?? ""}`;
+  const query = params.toString();
+  return { key, query: query ? `?${query}` : "" };
+}
 
 /**
  * Module-level dedup + TTL cache for /api/memory/stats so the Dashboard and
  * Memory pages don't double-fetch the (expensive) stats fan-out on simultaneous
- * mount. Use refresh=true to bust both caches.
+ * mount. Counts can be scoped to source/kind for the Memory advanced filters.
  */
-export async function getStats(refresh = false): Promise<MemoryStats> {
-  if (refresh) {
-    cached = null;
-    inflight = null;
+export async function getStats(filtersOrRefresh: MemoryStatsFilters | boolean = {}, refresh = false): Promise<MemoryStats> {
+  const args = normalizeArgs(filtersOrRefresh, refresh);
+  const { key, query } = statsQuery(args.filters, args.refresh);
+  if (args.refresh) {
+    cached.delete(key);
+    inflight.delete(key);
   }
-  if (cached && cached.expiresAt > Date.now()) return cached.data;
-  if (inflight) return inflight;
+  const cachedStats = cached.get(key);
+  if (cachedStats && cachedStats.expiresAt > Date.now()) return cachedStats.data;
+  const inflightStats = inflight.get(key);
+  if (inflightStats) return inflightStats;
 
-  inflight = apiFetch<MemoryStats>(`/api/memory/stats${refresh ? "?refresh=true" : ""}`)
+  const request = apiFetch<MemoryStats>(`/api/memory/stats${query}`)
     .then((data) => {
-      cached = { data, expiresAt: Date.now() + TTL_MS };
+      cached.set(key, { data, expiresAt: Date.now() + TTL_MS });
       return data;
     })
     .finally(() => {
-      inflight = null;
+      inflight.delete(key);
     });
 
-  return inflight;
+  inflight.set(key, request);
+  return request;
 }
 
 export function clearStatsCache(): void {
-  cached = null;
-  inflight = null;
+  cached.clear();
+  inflight.clear();
 }

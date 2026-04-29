@@ -62,7 +62,7 @@ const GOLDEN: GoldenCase[] = [
       as_of: "2026-04-28",
     },
     expectedVerdict: "grounded",
-    expectedForcedCategory: "observations",
+    expectedForcedCategory: "engineering",
     expectedExpiry: "set",
   },
   {
@@ -105,7 +105,7 @@ const GOLDEN: GoldenCase[] = [
       as_of: "2026-04-28",
     },
     expectedVerdict: "grounded",
-    expectedForcedCategory: "observations",
+    expectedForcedCategory: "engineering",
     expectedExpiry: "set",
   },
 
@@ -196,7 +196,7 @@ const GOLDEN: GoldenCase[] = [
       as_of: "2026-04-28",
     },
     expectedVerdict: "grounded",
-    expectedForcedCategory: "observations",
+    expectedForcedCategory: "engineering",
     expectedExpiry: "set",
   },
   {
@@ -308,7 +308,7 @@ test("golden set: recall ≥ 0.9 (bad facts caught — dropped or downgraded or 
     const isCaught =
       r.verdict === "ungrounded" ||
       r.verdict === "ambiguous" ||
-      r.forcedCategory === "observations" ||
+      r.forcedCategory !== null ||
       r.expiresAt !== null;
     if (isCaught) caught++;
   }

@@ -85,6 +85,11 @@ export interface QdrantClientConfig {
   retry_base_delay_ms: number;
 }
 
+export interface IdentityConfig {
+  actor_id: string | null;
+  actor_label: string | null;
+}
+
 export interface WatcherConfig {
   copilot: { enabled: boolean; path: string };
   claude: { enabled: boolean; path: string };
@@ -98,6 +103,7 @@ export interface BikkyConfig {
   embedding: EmbeddingConfig;
   llm: LLMConfig;
   daemon: DaemonConfig;
+  identity: IdentityConfig;
   watchers: WatcherConfig;
   qdrant_client: QdrantClientConfig;
 }
@@ -162,6 +168,10 @@ const DEFAULTS: BikkyConfig = {
     entity_typing_max_entities_per_run: 5,
     staleness_threshold_days: 30,
   },
+  identity: {
+    actor_id: null,
+    actor_label: null,
+  },
   watchers: {
     copilot: { enabled: true, path: path.join(os.homedir(), ".copilot", "session-state") },
     claude: { enabled: true, path: path.join(os.homedir(), ".claude", "projects") },
@@ -204,6 +214,8 @@ export const CONFIG_ENV_KEYS = [
   "BIKKY_DAEMON_ENTITY_TYPING_ENABLED",
   "BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC",
   "BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN",
+  "BIKKY_ACTOR_ID",
+  "BIKKY_ACTOR_LABEL",
 ] as const;
 
 const CONFIG_ENV_PREFIXES = [
@@ -271,6 +283,11 @@ const qdrantClientConfigFileSchema = z.object({
   retry_base_delay_ms: nonNegativeInt.optional(),
 }).passthrough();
 
+const identityConfigFileSchema = z.object({
+  actor_id: z.string().nullable().optional(),
+  actor_label: z.string().nullable().optional(),
+}).passthrough();
+
 const configFileSchema = z.object({
   qdrant_url: z.string().nullable().optional(),
   qdrant_api_key: z.string().nullable().optional(),
@@ -279,6 +296,7 @@ const configFileSchema = z.object({
   embedding: embeddingConfigFileSchema.optional(),
   llm: llmConfigFileSchema.optional(),
   daemon: daemonConfigFileSchema.optional(),
+  identity: identityConfigFileSchema.optional(),
   watchers: watcherConfigFileSchema.optional(),
   qdrant_client: qdrantClientConfigFileSchema.optional(),
 }).passthrough();
@@ -540,6 +558,8 @@ export function loadConfig(): BikkyConfig {
   if (entityTypingInterval !== null) config.daemon.entity_typing_interval_sec = entityTypingInterval;
   const entityTypingMax = positiveInt(process.env.BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN);
   if (entityTypingMax !== null) config.daemon.entity_typing_max_entities_per_run = entityTypingMax;
+  if (process.env.BIKKY_ACTOR_ID) config.identity.actor_id = process.env.BIKKY_ACTOR_ID;
+  if (process.env.BIKKY_ACTOR_LABEL) config.identity.actor_label = process.env.BIKKY_ACTOR_LABEL;
 
   // Propagate aws_profile into env so both Bedrock clients (LLM + embedding)
   // pick it up via the SDK's default credential chain.

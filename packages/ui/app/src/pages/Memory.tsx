@@ -5,11 +5,8 @@ import { apiFetch } from "../lib/api";
 import { getStats, type MemoryStats as Stats } from "../lib/statsCache";
 import FactCard, { type Fact } from "../components/FactCard";
 import {
-  CATEGORY_OPTIONS,
-  DOMAIN_OPTIONS,
-  KIND_OPTIONS,
-  ONTOLOGY_GROUPS,
-  SOURCE_OPTIONS,
+  BROWSABLE_CATEGORY_OPTIONS,
+  BROWSABLE_SUBTYPES_BY_CATEGORY,
   SUBTYPE_BY_VALUE,
   ontologyLabel,
 } from "../lib/ontology";
@@ -26,6 +23,26 @@ const DATE_PRESETS: { label: string; days: number }[] = [
   { label: "Past 7 days", days: 6 },
   { label: "Past month", days: 29 },
 ];
+
+function isBrowsableCategory(value: string): boolean {
+  return BROWSABLE_CATEGORY_OPTIONS.some((category) => category.value === value);
+}
+
+function isBrowsableSubtype(value: string): boolean {
+  const subtype = SUBTYPE_BY_VALUE[value];
+  return Boolean(subtype && subtype.category !== "system");
+}
+
+function parseParamList(raw: string | null, isAllowed: (value: string) => boolean): string[] {
+  if (!raw) return [];
+  return raw.split(",").map((value) => value.trim()).filter((value, index, values) =>
+    Boolean(value) && isAllowed(value) && values.indexOf(value) === index,
+  );
+}
+
+function toggleValue(values: string[], value: string): string[] {
+  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
+}
 
 function presetSinceDate(days: number): string {
   const d = new Date();
@@ -51,20 +68,27 @@ interface SearchResponse {
 
 const PAGE_SIZE = 20;
 
+interface ActiveFilter {
+  key: string;
+  label: string;
+  value: string;
+  onClear: () => void;
+}
+
 export default function Memory() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
-  const [category, setCategory] = useState(searchParams.get("category") ?? "");
-  const [domain, setDomain] = useState(searchParams.get("domain") ?? "");
-  const [kind, setKind] = useState(searchParams.get("kind") ?? "");
-  const [memorySubtype, setMemorySubtype] = useState(searchParams.get("memory_subtype") ?? "");
-  const [source, setSource] = useState(searchParams.get("source") ?? "");
+  const initialCategories = parseParamList(searchParams.get("category"), isBrowsableCategory);
+  const initialSubtypes = parseParamList(searchParams.get("memory_subtype"), isBrowsableSubtype);
+  const [categories, setCategories] = useState<string[]>(initialCategories);
+  const [memorySubtypes, setMemorySubtypes] = useState<string[]>(initialSubtypes);
   const [entity, setEntity] = useState(searchParams.get("entity") ?? "");
   const [sort, setSort] = useState(searchParams.get("sort") ?? "newest");
   const [since, setSince] = useState(searchParams.get("since") ?? "");
   const [until, setUntil] = useState(searchParams.get("until") ?? "");
+  const [browseRevision, setBrowseRevision] = useState(0);
 
   const [results, setResults] = useState<Fact[]>([]);
   const [loading, setLoading] = useState(false);
@@ -73,25 +97,27 @@ export default function Memory() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState("");
 
-  // Load stats on mount (shared cache → no double fetch with Dashboard)
   useEffect(() => {
-    getStats().then(setStats).catch(() => {});
+    let cancelled = false;
+    getStats()
+      .then((nextStats) => {
+        if (!cancelled) setStats(nextStats);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   const buildParams = useCallback(() => {
     const p: Record<string, string> = {};
     if (query) p.q = query;
-    if (category) p.category = category;
-    if (domain) p.domain = domain;
-    if (kind) p.kind = kind;
-    if (memorySubtype) p.memory_subtype = memorySubtype;
-    if (source) p.source = source;
+    if (categories.length) p.category = categories.join(",");
+    if (memorySubtypes.length) p.memory_subtype = memorySubtypes.join(",");
     if (entity) p.entity = entity;
     if (sort) p.sort = sort;
     if (since) p.since = since;
     if (until) p.until = until;
     return p;
-  }, [query, category, domain, kind, memorySubtype, source, entity, sort, since, until]);
+  }, [query, categories, memorySubtypes, entity, sort, since, until]);
 
   const fetchResults = useCallback(
     async (append = false, offset = 0) => {
@@ -101,11 +127,8 @@ export default function Memory() {
         if (query.trim()) {
           const params = new URLSearchParams();
           params.set("q", query.trim());
-          if (category) params.set("category", category);
-          if (domain) params.set("domain", domain);
-          if (kind) params.set("kind", kind);
-          if (memorySubtype) params.set("memory_subtype", memorySubtype);
-          if (source) params.set("source", source);
+          if (categories.length) params.set("category", categories.join(","));
+          if (memorySubtypes.length) params.set("memory_subtype", memorySubtypes.join(","));
           if (entity) params.set("entity", entity);
           params.set("limit", String(append ? results.length + PAGE_SIZE : PAGE_SIZE));
 
@@ -118,11 +141,8 @@ export default function Memory() {
           setNextOffset(data.results.length < data.count ? data.results.length : null);
         } else {
           const params = new URLSearchParams();
-          if (category) params.set("category", category);
-          if (domain) params.set("domain", domain);
-          if (kind) params.set("kind", kind);
-          if (memorySubtype) params.set("memory_subtype", memorySubtype);
-          if (source) params.set("source", source);
+          if (categories.length) params.set("category", categories.join(","));
+          if (memorySubtypes.length) params.set("memory_subtype", memorySubtypes.join(","));
           if (entity) params.set("entity", entity);
           if (sort) params.set("sort", sort);
           if (since) params.set("since", new Date(since).toISOString());
@@ -141,7 +161,7 @@ export default function Memory() {
         setLoading(false);
       }
     },
-    [query, category, domain, kind, memorySubtype, source, entity, sort, since, until, results],
+    [query, categories, memorySubtypes, entity, sort, since, until, results],
   );
 
   // Initial load and filter changes
@@ -149,7 +169,7 @@ export default function Memory() {
     fetchResults();
     setSearchParams(buildParams(), { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, domain, kind, memorySubtype, source, entity, sort, since, until]);
+  }, [categories, memorySubtypes, entity, sort, since, until, browseRevision]);
 
   const handleSearch = () => {
     setSearchParams(buildParams(), { replace: true });
@@ -168,30 +188,27 @@ export default function Memory() {
     "bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500";
 
   const applyCategory = (value: string) => {
-    setCategory(value);
-    setMemorySubtype("");
-  };
-
-  const applyKind = (value: string) => {
-    setKind(value);
-    setMemorySubtype("");
+    setQuery("");
+    setCategories((current) => toggleValue(current, value));
+    setBrowseRevision((revision) => revision + 1);
   };
 
   const applySubtype = (value: string) => {
-    setMemorySubtype(value);
-    const subtype = SUBTYPE_BY_VALUE[value];
-    if (subtype) {
-      setKind(subtype.kind);
-      setCategory(subtype.category);
-    }
+    setQuery("");
+    setMemorySubtypes((current) => toggleValue(current, value));
+    setBrowseRevision((revision) => revision + 1);
   };
 
   const clearOntologyFilters = () => {
-    setCategory("");
-    setDomain("");
-    setKind("");
-    setMemorySubtype("");
-    setSource("");
+    setCategories([]);
+    setMemorySubtypes([]);
+  };
+
+  const clearAllFilters = () => {
+    clearOntologyFilters();
+    setEntity("");
+    setSince("");
+    setUntil("");
   };
 
   const pillCls = (active: boolean) =>
@@ -202,6 +219,23 @@ export default function Memory() {
 
   const categoryCount = (value: string) => stats?.byCategory?.[value] ?? 0;
   const subtypeCount = (value: string) => stats?.bySubtype?.[value] ?? 0;
+  const activeFilters: ActiveFilter[] = [
+    ...categories.map((category) => ({
+      key: `category:${category}`,
+      label: "Category",
+      value: `${ontologyLabel(category)} (${categoryCount(category).toLocaleString()})`,
+      onClear: () => setCategories((current) => current.filter((item) => item !== category)),
+    })),
+    ...memorySubtypes.map((subtype) => ({
+      key: `memory_subtype:${subtype}`,
+      label: "Subtype",
+      value: `${SUBTYPE_BY_VALUE[subtype]?.label ?? ontologyLabel(subtype)} (${subtypeCount(subtype).toLocaleString()})`,
+      onClear: () => setMemorySubtypes((current) => current.filter((item) => item !== subtype)),
+    })),
+    entity ? { key: "entity", label: "Entity", value: entity, onClear: () => setEntity("") } : null,
+    since ? { key: "since", label: "From", value: since, onClear: () => setSince("") } : null,
+    until ? { key: "until", label: "Until", value: until, onClear: () => setUntil("") } : null,
+  ].filter((filter): filter is ActiveFilter => filter !== null);
 
   return (
     <div>
@@ -240,119 +274,71 @@ export default function Memory() {
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        <select value={category} onChange={(e) => applyCategory(e.target.value)} className={selectCls}>
-          <option value="">All categories</option>
-          {CATEGORY_OPTIONS.map((c) => (
-            <option key={c.value} value={c.value}>{c.label}</option>
-          ))}
-        </select>
-        <select value={domain} onChange={(e) => setDomain(e.target.value)} className={selectCls}>
-          <option value="">All domains</option>
-          {DOMAIN_OPTIONS.map((d) => (
-            <option key={d.value} value={d.value}>{d.label}</option>
-          ))}
-        </select>
-        <select value={kind} onChange={(e) => applyKind(e.target.value)} className={selectCls}>
-          <option value="">All kinds</option>
-          {KIND_OPTIONS.map((k) => (
-            <option key={k.value} value={k.value}>{k.label}</option>
-          ))}
-        </select>
-        <select value={memorySubtype} onChange={(e) => applySubtype(e.target.value)} className={selectCls}>
-          <option value="">All subtypes</option>
-          {ONTOLOGY_GROUPS.map((group) => (
-            <optgroup key={group.id} label={group.label}>
-              {group.subtypes.map((subtypeValue) => {
-                const subtype = SUBTYPE_BY_VALUE[subtypeValue];
-                if (!subtype) return null;
-                return (
-                  <option key={subtype.value} value={subtype.value}>
-                    {subtype.label}
-                  </option>
-                );
-              })}
-            </optgroup>
-          ))}
-        </select>
-        <select value={source} onChange={(e) => setSource(e.target.value)} className={selectCls}>
-          <option value="">All sources</option>
-          {SOURCE_OPTIONS.map((s) => (
-            <option key={s.value} value={s.value}>{s.label}</option>
-          ))}
-        </select>
-        {(category || domain || kind || memorySubtype || source) && (
-          <button
-            type="button"
-            onClick={clearOntologyFilters}
-            className="px-2.5 py-1.5 rounded-md text-sm text-zinc-500 hover:text-zinc-300"
-          >
-            Clear ontology
-          </button>
-        )}
-        {entity && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 border border-zinc-700 rounded-md text-sm text-zinc-300">
-            entity: {entity}
-            <button
-              onClick={() => setEntity("")}
-              className="ml-1 text-zinc-500 hover:text-zinc-300"
-            >
-              ×
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Ontology navigation */}
-      <div className="mb-6 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
-        <div className="flex items-start justify-between gap-4 mb-3">
-          <div>
-            <h3 className="text-sm font-medium text-zinc-200">Explore by memory ontology</h3>
-            <p className="text-xs text-zinc-500 mt-0.5">
-              Grouped by the canonical Bikky taxonomy so codebase, projects, observations, and telemetry are easy to browse.
-            </p>
-          </div>
-          {memorySubtype && (
+      {activeFilters.length > 0 && (
+        <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">Active filters</span>
+            {activeFilters.map((filter) => (
+              <ActiveFilterChip key={filter.key} filter={filter} />
+            ))}
             <button
               type="button"
-              onClick={() => setMemorySubtype("")}
+              onClick={clearAllFilters}
+              className="ml-auto text-xs text-zinc-500 hover:text-zinc-300"
+            >
+              Clear all
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Ontology navigation */}
+      <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h3 className="text-sm font-medium text-zinc-200">Browse by category and subtype</h3>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              Pick a top-level category or a concrete subtype. There are no extra groups or sub-tabs.
+            </p>
+          </div>
+          {memorySubtypes.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setMemorySubtypes([])}
               className="text-xs text-zinc-500 hover:text-zinc-300"
             >
-              Clear subtype
+              Clear subtypes
             </button>
           )}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {ONTOLOGY_GROUPS.map((group) => (
-            <div key={group.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-              <p className="text-sm font-medium text-zinc-200">{group.label}</p>
-              <p className="text-xs text-zinc-500 mt-1 min-h-8">{group.description}</p>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {group.categories.map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => applyCategory(cat)}
-                    className={pillCls(category === cat && !memorySubtype)}
-                    title={`${categoryCount(cat).toLocaleString()} facts`}
-                  >
-                    {ontologyLabel(cat)}
-                    {stats && <span className="ml-1 text-zinc-500">{categoryCount(cat).toLocaleString()}</span>}
-                  </button>
-                ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {BROWSABLE_CATEGORY_OPTIONS.map((cat) => (
+            <div key={cat.value} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-zinc-200">{cat.label}</p>
+                  <p className="text-xs text-zinc-500 mt-1 min-h-8">{cat.description}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => applyCategory(cat.value)}
+                  className={pillCls(categories.includes(cat.value))}
+                  title={`${categoryCount(cat.value).toLocaleString()} facts`}
+                >
+                  {categories.includes(cat.value) ? "Selected" : "Add"}
+                  {stats && <span className="ml-1 text-zinc-500">{categoryCount(cat.value).toLocaleString()}</span>}
+                </button>
               </div>
+              <p className="mt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">Subtypes</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {group.subtypes.map((subtypeValue) => {
-                  const subtype = SUBTYPE_BY_VALUE[subtypeValue];
-                  if (!subtype) return null;
+                {(BROWSABLE_SUBTYPES_BY_CATEGORY[cat.value] ?? []).map((subtype) => {
                   return (
                     <button
                       key={subtype.value}
                       type="button"
                       onClick={() => applySubtype(subtype.value)}
-                      className={pillCls(memorySubtype === subtype.value)}
-                      title={`${subtype.kind} / ${ontologyLabel(subtype.category)}`}
+                      className={pillCls(memorySubtypes.includes(subtype.value))}
+                      title={subtype.description}
                     >
                       {subtype.label}
                       {stats && <span className="ml-1 text-zinc-500">{subtypeCount(subtype.value).toLocaleString()}</span>}
@@ -476,5 +462,22 @@ export default function Memory() {
         </>
       )}
     </div>
+  );
+}
+
+function ActiveFilterChip({ filter }: { filter: ActiveFilter }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300">
+      <span className="text-zinc-500">{filter.label}</span>
+      <span>{filter.value}</span>
+      <button
+        type="button"
+        onClick={filter.onClear}
+        className="text-zinc-500 hover:text-zinc-200"
+        aria-label={`Clear ${filter.label} filter`}
+      >
+        ×
+      </button>
+    </span>
   );
 }

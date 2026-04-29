@@ -10,83 +10,43 @@
 // ---------------------------------------------------------------------------
 
 export const CATEGORIES = {
-  codebase: {
+  engineering: {
     description:
-      "Repository structure, modules, important files, APIs, build/test commands, and code navigation knowledge.",
+      "Engineering context: codebase maps, architecture decisions, infrastructure topology, access patterns, operations, troubleshooting, and reusable conventions.",
     examples: [
       "The auth middleware lives in src/server/auth.ts.",
-      "Run npm test -- --runInBand for flaky integration tests.",
+      "If Qdrant order_by fails, create the payload index before retrying.",
     ],
   },
-  infrastructure: {
+  product: {
     description:
-      "Cloud, deployment, runtime, secrets, queues, databases, CI/CD, and environment topology.",
+      "Product context: domain rules, product decisions, requirements, user workflows, roadmap, success metrics, and market or community insight.",
     examples: [
-      "Production runs on a Qdrant cluster (Cloud or self-hosted) for vector storage.",
-      "Deployments are promoted through GitHub Actions.",
+      "Bikky should show categories and concrete subtype chips directly, with no extra sub-tab layer.",
+      "Activation should be measured by whether agents successfully reuse recalled memory.",
     ],
   },
-  operations: {
+  human: {
     description:
-      "Runbooks, incident handling, maintenance procedures, debugging steps, and operational gotchas.",
-    examples: [
-      "Restart the worker after changing queue visibility timeout.",
-      "If migrations hang, check the advisory lock table first.",
-    ],
-  },
-  decisions: {
-    description:
-      "Architecture, product, process, and technical decisions with durable rationale.",
-    examples: [
-      "Use workspace_id as the access boundary instead of overloading domain.",
-      "Keep telemetry out of normal semantic recall.",
-    ],
-  },
-  product_domain: {
-    description:
-      "Product concepts, business rules, user workflows, domain vocabulary, and market assumptions.",
-    examples: [
-      "A workstream is the durable continuity unit for long-running tasks.",
-      "Recall quality should be measured by downstream usefulness, not just similarity.",
-    ],
-  },
-  projects: {
-    description:
-      "Project goals, milestones, current state, open questions, blockers, and active workstreams.",
-    examples: [
-      "The capture-policy workstream is implementing the memory ontology first.",
-      "The UI smoke suite is tracked in bikky-dev/bikky#13.",
-    ],
-  },
-  people: {
-    description:
-      "Ownership, roles, collaboration patterns, responsibilities, and team preferences.",
+      "Human context: explicit preferences, people and roles, ownership, working agreements, and durable actor-action activity events.",
     examples: [
       "Saber prefers concise implementation plans before code changes.",
-      "The platform team owns the deploy workflow.",
+      "Alex approved PR #85 for merge.",
     ],
   },
-  preferences: {
+  system: {
     description:
-      "User, team, or workspace preferences about style, tooling, defaults, and interaction patterns.",
+      "System context: Bikky-owned lifecycle memory, session indexes, episodes, workstreams, recall/feedback/outcome telemetry, and aggregate rollups.",
     examples: [
-      "Prefer Node's built-in test runner for this repo.",
-      "Default new memory captures to software_engineering.",
-    ],
-  },
-  observations: {
-    description:
-      "Validated observations, troubleshooting evidence, behavioral notes, and learned facts that do not fit a narrower category.",
-    examples: [
-      "The current ESLint config is incompatible with ESLint v9.",
-      "The dashboard shows stale facts separately from verified current facts.",
+      "Session indexes are routing/audit artifacts rather than durable project boundaries.",
+      "Recall telemetry is excluded from normal semantic recall.",
     ],
   },
 } as const;
 
 export type Category = keyof typeof CATEGORIES;
 
-export const DEFAULT_CATEGORY: Category = "observations";
+export const DEFAULT_CATEGORY: Category = "engineering";
 
 // ---------------------------------------------------------------------------
 // Domains: activity / knowledge profiles
@@ -97,59 +57,46 @@ export const DOMAINS = {
     description:
       "Coding-agent work: repositories, code changes, architecture, infrastructure, debugging, tests, CI, and developer workflow.",
     defaultCategories: [
-      "codebase",
-      "infrastructure",
-      "operations",
-      "decisions",
-      "projects",
-      "preferences",
-      "observations",
+      "engineering",
+      "product",
+      "human",
+      "system",
     ] as const,
   },
   product_strategy: {
     description:
       "Product direction, positioning, roadmap tradeoffs, customer problems, metrics, and market learning.",
     defaultCategories: [
-      "product_domain",
-      "decisions",
-      "projects",
-      "people",
-      "preferences",
-      "observations",
+      "product",
+      "human",
+      "system",
     ] as const,
   },
   business_operations: {
     description:
       "Business process, vendors, finance, legal/admin operations, recurring procedures, and ownership.",
     defaultCategories: [
-      "operations",
-      "decisions",
-      "projects",
-      "people",
-      "preferences",
-      "observations",
+      "product",
+      "human",
+      "system",
     ] as const,
   },
   research: {
     description:
       "Research questions, sources, hypotheses, experiment findings, synthesis, and reusable insights.",
     defaultCategories: [
-      "product_domain",
-      "decisions",
-      "projects",
-      "preferences",
-      "observations",
+      "product",
+      "engineering",
+      "system",
     ] as const,
   },
   personal_productivity: {
     description:
       "Individual productivity, habits, planning preferences, reminders, and personal operating context.",
     defaultCategories: [
-      "operations",
-      "projects",
-      "people",
-      "preferences",
-      "observations",
+      "human",
+      "product",
+      "system",
     ] as const,
   },
 } as const;
@@ -240,8 +187,18 @@ export const MEMORY_SUBTYPES = {
     "access_pattern",
     "operational_procedure",
     "domain_rule",
+    "product_decision",
+    "product_requirement",
+    "user_workflow",
+    "roadmap_item",
+    "success_metric",
+    "market_insight",
     "troubleshooting_gotcha",
     "preference",
+    "person_profile",
+    "ownership_note",
+    "working_agreement",
+    "activity_event",
   ],
   summary: ["session_index", "episode", "workstream"],
   distilled: ["convention"],
@@ -260,22 +217,32 @@ export const DEFAULT_MEMORY_SUBTYPE_BY_KIND = {
 } as const satisfies Record<Kind, MemorySubtype | null>;
 
 export const MEMORY_SUBTYPE_DEFAULT_CATEGORY = {
-  codebase_map: "codebase",
-  architecture_decision: "decisions",
-  infra_topology: "infrastructure",
-  access_pattern: "infrastructure",
-  operational_procedure: "operations",
-  domain_rule: "product_domain",
-  troubleshooting_gotcha: "operations",
-  preference: "preferences",
-  session_index: "projects",
-  episode: "projects",
-  workstream: "projects",
-  convention: "observations",
-  recall_event: "observations",
-  feedback_event: "observations",
-  outcome_event: "observations",
-  aggregate_rollup: "observations",
+  codebase_map: "engineering",
+  architecture_decision: "engineering",
+  infra_topology: "engineering",
+  access_pattern: "engineering",
+  operational_procedure: "engineering",
+  domain_rule: "product",
+  product_decision: "product",
+  product_requirement: "product",
+  user_workflow: "product",
+  roadmap_item: "product",
+  success_metric: "product",
+  market_insight: "product",
+  troubleshooting_gotcha: "engineering",
+  preference: "human",
+  person_profile: "human",
+  ownership_note: "human",
+  working_agreement: "human",
+  activity_event: "human",
+  session_index: "system",
+  episode: "system",
+  workstream: "system",
+  convention: "engineering",
+  recall_event: "system",
+  feedback_event: "system",
+  outcome_event: "system",
+  aggregate_rollup: "system",
 } as const satisfies Record<MemorySubtype, Category>;
 
 export const MEMORY_SUBTYPE_DEFAULT_LAYER = {
@@ -285,8 +252,18 @@ export const MEMORY_SUBTYPE_DEFAULT_LAYER = {
   access_pattern: "surface",
   operational_procedure: "surface",
   domain_rule: "domain",
+  product_decision: "domain",
+  product_requirement: "domain",
+  user_workflow: "domain",
+  roadmap_item: "workstream",
+  success_metric: "domain",
+  market_insight: "domain",
   troubleshooting_gotcha: "surface",
   preference: "domain",
+  person_profile: "domain",
+  ownership_note: "domain",
+  working_agreement: "domain",
+  activity_event: "episode",
   session_index: "episode",
   episode: "episode",
   workstream: "workstream",
@@ -332,39 +309,24 @@ export const THRESHOLD_RELATED = 0.8;
 
 export const DECAY_HALF_LIFE: Record<string, number> = {
   // Software-engineering defaults.
-  "codebase.software_engineering": 120,
-  "infrastructure.software_engineering": 60,
-  "operations.software_engineering": 60,
-  "decisions.software_engineering": 180,
-  "product_domain.software_engineering": 120,
-  "projects.software_engineering": 45,
-  "people.software_engineering": 120,
-  "preferences.software_engineering": 180,
-  "observations.software_engineering": 45,
+  "engineering.software_engineering": 120,
+  "product.software_engineering": 120,
+  "human.software_engineering": 180,
+  "system.software_engineering": 45,
 
   // Other domain profiles.
-  "product_domain.product_strategy": 120,
-  "decisions.product_strategy": 180,
-  "projects.product_strategy": 60,
-  "people.product_strategy": 120,
-  "preferences.product_strategy": 180,
-  "observations.product_strategy": 60,
-  "operations.business_operations": 120,
-  "decisions.business_operations": 180,
-  "projects.business_operations": 60,
-  "people.business_operations": 180,
-  "preferences.business_operations": 180,
-  "observations.business_operations": 90,
-  "product_domain.research": 120,
-  "decisions.research": 180,
-  "projects.research": 60,
-  "preferences.research": 180,
-  "observations.research": 90,
-  "operations.personal_productivity": 90,
-  "projects.personal_productivity": 45,
-  "people.personal_productivity": 180,
-  "preferences.personal_productivity": 180,
-  "observations.personal_productivity": 45,
+  "product.product_strategy": 180,
+  "human.product_strategy": 180,
+  "system.product_strategy": 60,
+  "product.business_operations": 120,
+  "human.business_operations": 180,
+  "system.business_operations": 90,
+  "product.research": 120,
+  "engineering.research": 120,
+  "system.research": 90,
+  "human.personal_productivity": 180,
+  "product.personal_productivity": 90,
+  "system.personal_productivity": 45,
 
 };
 
@@ -432,12 +394,49 @@ export function normalizeCategory(category: string | null | undefined): Category
   if (normalized in CATEGORIES) {
     return normalized as Category;
   }
-  if (normalized.includes("infra")) return "infrastructure";
-  if (normalized.includes("decision")) return "decisions";
-  if (normalized.includes("operation") || normalized.includes("runbook")) return "operations";
-  if (normalized.includes("owner") || normalized.includes("people")) return "people";
-  if (normalized.includes("product") || normalized.includes("domain")) return "product_domain";
-  if (normalized.includes("repo") || normalized.includes("code")) return "codebase";
+  if (
+    normalized.includes("product") ||
+    normalized.includes("domain") ||
+    normalized.includes("roadmap") ||
+    normalized.includes("requirement") ||
+    normalized.includes("workflow") ||
+    normalized.includes("metric") ||
+    normalized.includes("market") ||
+    normalized.includes("customer") ||
+    normalized === "projects"
+  ) return "product";
+  if (
+    normalized.includes("human") ||
+    normalized.includes("people") ||
+    normalized.includes("person") ||
+    normalized.includes("owner") ||
+    normalized.includes("team") ||
+    normalized.includes("preference") ||
+    normalized.includes("agreement") ||
+    normalized.includes("activity") ||
+    normalized.includes("actor")
+  ) return "human";
+  if (
+    normalized.includes("system") ||
+    normalized.includes("session") ||
+    normalized.includes("episode") ||
+    normalized.includes("workstream") ||
+    normalized.includes("telemetry") ||
+    normalized.includes("feedback") ||
+    normalized.includes("outcome") ||
+    normalized.includes("rollup")
+  ) return "system";
+  if (
+    normalized.includes("infra") ||
+    normalized.includes("decision") ||
+    normalized.includes("operation") ||
+    normalized.includes("runbook") ||
+    normalized.includes("repo") ||
+    normalized.includes("code") ||
+    normalized.includes("architecture") ||
+    normalized.includes("troubleshoot") ||
+    normalized.includes("observation")
+  ) return "engineering";
   return DEFAULT_CATEGORY;
 }
 
@@ -580,16 +579,41 @@ export function getDecayHalfLife(input: {
   const categoryWasProvided = rawCategory.length > 0;
   const categoryIsKnown =
     rawCategory in CATEGORIES ||
+    rawCategory.includes("product") ||
+    rawCategory.includes("domain") ||
+    rawCategory.includes("roadmap") ||
+    rawCategory.includes("requirement") ||
+    rawCategory.includes("workflow") ||
+    rawCategory.includes("metric") ||
+    rawCategory.includes("market") ||
+    rawCategory.includes("customer") ||
+    rawCategory === "projects" ||
+    rawCategory.includes("human") ||
+    rawCategory.includes("people") ||
+    rawCategory.includes("person") ||
+    rawCategory.includes("owner") ||
+    rawCategory.includes("team") ||
+    rawCategory.includes("preference") ||
+    rawCategory.includes("agreement") ||
+    rawCategory.includes("activity") ||
+    rawCategory.includes("actor") ||
+    rawCategory.includes("system") ||
+    rawCategory.includes("session") ||
+    rawCategory.includes("episode") ||
+    rawCategory.includes("workstream") ||
+    rawCategory.includes("telemetry") ||
+    rawCategory.includes("feedback") ||
+    rawCategory.includes("outcome") ||
+    rawCategory.includes("rollup") ||
     rawCategory.includes("infra") ||
     rawCategory.includes("decision") ||
     rawCategory.includes("operation") ||
     rawCategory.includes("runbook") ||
-    rawCategory.includes("owner") ||
-    rawCategory.includes("people") ||
-    rawCategory.includes("product") ||
-    rawCategory.includes("domain") ||
     rawCategory.includes("repo") ||
-    rawCategory.includes("code");
+    rawCategory.includes("code") ||
+    rawCategory.includes("architecture") ||
+    rawCategory.includes("troubleshoot") ||
+    rawCategory.includes("observation");
   if (categoryWasProvided && !categoryIsKnown) {
     return DECAY_DEFAULT_HALF_LIFE;
   }

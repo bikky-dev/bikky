@@ -57,6 +57,37 @@ describe("ui/lib/qdrant", () => {
       ]);
     });
 
+    it("maps canonical category filters to legacy stored categories", () => {
+      const f = buildFilter({ category: "engineering" });
+      assert.deepEqual(f.must, [
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
+      ]);
+    });
+
+    it("maps convention subtype filters to legacy distilled memories", () => {
+      const f = buildFilter({ memorySubtype: "convention" });
+      assert.deepEqual(f.must, []);
+      assert.deepEqual(f.should, [
+        { key: "memory_subtype", match: { value: "convention" } },
+        { key: "kind", match: { value: "distilled" } },
+      ]);
+    });
+
+    it("combines selected categories and subtypes as OR filters", () => {
+      const f = buildFilter({
+        categories: ["engineering", "product"],
+        memorySubtypes: ["codebase_map", "convention"],
+      });
+      assert.deepEqual(f.must, []);
+      assert.deepEqual(f.should, [
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
+        { key: "category", match: { any: ["product", "product_domain", "projects"] } },
+        { key: "memory_subtype", match: { value: "codebase_map" } },
+        { key: "memory_subtype", match: { value: "convention" } },
+        { key: "kind", match: { value: "distilled" } },
+      ]);
+    });
+
     it("lowercases the entity value", () => {
       const f = buildFilter({ entity: "Bikky" });
       assert.deepEqual(f.must, [{ key: "entities", match: { value: "bikky" } }]);

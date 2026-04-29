@@ -9,7 +9,7 @@ test("scoreSubtype: operational_procedure for deploy/rollout content", () => {
 });
 
 test("scoreSubtype: troubleshooting_gotcha for failure-mode content", () => {
-  const r = scoreSubtype("Watch out: the WA cron silently fails when the suspended flag is set.");
+  const r = scoreSubtype("Watch out: the import cron silently fails when the suspended flag is set.");
   assert.equal(r.subtype, "troubleshooting_gotcha");
   assert.ok(r.score >= 1.0);
 });
@@ -35,8 +35,33 @@ test("scoreSubtype: access_pattern for auth content", () => {
 });
 
 test("scoreSubtype: domain_rule for business-rule content", () => {
-  const r = scoreSubtype("A scam session must reach an SLA of 30s before alerting; otherwise it is ineligible.");
+  const r = scoreSubtype("A workspace is ineligible for export unless retention is enabled.");
   assert.equal(r.subtype, "domain_rule");
+});
+
+test("scoreSubtype: product_decision for UX/product choice content", () => {
+  const r = scoreSubtype("The UX decision is to show category cards because sub-tabs confused users.");
+  assert.equal(r.subtype, "product_decision");
+});
+
+test("scoreSubtype: product_requirement for explicit product behavior", () => {
+  const r = scoreSubtype("The memory page must show subtype chips for every selected category.");
+  assert.equal(r.subtype, "product_requirement");
+});
+
+test("scoreSubtype: success_metric for KPI/target content", () => {
+  const r = scoreSubtype("Activation should be measured by the weekly adoption target for successful recall reuse.");
+  assert.equal(r.subtype, "success_metric");
+});
+
+test("scoreSubtype: ownership_note for owner/approver content", () => {
+  const r = scoreSubtype("Saber is the approver responsible for ontology UX changes.");
+  assert.equal(r.subtype, "ownership_note");
+});
+
+test("scoreSubtype: activity_event for durable actor-action content", () => {
+  const r = scoreSubtype("Saber merged PR #85 after approving the subtype UX changes.");
+  assert.equal(r.subtype, "activity_event");
 });
 
 test("scoreSubtype: preference for personal-style content", () => {
@@ -176,52 +201,52 @@ test("verifyGrounding: downgrades to ambiguous when LLM is mid-confident", () =>
   assert.equal(r.verdict, "ambiguous");
 });
 
-test("verifyVolatilityCoherence: transient gets 30d expiry and observations category", () => {
+test("verifyVolatilityCoherence: transient gets 30d expiry without forcing a catch-all category", () => {
   const r = verifyVolatilityCoherence({
     volatility: "transient",
     as_of: "2026-04-28",
-    category: "infrastructure",
+    category: "engineering",
   });
   assert.equal(r.effective, "transient");
-  assert.equal(r.forcedCategory, "observations");
+  assert.equal(r.forcedCategory, null);
   assert.equal(r.halfLifeMultiplier, 0.25);
   assert.ok(r.expiresAt);
   // 30 days after 2026-04-28 is 2026-05-28
   assert.ok(r.expiresAt!.startsWith("2026-05-28"));
 });
 
-test("verifyVolatilityCoherence: ephemeral gets 7d expiry and observations category", () => {
+test("verifyVolatilityCoherence: ephemeral gets 7d expiry without forcing a catch-all category", () => {
   const r = verifyVolatilityCoherence({
     volatility: "ephemeral",
     as_of: "2026-04-28",
-    category: "operations",
+    category: "engineering",
   });
   assert.equal(r.effective, "ephemeral");
-  assert.equal(r.forcedCategory, "observations");
+  assert.equal(r.forcedCategory, null);
   assert.equal(r.halfLifeMultiplier, 0.1);
   assert.ok(r.expiresAt!.startsWith("2026-05-05"));
 });
 
 test("verifyVolatilityCoherence: stable / evolving leave category alone with no expiry", () => {
-  const stable = verifyVolatilityCoherence({ volatility: "stable", category: "codebase" });
+  const stable = verifyVolatilityCoherence({ volatility: "stable", category: "engineering" });
   assert.equal(stable.expiresAt, null);
   assert.equal(stable.forcedCategory, null);
   assert.equal(stable.halfLifeMultiplier, 1.0);
 
-  const evolving = verifyVolatilityCoherence({ volatility: "evolving", category: "infrastructure" });
+  const evolving = verifyVolatilityCoherence({ volatility: "evolving", category: "engineering" });
   assert.equal(evolving.expiresAt, null);
   assert.equal(evolving.forcedCategory, null);
 });
 
 test("verifyVolatilityCoherence: synthesises as_of when missing for transient", () => {
-  const r = verifyVolatilityCoherence({ volatility: "transient", category: "observations" });
+  const r = verifyVolatilityCoherence({ volatility: "transient", category: "engineering" });
   assert.equal(r.effective, "transient");
   assert.ok(r.expiresAt);
   assert.ok(r.notes.some((n) => n.includes("as_of synthesised")));
 });
 
 test("verifyVolatilityCoherence: missing volatility defaults to evolving (not stable)", () => {
-  const r = verifyVolatilityCoherence({ category: "codebase" });
+  const r = verifyVolatilityCoherence({ category: "engineering" });
   assert.equal(r.effective, "evolving");
   assert.ok(r.notes.some((n) => n.includes("defaulted to 'evolving'")));
 });

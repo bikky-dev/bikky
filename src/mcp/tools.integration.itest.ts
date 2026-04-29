@@ -118,7 +118,7 @@ describe("mcp/tools — Qdrant integration", { skip: !enabled }, () => {
   it("inserts two distinct facts", async () => {
     const r1 = JSON.parse(textOf(await invoke("memory_store", {
       content: "Qdrant Cloud free tier provides 1GB storage with no credit card required",
-      category: "infrastructure",
+      category: "engineering",
       entities: ["qdrant", "qdrant-cloud"],
     })));
     assert.equal(r1.action, "inserted");
@@ -126,7 +126,7 @@ describe("mcp/tools — Qdrant integration", { skip: !enabled }, () => {
 
     const r2 = JSON.parse(textOf(await invoke("memory_store", {
       content: "OpenAI text-embedding-3-small produces 1536-dimensional vectors",
-      category: "infrastructure",
+      category: "engineering",
       entities: ["openai", "embeddings"],
     })));
     assert.equal(r2.action, "inserted");
@@ -138,7 +138,7 @@ describe("mcp/tools — Qdrant integration", { skip: !enabled }, () => {
   it("reinforces on exact content-hash match", async () => {
     const r = JSON.parse(textOf(await invoke("memory_store", {
       content: "Qdrant Cloud free tier provides 1GB storage with no credit card required",
-      category: "infrastructure",
+      category: "engineering",
       entities: ["qdrant"],
     })));
     assert.equal(r.action, "reinforced");
@@ -150,7 +150,7 @@ describe("mcp/tools — Qdrant integration", { skip: !enabled }, () => {
     // Paraphrase of fact 1 — same meaning, different wording.
     const r = JSON.parse(textOf(await invoke("memory_store", {
       content: "Qdrant Cloud's free plan offers 1GB of storage and does not require a credit card",
-      category: "infrastructure",
+      category: "engineering",
       entities: ["qdrant"],
     })));
     // Either reinforced (preferred — proves the 0.92 threshold) or inserted

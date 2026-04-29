@@ -94,23 +94,28 @@ export const CAPTURE_KIND_SUBTYPES = {
     "access_pattern",
     "operational_procedure",
     "domain_rule",
+    "product_decision",
+    "product_requirement",
+    "user_workflow",
+    "roadmap_item",
+    "success_metric",
+    "market_insight",
     "troubleshooting_gotcha",
     "preference",
+    "person_profile",
+    "ownership_note",
+    "working_agreement",
+    "activity_event",
   ],
   summary: ["session_index", "episode", "workstream"],
   distilled: ["convention"],
 } as const satisfies Partial<Record<Kind, readonly MemorySubtype[]>>;
 
 export const FACT_CATEGORY_TO_SUBTYPE: Record<Category, MemorySubtype> = {
-  codebase: "codebase_map",
-  infrastructure: "infra_topology",
-  operations: "operational_procedure",
-  decisions: "architecture_decision",
-  product_domain: "domain_rule",
-  projects: "codebase_map",
-  people: "preference",
-  preferences: "preference",
-  observations: "troubleshooting_gotcha",
+  engineering: "codebase_map",
+  product: "domain_rule",
+  human: "preference",
+  system: "codebase_map",
 };
 
 export const DEFAULT_CAPTURE_CONTEXT = {

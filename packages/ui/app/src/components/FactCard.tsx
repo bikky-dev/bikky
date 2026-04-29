@@ -10,6 +10,7 @@ export interface Fact {
   domain?: string;
   kind?: string;
   memory_subtype?: string | null;
+  actor_id?: string;
   entities: string[];
   source?: string;
   confidence: number;
@@ -44,15 +45,15 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Badge label={ontologyLabel(fact.category)} color={CATEGORY_COLORS[fact.category]} />
+        <Badge label={`Category: ${ontologyLabel(fact.category)}`} color={CATEGORY_COLORS[fact.category]} />
         {fact.kind && fact.kind !== "fact" && (
-          <Badge label={ontologyLabel(fact.kind)} color={KIND_COLORS[fact.kind]} />
+          <Badge label={`Kind: ${ontologyLabel(fact.kind)}`} color={KIND_COLORS[fact.kind]} />
         )}
         {fact.memory_subtype && (
-          <Badge label={ontologyLabel(fact.memory_subtype)} color={CATEGORY_COLORS[fact.category]} />
+          <Badge label={`Type: ${ontologyLabel(fact.memory_subtype)}`} color={CATEGORY_COLORS[fact.category]} />
         )}
         {fact.domain && fact.domain !== "software_engineering" && (
-          <Badge label={ontologyLabel(fact.domain)} color="green" />
+          <Badge label={`Domain: ${ontologyLabel(fact.domain)}`} color="green" />
         )}
         {fact.entities.map((e) => (
           <EntityChip key={e} name={e} link={false} />
@@ -67,6 +68,7 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
         {fact.task_key && <ProvChip label="task" value={fact.task_key} />}
         {fact.repo && <ProvChip label="repo" value={fact.repo} />}
         {fact.branch && <ProvChip label="branch" value={fact.branch} />}
+        {fact.actor_id && <ProvChip label="actor" value={fact.actor_id} />}
         {fact.session_id && <ProvChip label="session" value={fact.session_id.slice(0, 8)} />}
         {fact.episode_id && <ProvChip label="episode" value={fact.episode_id.slice(0, 8)} />}
       </div>

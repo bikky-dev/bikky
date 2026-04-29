@@ -35,8 +35,16 @@ interface GraphData {
   truncated?: boolean;
   limit?: number;
   topN?: number | null;
+  maxNodes?: number;
+  maxEdges?: number;
+  minWeight?: number;
   nodesPruned?: number;
   totalNodes?: number;
+  edgesPruned?: number;
+  totalEdges?: number;
+  edgesFilteredByWeight?: number;
+  denseFactsSkipped?: number;
+  coOccurrenceEdgesSkipped?: number;
 }
 
 interface SharedFact {
@@ -46,6 +54,9 @@ interface SharedFact {
   kind: string;
   entities: string[];
   created_at: string;
+  relation_type?: string;
+  from_entity?: string;
+  to_entity?: string;
 }
 
 interface SharedResponse {
@@ -56,6 +67,11 @@ interface SharedResponse {
 }
 
 const CATEGORY_HEX: Record<string, string> = {
+  engineering: "#3b82f6",
+  product: "#6366f1",
+  human: "#ec4899",
+  system: "#f59e0b",
+  // Legacy facts may still carry pre-ontology category values.
   codebase: "#3b82f6",
   infrastructure: "#3b82f6",
   operations: "#f97316",
@@ -69,6 +85,25 @@ const CATEGORY_HEX: Record<string, string> = {
   team: "#ec4899",
 };
 
+const GRAPH_MAX_NODES = 75;
+const GRAPH_MAX_EDGES = 300;
+const GRAPH_SERVER_MIN_WEIGHT = 1;
+const MAX_SIMULATION_TICKS = 500;
+const SIMULATION_WARMUP_TICKS = 60;
+
+// Canonical four-category ontology shown in the legend.
+const LEGEND_CATEGORIES: Array<{ key: string; label: string }> = [
+  { key: "engineering", label: "Engineering" },
+  { key: "product", label: "Product" },
+  { key: "human", label: "Human" },
+  { key: "system", label: "System" },
+];
+
+// Edges fall into two visual buckets: typed relations (any explicit
+// relationship like "owns", "uses", "decided") render in one accent color,
+// while statistical co-occurrence edges stay neutral grey.
+const RELATION_EDGE_COLOR = "#a855f7";
+
 export default function Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -76,7 +111,9 @@ export default function Graph() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
-  const [minWeight, setMinWeight] = useState(2);
+  const [minWeight, setMinWeight] = useState(1);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchQueryRef = useRef("");
   const [selectedEdge, setSelectedEdge] = useState<{ a: string; b: string } | null>(null);
   const [sharedFacts, setSharedFacts] = useState<SharedFact[]>([]);
   const [sharedLoading, setSharedLoading] = useState(false);
@@ -99,6 +136,12 @@ export default function Graph() {
     startY: 0,
   });
   const simRef = useRef<ReturnType<typeof forceSimulation<GraphNode>> | null>(null);
+  // Tick budget is shared with the pointer handler so a user-initiated
+  // drag/pan can reset it. Without resets the simulation hits the cap during
+  // initial settling and `sim.stop()` fires permanently — every subsequent
+  // alphaTarget().restart() runs one tick and stops, so dragged nodes never
+  // update visually. The drag appears "hung".
+  const tickBudgetRef = useRef({ remaining: MAX_SIMULATION_TICKS });
 
   // Stable ref-based callback for selecting an edge (called from event handlers)
   const selectEdgeRef = useRef((a: string, b: string) => {
@@ -119,9 +162,8 @@ export default function Graph() {
   });
 
   useEffect(() => {
-    // Default cap at top-200 nodes server-side to keep d3-force responsive on
-    // large corpora. Banner below surfaces if the server pruned anything.
-    apiFetch<GraphData>("/api/memory/graph?topN=200")
+    // Server-side graph budgets keep d3-force responsive on large memory stores.
+    apiFetch<GraphData>(`/api/memory/graph?maxNodes=${GRAPH_MAX_NODES}&maxEdges=${GRAPH_MAX_EDGES}&minWeight=${GRAPH_SERVER_MIN_WEIGHT}`)
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -149,6 +191,19 @@ export default function Graph() {
     const nodes = nodesRef.current;
     const edges = edgesRef.current;
 
+    // Search highlighting: when a query is active, dim non-matching nodes
+    // and any edge that doesn't touch a match.
+    const query = searchQueryRef.current.trim().toLowerCase();
+    const matchIds = new Set<string>();
+    if (query) {
+      for (const n of nodes) {
+        if (n.label.toLowerCase().includes(query) || n.id.toLowerCase().includes(query)) {
+          matchIds.add(n.id);
+        }
+      }
+    }
+    const hasQuery = query.length > 0;
+
     // Draw edges
     for (const edge of edges) {
       const source = edge.source as GraphNode;
@@ -160,6 +215,8 @@ export default function Graph() {
         ((source.id === selEdge.a && target.id === selEdge.b) ||
           (source.id === selEdge.b && target.id === selEdge.a));
       const isHovered = hovEdge === edge;
+      const touchesMatch = hasQuery && (matchIds.has(source.id) || matchIds.has(target.id));
+      const dimmed = hasQuery && !touchesMatch;
 
       ctx.beginPath();
       ctx.moveTo(source.x, source.y!);
@@ -172,10 +229,11 @@ export default function Graph() {
         ctx.strokeStyle = "rgba(250, 250, 250, 0.7)";
         ctx.lineWidth = 2.5;
       } else if (edge.type !== "co-occurrence") {
-        ctx.strokeStyle = "rgba(168, 85, 247, 0.5)";
+        ctx.strokeStyle = dimmed ? `${RELATION_EDGE_COLOR}1f` : `${RELATION_EDGE_COLOR}cc`;
         ctx.lineWidth = 2;
       } else {
-        const alpha = Math.min(0.15 + edge.weight * 0.05, 0.6);
+        const baseAlpha = Math.min(0.15 + edge.weight * 0.05, 0.6);
+        const alpha = dimmed ? baseAlpha * 0.18 : baseAlpha;
         ctx.strokeStyle = `rgba(113, 113, 122, ${alpha})`;
         ctx.lineWidth = Math.min(0.5 + edge.weight * 0.3, 3);
       }
@@ -185,7 +243,7 @@ export default function Graph() {
       if (edge.type !== "co-occurrence") {
         const mx = (source.x + target.x) / 2;
         const my = (source.y! + target.y!) / 2;
-        ctx.fillStyle = "rgba(168, 85, 247, 0.8)";
+        ctx.fillStyle = RELATION_EDGE_COLOR;
         ctx.font = "9px system-ui";
         ctx.textAlign = "center";
         ctx.fillText(edge.type, mx, my - 4);
@@ -198,29 +256,35 @@ export default function Graph() {
       const radius = Math.max(4, Math.min(Math.sqrt(node.factCount) * 3, 24));
       const color = CATEGORY_HEX[node.primaryCategory] ?? "#71717a";
       const isHovered = hovered?.id === node.id;
+      const isMatch = hasQuery && matchIds.has(node.id);
+      const isDimmed = hasQuery && !isMatch;
 
-      // Glow for hovered
-      if (isHovered) {
+      ctx.globalAlpha = isDimmed ? 0.18 : 1;
+
+      // Glow for hovered or search match
+      if (isHovered || isMatch) {
         ctx.beginPath();
-        ctx.arc(node.x, node.y!, radius + 4, 0, Math.PI * 2);
-        ctx.fillStyle = `${color}33`;
+        ctx.arc(node.x, node.y!, radius + (isMatch ? 6 : 4), 0, Math.PI * 2);
+        ctx.fillStyle = isMatch ? "rgba(250, 204, 21, 0.35)" : `${color}33`;
         ctx.fill();
       }
 
       // Node circle
       ctx.beginPath();
       ctx.arc(node.x, node.y!, radius, 0, Math.PI * 2);
-      ctx.fillStyle = isHovered ? color : `${color}cc`;
+      ctx.fillStyle = isHovered || isMatch ? color : `${color}cc`;
       ctx.fill();
-      ctx.strokeStyle = isHovered ? "#fff" : `${color}`;
-      ctx.lineWidth = isHovered ? 2 : 1;
+      ctx.strokeStyle = isMatch ? "#facc15" : isHovered ? "#fff" : color;
+      ctx.lineWidth = isMatch ? 2.5 : isHovered ? 2 : 1;
       ctx.stroke();
 
       // Label
-      ctx.fillStyle = "#e4e4e7";
-      ctx.font = `${isHovered ? "bold " : ""}${radius > 8 ? 11 : 9}px system-ui`;
+      ctx.fillStyle = isMatch ? "#fef9c3" : "#e4e4e7";
+      ctx.font = `${isHovered || isMatch ? "bold " : ""}${radius > 8 ? 11 : 9}px system-ui`;
       ctx.textAlign = "center";
       ctx.fillText(node.label, node.x, node.y! + radius + 12);
+
+      ctx.globalAlpha = 1;
     }
 
     ctx.restore();
@@ -245,16 +309,28 @@ export default function Graph() {
       (e) => e.type !== "co-occurrence" || e.weight >= minWeight,
     );
 
-    // Only include nodes that have at least one visible edge
+    // Hide nodes left disconnected after the minWeight filter so they don't
+    // float around as orphan dots cluttering the canvas.
     const connectedIds = new Set<string>();
-    for (const e of filteredEdges) {
-      connectedIds.add(typeof e.source === "string" ? e.source : e.source.id);
-      connectedIds.add(typeof e.target === "string" ? e.target : e.target.id);
+    for (const edge of filteredEdges) {
+      const sourceId = typeof edge.source === "string" ? edge.source : edge.source.id;
+      const targetId = typeof edge.target === "string" ? edge.target : edge.target.id;
+      connectedIds.add(sourceId);
+      connectedIds.add(targetId);
     }
-    const filteredNodes = data.nodes.filter((n) => connectedIds.has(n.id));
+    const visibleNodes = data.nodes.filter((n) => connectedIds.has(n.id));
 
-    // Clone for simulation (d3 mutates these)
-    const nodes: GraphNode[] = filteredNodes.map((n) => ({ ...n }));
+    // Clone for simulation (d3 mutates these). Seed positions in a wide
+    // ring so the first frame already looks centered and spread out.
+    const ringRadius = Math.min(w, h) * 0.4;
+    const nodes: GraphNode[] = visibleNodes.map((n, i) => {
+      const theta = (i / Math.max(visibleNodes.length, 1)) * Math.PI * 2;
+      return {
+        ...n,
+        x: Math.cos(theta) * ringRadius,
+        y: Math.sin(theta) * ringRadius,
+      };
+    });
     const edges: GraphEdge[] = filteredEdges.map((e) => ({
       ...e,
       source: typeof e.source === "string" ? e.source : e.source.id,
@@ -267,20 +343,62 @@ export default function Graph() {
     // Center transform
     transformRef.current = { x: w / 2, y: h / 2, k: 1 };
 
+    let tickCount = 0;
+    tickBudgetRef.current.remaining = MAX_SIMULATION_TICKS;
     const sim = forceSimulation(nodes)
+      .alphaDecay(0.03)
       .force(
         "link",
         forceLink<GraphNode, GraphEdge>(edges)
           .id((d) => d.id)
-          .distance((d) => Math.max(60, 120 - (d as GraphEdge).weight * 8))
-          .strength((d) => Math.min(0.1 + (d as GraphEdge).weight * 0.03, 0.5)),
+          .distance((d) => Math.max(110, 200 - (d as GraphEdge).weight * 10))
+          .strength((d) => Math.min(0.05 + (d as GraphEdge).weight * 0.02, 0.35)),
       )
-      .force("charge", forceManyBody().strength(-120))
+      .force("charge", forceManyBody<GraphNode>().strength((d) => -400 - d.factCount * 4).distanceMax(600))
       .force("center", forceCenter(0, 0))
-      .force("collide", forceCollide<GraphNode>().radius((d) => Math.sqrt(d.factCount) * 3 + 15))
-      .on("tick", draw);
+      .force("collide", forceCollide<GraphNode>().radius((d) => Math.sqrt(d.factCount) * 3 + 32).strength(0.9))
+      .stop();
+
+    // Warm-up ticks before first paint so the layout is roughly settled and
+    // doesn't visibly jitter into place.
+    for (let i = 0; i < SIMULATION_WARMUP_TICKS; i++) sim.tick();
+
+    // Fit warm-up result to viewport. We do NOT scale up beyond 1.0 — small
+    // graphs stay at natural size so nodes don't bunch near the center.
+    const padding = 80;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      if (n.x == null || n.y == null) continue;
+      if (n.x < minX) minX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y > maxY) maxY = n.y;
+    }
+    if (isFinite(minX) && maxX > minX && maxY > minY) {
+      const graphW = maxX - minX;
+      const graphH = maxY - minY;
+      const scale = Math.min(
+        (w - padding * 2) / graphW,
+        (h - padding * 2) / graphH,
+        1.0,
+      );
+      transformRef.current = {
+        x: w / 2 - ((minX + maxX) / 2) * scale,
+        y: h / 2 - ((minY + maxY) / 2) * scale,
+        k: scale,
+      };
+    }
+
+    sim.on("tick", () => {
+      draw();
+      tickCount++;
+      tickBudgetRef.current.remaining--;
+      if (tickBudgetRef.current.remaining <= 0) sim.stop();
+    });
+    sim.alpha(0.6).restart();
 
     simRef.current = sim;
+    draw();
 
     return () => {
       sim.stop();
@@ -303,6 +421,45 @@ export default function Graph() {
     },
     [draw],
   );
+
+  // Re-render canvas when search query changes; on Enter we also fit to matches.
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+    draw();
+  }, [searchQuery, draw]);
+
+  const fitToMatches = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const query = searchQueryRef.current.trim().toLowerCase();
+    if (!query) return;
+    const matches = nodesRef.current.filter(
+      (n) =>
+        n.label.toLowerCase().includes(query) || n.id.toLowerCase().includes(query),
+    );
+    if (matches.length === 0) return;
+    const w = canvas.parentElement!.clientWidth;
+    const h = canvas.parentElement!.clientHeight;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of matches) {
+      if (n.x == null || n.y == null) continue;
+      if (n.x < minX) minX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y > maxY) maxY = n.y;
+    }
+    if (!isFinite(minX)) return;
+    const padding = 120;
+    const graphW = Math.max(maxX - minX, 1);
+    const graphH = Math.max(maxY - minY, 1);
+    const scale = Math.min((w - padding * 2) / graphW, (h - padding * 2) / graphH, 2.5);
+    transformRef.current = {
+      x: w / 2 - ((minX + maxX) / 2) * scale,
+      y: h / 2 - ((minY + maxY) / 2) * scale,
+      k: scale,
+    };
+    draw();
+  }, [draw]);
 
   const resetView = useCallback(() => {
     const canvas = canvasRef.current;
@@ -369,19 +526,51 @@ export default function Graph() {
       return closest;
     }
 
+    // Defensive reset — clears any stale drag state from a previous interaction
+    // that didn't terminate cleanly (e.g. pointercancel, thrown release, effect
+    // re-run mid-drag). Safe to call from any handler.
+    function resetInteraction() {
+      if (dragRef.current.node) {
+        dragRef.current.node.fx = null;
+        dragRef.current.node.fy = null;
+      }
+      dragRef.current = { node: null, startX: 0, startY: 0 };
+      isPanningRef.current = false;
+      simRef.current?.alphaTarget(0);
+      canvas!.style.cursor = "grab";
+    }
+
     function onMouseDown(e: PointerEvent) {
-      canvas!.setPointerCapture(e.pointerId);
+      // If a prior interaction left state behind (pointercancel without up,
+      // browser focus loss, etc.), recover before starting a fresh one.
+      if (dragRef.current.node || isPanningRef.current) {
+        resetInteraction();
+      }
+      try {
+        canvas!.setPointerCapture(e.pointerId);
+      } catch {
+        /* pointer capture is best-effort; ignore failures */
+      }
       const node = getNodeAt(e.clientX, e.clientY);
       if (node) {
         dragRef.current = { node, startX: e.clientX, startY: e.clientY };
         node.fx = node.x;
         node.fy = node.y;
-        simRef.current?.alphaTarget(0.3).restart();
+        // Refill the simulation tick budget — a fresh user interaction needs
+        // ticks to render the node moving even after initial layout has stopped.
+        tickBudgetRef.current.remaining = Math.max(
+          tickBudgetRef.current.remaining,
+          MAX_SIMULATION_TICKS,
+        );
+        // Bump alpha directly above alphaMin (default 0.001). After initial
+        // layout settles, alpha decays to ~0; then alphaTarget(0.3).restart()
+        // alone won't run — d3 stops the timer on the very next tick because
+        // alpha is still below alphaMin when the stop check fires.
+        simRef.current?.alpha(0.5).alphaTarget(0.3).restart();
         canvas!.style.cursor = "grabbing";
       } else {
         isPanningRef.current = true;
         panStartRef.current = { x: e.clientX, y: e.clientY };
-        // Store start for click-vs-pan detection
         dragRef.current = { node: null, startX: e.clientX, startY: e.clientY };
         canvas!.style.cursor = "grabbing";
       }
@@ -421,7 +610,11 @@ export default function Graph() {
     }
 
     function onMouseUp(e: PointerEvent) {
-      canvas!.releasePointerCapture(e.pointerId);
+      try {
+        canvas!.releasePointerCapture(e.pointerId);
+      } catch {
+        /* capture may have been implicitly released; ignore */
+      }
       if (dragRef.current.node) {
         const moved =
           Math.abs(e.clientX - dragRef.current.startX) + Math.abs(e.clientY - dragRef.current.startY);
@@ -454,6 +647,15 @@ export default function Graph() {
       canvas!.style.cursor = "grab";
     }
 
+    function onPointerCancel(e: PointerEvent) {
+      try {
+        canvas!.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      resetInteraction();
+    }
+
     function onMouseLeave() {
       // Don't interrupt active drag/pan — pointer capture keeps delivering events
       if (isPanningRef.current || dragRef.current.node) return;
@@ -480,17 +682,62 @@ export default function Graph() {
     canvas.addEventListener("pointerdown", onMouseDown);
     canvas.addEventListener("pointermove", onMouseMove);
     canvas.addEventListener("pointerup", onMouseUp);
+    canvas.addEventListener("pointercancel", onPointerCancel);
+    canvas.addEventListener("lostpointercapture", onPointerCancel);
     canvas.addEventListener("pointerleave", onMouseLeave);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    // If the window loses focus mid-drag (alt-tab, OS gesture, devtools), the
+    // browser may swallow pointerup. Clear interaction state defensively.
+    window.addEventListener("blur", resetInteraction);
 
     return () => {
       canvas.removeEventListener("pointerdown", onMouseDown);
       canvas.removeEventListener("pointermove", onMouseMove);
       canvas.removeEventListener("pointerup", onMouseUp);
+      canvas.removeEventListener("pointercancel", onPointerCancel);
+      canvas.removeEventListener("lostpointercapture", onPointerCancel);
       canvas.removeEventListener("pointerleave", onMouseLeave);
       canvas.removeEventListener("wheel", onWheel);
+      window.removeEventListener("blur", resetInteraction);
+      // Effect re-runs (data/draw changes) shouldn't strand a node pinned mid-drag.
+      resetInteraction();
     };
   }, [draw]);
+
+  const visibleEdgeCount = data
+    ? data.edges.filter((e) => e.type !== "co-occurrence" || e.weight >= minWeight).length
+    : 0;
+  const visibleNodeCount = nodesRef.current.length;
+
+  // Count search matches for the inline result hint.
+  const searchTrimmed = searchQuery.trim().toLowerCase();
+  const searchMatchCount = searchTrimmed
+    ? nodesRef.current.filter(
+        (n) =>
+          n.label.toLowerCase().includes(searchTrimmed) ||
+          n.id.toLowerCase().includes(searchTrimmed),
+      ).length
+    : 0;
+
+  // True when the loaded graph contains at least one typed relation edge.
+  const hasTypedRelations = data
+    ? data.edges.some((e) => e.type !== "co-occurrence")
+    : false;
+
+  // Build a single concise prune note instead of stacking multiple banner lines.
+  const pruneNotes: string[] = [];
+  if (data?.truncated) {
+    pruneNotes.push(`scanned first ${(data.factsScanned ?? data.factCount).toLocaleString()} facts`);
+  }
+  if (data && (data.nodesPruned ?? 0) > 0) {
+    pruneNotes.push(`top ${data.nodes.length} of ${data.totalNodes?.toLocaleString() ?? "?"} entities`);
+  }
+  if (data && (data.edgesPruned ?? 0) > 0) {
+    pruneNotes.push(`top ${data.edges.length} of ${data.totalEdges?.toLocaleString() ?? "?"} connections`);
+  }
+  if (data && (data.denseFactsSkipped ?? 0) > 0) {
+    pruneNotes.push(`${data.denseFactsSkipped.toLocaleString()} dense facts skipped`);
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
@@ -499,25 +746,59 @@ export default function Graph() {
           <h2 className="text-2xl font-bold">Entity Graph</h2>
           {data && (
             <p className="text-sm text-zinc-500 mt-1">
-              {data.nodes.length} entities · {data.edges.length} connections · {data.factCount} facts
+              {visibleNodeCount || data.nodes.length} entities · {visibleEdgeCount} connections · {data.factCount} facts
             </p>
           )}
-          {data && (data.truncated || (data.nodesPruned ?? 0) > 0) && (
-            <p className="text-xs text-amber-400 mt-1">
-              {data.truncated && `Graph based on first ${data.factsScanned?.toLocaleString() ?? data.factCount} facts (limit ${data.limit?.toLocaleString() ?? "?"}).`}
-              {(data.nodesPruned ?? 0) > 0 && (
-                <>
-                  {data.truncated ? " " : ""}
-                  Showing top {data.nodes.length} of {data.totalNodes?.toLocaleString() ?? "?"} entities by fact count.
-                </>
-              )}
-            </p>
+          {data && pruneNotes.length > 0 && (
+            <p className="text-xs text-amber-400/80 mt-1">Showing {pruneNotes.join(" · ")}.</p>
           )}
           {loading && <p className="text-sm text-zinc-500 mt-1">Loading graph data…</p>}
           {error && <p className="text-sm text-red-400 mt-1">Failed to load graph: {error}</p>}
         </div>
         {data && (
           <div className="flex items-center gap-4">
+            <div className="relative">
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") fitToMatches();
+                  else if (e.key === "Escape") setSearchQuery("");
+                }}
+                placeholder="Search entities…"
+                className="w-56 pl-8 pr-8 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-md text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                aria-label="Search entities in graph"
+              />
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-sm"
+                  aria-label="Clear search"
+                >
+                  ×
+                </button>
+              )}
+              {searchTrimmed && (
+                <span className="absolute -bottom-5 left-0 text-xs text-zinc-500">
+                  {searchMatchCount} {searchMatchCount === 1 ? "match" : "matches"}
+                  {searchMatchCount > 0 ? " · Enter to focus" : ""}
+                </span>
+              )}
+            </div>
             <label className="flex items-center gap-2 text-sm text-zinc-400">
               Min co-occurrence:
               <input
@@ -531,16 +812,33 @@ export default function Graph() {
               <span className="text-zinc-300 w-4">{minWeight}</span>
             </label>
             <div className="flex items-center gap-3">
-              {Object.entries(CATEGORY_HEX).map(([cat, color]) => (
-                <div key={cat} className="flex items-center gap-1">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-                  <span className="text-xs text-zinc-500 capitalize">{cat}</span>
+              {LEGEND_CATEGORIES.map(({ key, label }) => (
+                <div key={key} className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CATEGORY_HEX[key] }} />
+                  <span className="text-xs text-zinc-500">{label}</span>
                 </div>
               ))}
             </div>
           </div>
         )}
       </div>
+
+      {data && hasTypedRelations && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 shrink-0">
+          <span className="text-xs uppercase tracking-wide text-zinc-500">Edges</span>
+          <div className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-4 h-0.5 rounded"
+              style={{ backgroundColor: RELATION_EDGE_COLOR }}
+            />
+            <span className="text-xs text-zinc-400">relationship</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block w-4 h-0.5 rounded bg-zinc-600" />
+            <span className="text-xs text-zinc-500">co-occurrence</span>
+          </div>
+        </div>
+      )}
 
       {/* Tooltip */}
       {hoveredNode && (
@@ -617,32 +915,63 @@ export default function Graph() {
               {!sharedLoading && sharedFacts.length === 0 && (
                 <p className="text-xs text-zinc-500">No shared memories found.</p>
               )}
-              {sharedFacts.map((fact) => (
-                <div
-                  key={fact.id}
-                  onClick={() => navigateRef.current(`/memory/facts/${fact.id}`)}
-                  className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 hover:border-zinc-600 cursor-pointer transition-colors"
-                >
-                  <p className="text-xs text-zinc-300 leading-relaxed">{fact.content}</p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span
-                      className="text-[10px] px-1.5 py-0.5 rounded capitalize"
-                      style={{
-                        backgroundColor: `${CATEGORY_HEX[fact.category] ?? "#71717a"}22`,
-                        color: CATEGORY_HEX[fact.category] ?? "#71717a",
-                      }}
-                    >
-                      {fact.category}
-                    </span>
-                    {fact.kind !== "fact" && (
-                      <span className="text-[10px] text-zinc-500">{fact.kind}</span>
+              {!sharedLoading && (() => {
+                const relationFacts = sharedFacts.filter((f) => f.kind === "relation");
+                const otherFacts = sharedFacts.filter((f) => f.kind !== "relation");
+                const renderFact = (fact: SharedFact) => (
+                  <div
+                    key={fact.id}
+                    onClick={() => navigateRef.current(`/memory/facts/${fact.id}`)}
+                    className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 hover:border-zinc-600 cursor-pointer transition-colors"
+                  >
+                    {fact.kind === "relation" && fact.relation_type && (
+                      <p className="text-[11px] font-medium text-purple-300 mb-1.5">
+                        {fact.from_entity ?? "?"}
+                        <span className="text-purple-400 mx-1">— {fact.relation_type} →</span>
+                        {fact.to_entity ?? "?"}
+                      </p>
                     )}
-                    <span className="text-[10px] text-zinc-600 ml-auto">
-                      {new Date(fact.created_at).toLocaleDateString()}
-                    </span>
+                    <p className="text-xs text-zinc-300 leading-relaxed">{fact.content}</p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded capitalize"
+                        style={{
+                          backgroundColor: `${CATEGORY_HEX[fact.category] ?? "#71717a"}22`,
+                          color: CATEGORY_HEX[fact.category] ?? "#71717a",
+                        }}
+                      >
+                        {fact.category}
+                      </span>
+                      {fact.kind !== "fact" && (
+                        <span className="text-[10px] text-zinc-500">{fact.kind}</span>
+                      )}
+                      <span className="text-[10px] text-zinc-600 ml-auto">
+                        {new Date(fact.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+                return (
+                  <>
+                    {relationFacts.length > 0 && (
+                      <>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-purple-400">
+                          Relationship{relationFacts.length > 1 ? "s" : ""}
+                        </p>
+                        {relationFacts.map(renderFact)}
+                      </>
+                    )}
+                    {otherFacts.length > 0 && (
+                      <>
+                        <p className={`text-[11px] font-semibold uppercase tracking-wide text-zinc-500 ${relationFacts.length > 0 ? "pt-2" : ""}`}>
+                          Co-occurrences
+                        </p>
+                        {otherFacts.map(renderFact)}
+                      </>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         )}

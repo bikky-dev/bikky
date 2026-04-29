@@ -186,8 +186,8 @@ const autoDistill = async (
       const hash = createHash("sha256").update(`distilled:${pattern.content}`).digest("hex");
       await qdrant.storeFact({
         content: pattern.content,
-        category: normalizeCategory(pattern.category ?? "observation"),
-        domain: normalizeDomain(pattern.domain ?? "work"),
+        category: normalizeCategory(pattern.category ?? "engineering"),
+        domain: normalizeDomain(pattern.domain ?? "software_engineering"),
         kind: "distilled",
         entities: Array.isArray(pattern.entities) ? pattern.entities.map(e => String(e).toLowerCase()) : [],
         source: "system",
@@ -231,8 +231,7 @@ const detectContradiction = async (
 
   try {
     const vector = await qdrant.embed(fact.content);
-    // Search across ALL categories — contradictions can cross category lines
-    // (e.g. an "infrastructure" port fact vs an "observation" workaround fact).
+    // Search across all categories because contradictions can cross category lines.
     const results = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/search`, {
       vector,
       filter: { must: [{ is_null: { key: "superseded_by" } }] },
@@ -465,14 +464,22 @@ const formatHealthReport = (report: HealthReport | null): string => {
  * Written to ~/.bikky/state/brief.md for agent orientation.
  */
 const CATEGORY_TO_HEADING: Record<string, (typeof ALLOWED_BRIEF_HEADINGS)[number]> = {
-  team: "Key People & Team",
-  people: "Key People & Team",
-  projects: "Active Projects",
-  infrastructure: "Infrastructure Overview",
-  decisions: "Recent Decisions",
-  observation: "Known Gotchas",
-  observations: "Known Gotchas",
-  preferences: "Preferences & Conventions",
+  engineering: "Engineering",
+  product: "Product",
+  human: "Human",
+  system: "System",
+  // Legacy stored categories remain readable before any data migration.
+  codebase: "Engineering",
+  infrastructure: "Engineering",
+  operations: "Engineering",
+  decisions: "Engineering",
+  product_domain: "Product",
+  projects: "System",
+  observation: "Engineering",
+  observations: "Engineering",
+  preferences: "Human",
+  people: "Human",
+  team: "Human",
 };
 
 const generateMemoryBrief = async (_config: BikkyConfig): Promise<boolean> => {
