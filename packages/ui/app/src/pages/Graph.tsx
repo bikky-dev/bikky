@@ -518,8 +518,31 @@ export default function Graph() {
       return closest;
     }
 
+    // Defensive reset — clears any stale drag state from a previous interaction
+    // that didn't terminate cleanly (e.g. pointercancel, thrown release, effect
+    // re-run mid-drag). Safe to call from any handler.
+    function resetInteraction() {
+      if (dragRef.current.node) {
+        dragRef.current.node.fx = null;
+        dragRef.current.node.fy = null;
+      }
+      dragRef.current = { node: null, startX: 0, startY: 0 };
+      isPanningRef.current = false;
+      simRef.current?.alphaTarget(0);
+      canvas!.style.cursor = "grab";
+    }
+
     function onMouseDown(e: PointerEvent) {
-      canvas!.setPointerCapture(e.pointerId);
+      // If a prior interaction left state behind (pointercancel without up,
+      // browser focus loss, etc.), recover before starting a fresh one.
+      if (dragRef.current.node || isPanningRef.current) {
+        resetInteraction();
+      }
+      try {
+        canvas!.setPointerCapture(e.pointerId);
+      } catch {
+        /* pointer capture is best-effort; ignore failures */
+      }
       const node = getNodeAt(e.clientX, e.clientY);
       if (node) {
         dragRef.current = { node, startX: e.clientX, startY: e.clientY };
@@ -530,7 +553,6 @@ export default function Graph() {
       } else {
         isPanningRef.current = true;
         panStartRef.current = { x: e.clientX, y: e.clientY };
-        // Store start for click-vs-pan detection
         dragRef.current = { node: null, startX: e.clientX, startY: e.clientY };
         canvas!.style.cursor = "grabbing";
       }
@@ -570,7 +592,11 @@ export default function Graph() {
     }
 
     function onMouseUp(e: PointerEvent) {
-      canvas!.releasePointerCapture(e.pointerId);
+      try {
+        canvas!.releasePointerCapture(e.pointerId);
+      } catch {
+        /* capture may have been implicitly released; ignore */
+      }
       if (dragRef.current.node) {
         const moved =
           Math.abs(e.clientX - dragRef.current.startX) + Math.abs(e.clientY - dragRef.current.startY);
@@ -603,6 +629,15 @@ export default function Graph() {
       canvas!.style.cursor = "grab";
     }
 
+    function onPointerCancel(e: PointerEvent) {
+      try {
+        canvas!.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      resetInteraction();
+    }
+
     function onMouseLeave() {
       // Don't interrupt active drag/pan — pointer capture keeps delivering events
       if (isPanningRef.current || dragRef.current.node) return;
@@ -629,15 +664,25 @@ export default function Graph() {
     canvas.addEventListener("pointerdown", onMouseDown);
     canvas.addEventListener("pointermove", onMouseMove);
     canvas.addEventListener("pointerup", onMouseUp);
+    canvas.addEventListener("pointercancel", onPointerCancel);
+    canvas.addEventListener("lostpointercapture", onPointerCancel);
     canvas.addEventListener("pointerleave", onMouseLeave);
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    // If the window loses focus mid-drag (alt-tab, OS gesture, devtools), the
+    // browser may swallow pointerup. Clear interaction state defensively.
+    window.addEventListener("blur", resetInteraction);
 
     return () => {
       canvas.removeEventListener("pointerdown", onMouseDown);
       canvas.removeEventListener("pointermove", onMouseMove);
       canvas.removeEventListener("pointerup", onMouseUp);
+      canvas.removeEventListener("pointercancel", onPointerCancel);
+      canvas.removeEventListener("lostpointercapture", onPointerCancel);
       canvas.removeEventListener("pointerleave", onMouseLeave);
       canvas.removeEventListener("wheel", onWheel);
+      window.removeEventListener("blur", resetInteraction);
+      // Effect re-runs (data/draw changes) shouldn't strand a node pinned mid-drag.
+      resetInteraction();
     };
   }, [draw]);
 
