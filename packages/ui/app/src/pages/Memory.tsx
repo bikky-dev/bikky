@@ -208,7 +208,6 @@ export default function Memory() {
     setMemorySubtype(value);
     if (value) {
       setCategory("");
-      setKind("");
     }
     setBrowseRevision((revision) => revision + 1);
   };

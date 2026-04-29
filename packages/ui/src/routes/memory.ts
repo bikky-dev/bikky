@@ -110,7 +110,7 @@ memoryRoutes.get("/search", async (c) => {
   });
 
   const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 100);
-  const hasFilter = filter.must.length > 0 || (filter.must_not?.length ?? 0) > 0;
+  const hasFilter = filter.must.length > 0 || (filter.should?.length ?? 0) > 0 || (filter.must_not?.length ?? 0) > 0;
   const points = await qdrant.search(vector, hasFilter ? filter : undefined, limit);
 
   return c.json({ results: points.map(formatPoint), count: points.length });

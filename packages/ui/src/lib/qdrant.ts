@@ -57,6 +57,7 @@ export interface FilterCondition {
 
 export interface QdrantFilter {
   must: FilterCondition[];
+  should?: FilterCondition[];
   must_not?: FilterCondition[];
 }
 
@@ -97,6 +98,13 @@ const sourceFilterValue = (source: string): { value?: string; any?: string[] } =
 
 const categoryFilterValue = (category: string): { value?: string; any?: string[] } => {
   return aliasedFilterValue(CATEGORY_FILTER_ALIASES, category);
+};
+
+const MEMORY_SUBTYPE_FILTER_ALIASES: Record<string, FilterCondition[]> = {
+  convention: [
+    { key: "memory_subtype", match: { value: "convention" } },
+    { key: "kind", match: { value: "distilled" } },
+  ],
 };
 
 // --- Client ---
@@ -193,12 +201,17 @@ export function buildFilter(opts: {
   excludeEntityType?: boolean;
 }): QdrantFilter {
   const must: FilterCondition[] = [];
+  const should: FilterCondition[] = [];
   const must_not: FilterCondition[] = [];
   if (opts.excludeSuperseded === true) must.push({ is_null: { key: "superseded_by" } });
   if (opts.category) must.push({ key: "category", match: categoryFilterValue(opts.category) });
   if (opts.domain) must.push({ key: "domain", match: { value: opts.domain } });
   if (opts.kind) must.push({ key: "kind", match: { value: opts.kind } });
-  if (opts.memorySubtype) must.push({ key: "memory_subtype", match: { value: opts.memorySubtype } });
+  if (opts.memorySubtype) {
+    const aliases = MEMORY_SUBTYPE_FILTER_ALIASES[opts.memorySubtype];
+    if (aliases) should.push(...aliases);
+    else must.push({ key: "memory_subtype", match: { value: opts.memorySubtype } });
+  }
   if (opts.entity) must.push({ key: "entities", match: { value: opts.entity.toLowerCase() } });
   if (opts.source) must.push({ key: "source", match: sourceFilterValue(opts.source) });
   if (opts.actorId) must.push({ key: "actor_id", match: { value: opts.actorId } });
@@ -208,7 +221,10 @@ export function buildFilter(opts: {
   if (opts.excludeEntityType === true && opts.kind !== "entity_type") {
     must_not.push({ key: "kind", match: { value: "entity_type" } });
   }
-  return must_not.length > 0 ? { must, must_not } : { must };
+  const filter: QdrantFilter = { must };
+  if (should.length > 0) filter.should = should;
+  if (must_not.length > 0) filter.must_not = must_not;
+  return filter;
 }
 
 // --- Factory ---

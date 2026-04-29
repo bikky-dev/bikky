@@ -256,6 +256,22 @@ describe("ui/routes/memory", () => {
         match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] },
       });
     });
+
+    it("uses legacy distilled aliases for convention subtype browse filters", async () => {
+      const log = installMock({
+        qdrantHandler: () => ({ result: { points: [], next_page_offset: null } }),
+      });
+      const app = buildApp();
+
+      await app.fetch(new Request("http://localhost/api/memory/browse?memory_subtype=convention"));
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.ok(scroll);
+      assert.deepEqual(scroll!.body.filter.must, []);
+      assert.deepEqual(scroll!.body.filter.should, [
+        { key: "memory_subtype", match: { value: "convention" } },
+        { key: "kind", match: { value: "distilled" } },
+      ]);
+    });
   });
 
   describe("GET /facts/:id", () => {
@@ -662,6 +678,48 @@ describe("ui/routes/memory", () => {
         { key: "kind", match: { value: "fact" } },
         { key: "memory_subtype", match: { value: "codebase_map" } },
         { key: "source", match: { any: ["system", "daemon"] } },
+      ]);
+    });
+
+    it("counts legacy distilled memories under the convention subtype", async () => {
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path === "/collections/test") {
+            return { result: { points_count: 200, vectors_count: 200 } };
+          }
+          if (c.path.endsWith("/points/count")) {
+            const must = c.body?.filter?.must ?? [];
+            const should = c.body?.filter?.should ?? [];
+            const isConventionSubtype = should.some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "convention") &&
+              should.some((cond: any) => cond.key === "kind" && cond.match?.value === "distilled");
+            if (isConventionSubtype) return { result: { count: 153 } };
+            if (must.some((cond: any) => cond.key === "kind" && cond.match?.value === "distilled")) return { result: { count: 153 } };
+            return { result: { count: 0 } };
+          }
+          return { result: {} };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/stats?kind=distilled"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        active: number;
+        bySubtype: Record<string, number>;
+      };
+      assert.equal(body.active, 153);
+      assert.equal(body.bySubtype.convention, 153);
+
+      const conventionCount = log.calls
+        .filter((c) => c.path.endsWith("/points/count"))
+        .find((c) => (c.body?.filter?.should ?? []).some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "convention"));
+      assert.ok(conventionCount);
+      assert.deepEqual(conventionCount!.body.filter.must, [
+        { key: "kind", match: { value: "distilled" } },
+      ]);
+      assert.deepEqual(conventionCount!.body.filter.should, [
+        { key: "memory_subtype", match: { value: "convention" } },
+        { key: "kind", match: { value: "distilled" } },
       ]);
     });
   });

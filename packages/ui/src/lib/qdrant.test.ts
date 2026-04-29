@@ -64,6 +64,15 @@ describe("ui/lib/qdrant", () => {
       ]);
     });
 
+    it("maps convention subtype filters to legacy distilled memories", () => {
+      const f = buildFilter({ memorySubtype: "convention" });
+      assert.deepEqual(f.must, []);
+      assert.deepEqual(f.should, [
+        { key: "memory_subtype", match: { value: "convention" } },
+        { key: "kind", match: { value: "distilled" } },
+      ]);
+    });
+
     it("lowercases the entity value", () => {
       const f = buildFilter({ entity: "Bikky" });
       assert.deepEqual(f.must, [{ key: "entities", match: { value: "bikky" } }]);
