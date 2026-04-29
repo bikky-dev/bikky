@@ -85,7 +85,16 @@ const CATEGORY_HEX: Record<string, string> = {
 const GRAPH_MAX_NODES = 75;
 const GRAPH_MAX_EDGES = 300;
 const GRAPH_SERVER_MIN_WEIGHT = 1;
-const MAX_SIMULATION_TICKS = 300;
+const MAX_SIMULATION_TICKS = 500;
+const SIMULATION_WARMUP_TICKS = 60;
+
+// Canonical four-category ontology shown in the legend.
+const LEGEND_CATEGORIES: Array<{ key: string; label: string }> = [
+  { key: "engineering", label: "Engineering" },
+  { key: "product", label: "Product" },
+  { key: "human", label: "Human" },
+  { key: "system", label: "System" },
+];
 
 export default function Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -94,7 +103,7 @@ export default function Graph() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
-  const [minWeight, setMinWeight] = useState(2);
+  const [minWeight, setMinWeight] = useState(1);
   const [selectedEdge, setSelectedEdge] = useState<{ a: string; b: string } | null>(null);
   const [sharedFacts, setSharedFacts] = useState<SharedFact[]>([]);
   const [sharedLoading, setSharedLoading] = useState(false);
@@ -262,8 +271,28 @@ export default function Graph() {
       (e) => e.type !== "co-occurrence" || e.weight >= minWeight,
     );
 
-    // Clone for simulation (d3 mutates these)
-    const nodes: GraphNode[] = data.nodes.map((n) => ({ ...n }));
+    // Hide nodes left disconnected after the minWeight filter so they don't
+    // float around as orphan dots cluttering the canvas.
+    const connectedIds = new Set<string>();
+    for (const edge of filteredEdges) {
+      const sourceId = typeof edge.source === "string" ? edge.source : edge.source.id;
+      const targetId = typeof edge.target === "string" ? edge.target : edge.target.id;
+      connectedIds.add(sourceId);
+      connectedIds.add(targetId);
+    }
+    const visibleNodes = data.nodes.filter((n) => connectedIds.has(n.id));
+
+    // Clone for simulation (d3 mutates these). Seed positions in a small
+    // ring near the origin so the first frame already looks centered.
+    const ringRadius = Math.min(w, h) * 0.25;
+    const nodes: GraphNode[] = visibleNodes.map((n, i) => {
+      const theta = (i / Math.max(visibleNodes.length, 1)) * Math.PI * 2;
+      return {
+        ...n,
+        x: Math.cos(theta) * ringRadius,
+        y: Math.sin(theta) * ringRadius,
+      };
+    });
     const edges: GraphEdge[] = filteredEdges.map((e) => ({
       ...e,
       source: typeof e.source === "string" ? e.source : e.source.id,
@@ -278,6 +307,7 @@ export default function Graph() {
 
     let tickCount = 0;
     const sim = forceSimulation(nodes)
+      .alphaDecay(0.04)
       .force(
         "link",
         forceLink<GraphNode, GraphEdge>(edges)
@@ -285,16 +315,49 @@ export default function Graph() {
           .distance((d) => Math.max(60, 120 - (d as GraphEdge).weight * 8))
           .strength((d) => Math.min(0.1 + (d as GraphEdge).weight * 0.03, 0.5)),
       )
-      .force("charge", forceManyBody().strength(-120))
+      .force("charge", forceManyBody().strength(-180))
       .force("center", forceCenter(0, 0))
-      .force("collide", forceCollide<GraphNode>().radius((d) => Math.sqrt(d.factCount) * 3 + 15))
-      .on("tick", () => {
-        draw();
-        tickCount++;
-        if (tickCount >= MAX_SIMULATION_TICKS) sim.stop();
-      });
+      .force("collide", forceCollide<GraphNode>().radius((d) => Math.sqrt(d.factCount) * 3 + 18))
+      .stop();
+
+    // Warm-up ticks before first paint so the layout is roughly settled and
+    // doesn't visibly jitter into place.
+    for (let i = 0; i < SIMULATION_WARMUP_TICKS; i++) sim.tick();
+
+    // Fit warm-up result to viewport so the whole graph is visible on load.
+    const padding = 60;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      if (n.x == null || n.y == null) continue;
+      if (n.x < minX) minX = n.x;
+      if (n.y < minY) minY = n.y;
+      if (n.x > maxX) maxX = n.x;
+      if (n.y > maxY) maxY = n.y;
+    }
+    if (isFinite(minX) && maxX > minX && maxY > minY) {
+      const graphW = maxX - minX;
+      const graphH = maxY - minY;
+      const scale = Math.min(
+        (w - padding * 2) / graphW,
+        (h - padding * 2) / graphH,
+        1.2,
+      );
+      transformRef.current = {
+        x: w / 2 - ((minX + maxX) / 2) * scale,
+        y: h / 2 - ((minY + maxY) / 2) * scale,
+        k: scale,
+      };
+    }
+
+    sim.on("tick", () => {
+      draw();
+      tickCount++;
+      if (tickCount >= MAX_SIMULATION_TICKS) sim.stop();
+    });
+    sim.alpha(0.6).restart();
 
     simRef.current = sim;
+    draw();
 
     return () => {
       sim.stop();
@@ -509,6 +572,22 @@ export default function Graph() {
   const visibleEdgeCount = data
     ? data.edges.filter((e) => e.type !== "co-occurrence" || e.weight >= minWeight).length
     : 0;
+  const visibleNodeCount = nodesRef.current.length;
+
+  // Build a single concise prune note instead of stacking multiple banner lines.
+  const pruneNotes: string[] = [];
+  if (data?.truncated) {
+    pruneNotes.push(`scanned first ${(data.factsScanned ?? data.factCount).toLocaleString()} facts`);
+  }
+  if (data && (data.nodesPruned ?? 0) > 0) {
+    pruneNotes.push(`top ${data.nodes.length} of ${data.totalNodes?.toLocaleString() ?? "?"} entities`);
+  }
+  if (data && (data.edgesPruned ?? 0) > 0) {
+    pruneNotes.push(`top ${data.edges.length} of ${data.totalEdges?.toLocaleString() ?? "?"} connections`);
+  }
+  if (data && (data.denseFactsSkipped ?? 0) > 0) {
+    pruneNotes.push(`${data.denseFactsSkipped.toLocaleString()} dense facts skipped`);
+  }
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
@@ -517,31 +596,11 @@ export default function Graph() {
           <h2 className="text-2xl font-bold">Entity Graph</h2>
           {data && (
             <p className="text-sm text-zinc-500 mt-1">
-              {data.nodes.length} entities · {visibleEdgeCount} visible connections · {data.factCount} facts
+              {visibleNodeCount || data.nodes.length} entities · {visibleEdgeCount} connections · {data.factCount} facts
             </p>
           )}
-          {data && (data.truncated || (data.nodesPruned ?? 0) > 0 || (data.edgesPruned ?? 0) > 0 || (data.denseFactsSkipped ?? 0) > 0) && (
-            <p className="text-xs text-amber-400 mt-1">
-              {data.truncated && `Graph based on first ${data.factsScanned?.toLocaleString() ?? data.factCount} facts (limit ${data.limit?.toLocaleString() ?? "?"}).`}
-              {(data.nodesPruned ?? 0) > 0 && (
-                <>
-                  {data.truncated ? " " : ""}
-                  Showing top {data.nodes.length} of {data.totalNodes?.toLocaleString() ?? "?"} entities by fact count.
-                </>
-              )}
-              {(data.edgesPruned ?? 0) > 0 && (
-                <>
-                  {(data.truncated || (data.nodesPruned ?? 0) > 0) ? " " : ""}
-                  Showing strongest {data.edges.length} of {data.totalEdges?.toLocaleString() ?? "?"} eligible connections.
-                </>
-              )}
-              {(data.denseFactsSkipped ?? 0) > 0 && (
-                <>
-                  {(data.truncated || (data.nodesPruned ?? 0) > 0 || (data.edgesPruned ?? 0) > 0) ? " " : ""}
-                  Skipped dense co-occurrence expansion for {data.denseFactsSkipped.toLocaleString()} memories.
-                </>
-              )}
-            </p>
+          {data && pruneNotes.length > 0 && (
+            <p className="text-xs text-amber-400/80 mt-1">Showing {pruneNotes.join(" · ")}.</p>
           )}
           {loading && <p className="text-sm text-zinc-500 mt-1">Loading graph data…</p>}
           {error && <p className="text-sm text-red-400 mt-1">Failed to load graph: {error}</p>}
@@ -561,10 +620,10 @@ export default function Graph() {
               <span className="text-zinc-300 w-4">{minWeight}</span>
             </label>
             <div className="flex items-center gap-3">
-              {Object.entries(CATEGORY_HEX).map(([cat, color]) => (
-                <div key={cat} className="flex items-center gap-1">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-                  <span className="text-xs text-zinc-500 capitalize">{cat}</span>
+              {LEGEND_CATEGORIES.map(({ key, label }) => (
+                <div key={key} className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: CATEGORY_HEX[key] }} />
+                  <span className="text-xs text-zinc-500">{label}</span>
                 </div>
               ))}
             </div>
