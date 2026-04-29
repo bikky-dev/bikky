@@ -54,6 +54,9 @@ interface SharedFact {
   kind: string;
   entities: string[];
   created_at: string;
+  relation_type?: string;
+  from_entity?: string;
+  to_entity?: string;
 }
 
 interface SharedResponse {
@@ -96,32 +99,10 @@ const LEGEND_CATEGORIES: Array<{ key: string; label: string }> = [
   { key: "system", label: "System" },
 ];
 
-// Named colors for the most common typed relations. Anything not listed here
-// falls back to a stable hash-based color so unknown relation types still get
-// a consistent, distinguishable hue across re-renders.
-const RELATION_COLORS: Record<string, string> = {
-  owns: "#a855f7",
-  uses: "#22d3ee",
-  "depends-on": "#22d3ee",
-  decided: "#f97316",
-  prefers: "#f472b6",
-  "works-on": "#34d399",
-  manages: "#facc15",
-  "part-of": "#60a5fa",
-  related: "#a3a3a3",
-};
-
-const RELATION_FALLBACK_PALETTE = [
-  "#a855f7", "#22d3ee", "#f97316", "#f472b6", "#34d399",
-  "#facc15", "#60a5fa", "#fb7185", "#4ade80", "#c084fc",
-];
-
-function relationColor(type: string): string {
-  if (RELATION_COLORS[type]) return RELATION_COLORS[type];
-  let hash = 0;
-  for (let i = 0; i < type.length; i++) hash = (hash * 31 + type.charCodeAt(i)) >>> 0;
-  return RELATION_FALLBACK_PALETTE[hash % RELATION_FALLBACK_PALETTE.length];
-}
+// Edges fall into two visual buckets: typed relations (any explicit
+// relationship like "owns", "uses", "decided") render in one accent color,
+// while statistical co-occurrence edges stay neutral grey.
+const RELATION_EDGE_COLOR = "#a855f7";
 
 export default function Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -242,10 +223,7 @@ export default function Graph() {
         ctx.strokeStyle = "rgba(250, 250, 250, 0.7)";
         ctx.lineWidth = 2.5;
       } else if (edge.type !== "co-occurrence") {
-        const baseColor = relationColor(edge.type);
-        ctx.strokeStyle = dimmed
-          ? `${baseColor}1f` // ~12% alpha
-          : `${baseColor}cc`; // ~80% alpha
+        ctx.strokeStyle = dimmed ? `${RELATION_EDGE_COLOR}1f` : `${RELATION_EDGE_COLOR}cc`;
         ctx.lineWidth = 2;
       } else {
         const baseAlpha = Math.min(0.15 + edge.weight * 0.05, 0.6);
@@ -259,7 +237,7 @@ export default function Graph() {
       if (edge.type !== "co-occurrence") {
         const mx = (source.x + target.x) / 2;
         const my = (source.y! + target.y!) / 2;
-        ctx.fillStyle = relationColor(edge.type);
+        ctx.fillStyle = RELATION_EDGE_COLOR;
         ctx.font = "9px system-ui";
         ctx.textAlign = "center";
         ctx.fillText(edge.type, mx, my - 4);
@@ -678,17 +656,10 @@ export default function Graph() {
       ).length
     : 0;
 
-  // Distinct typed relations actually present in the graph (sorted, capped) —
-  // drives the per-relation color legend in the header.
-  const relationTypesPresent = data
-    ? Array.from(
-        new Set(
-          data.edges
-            .filter((e) => e.type !== "co-occurrence")
-            .map((e) => e.type),
-        ),
-      ).sort()
-    : [];
+  // True when the loaded graph contains at least one typed relation edge.
+  const hasTypedRelations = data
+    ? data.edges.some((e) => e.type !== "co-occurrence")
+    : false;
 
   // Build a single concise prune note instead of stacking multiple banner lines.
   const pruneNotes: string[] = [];
@@ -789,18 +760,16 @@ export default function Graph() {
         )}
       </div>
 
-      {data && relationTypesPresent.length > 0 && (
+      {data && hasTypedRelations && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 shrink-0">
-          <span className="text-xs uppercase tracking-wide text-zinc-500">Relations</span>
-          {relationTypesPresent.map((type) => (
-            <div key={type} className="flex items-center gap-1.5">
-              <span
-                className="inline-block w-4 h-0.5 rounded"
-                style={{ backgroundColor: relationColor(type) }}
-              />
-              <span className="text-xs text-zinc-400">{type}</span>
-            </div>
-          ))}
+          <span className="text-xs uppercase tracking-wide text-zinc-500">Edges</span>
+          <div className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-4 h-0.5 rounded"
+              style={{ backgroundColor: RELATION_EDGE_COLOR }}
+            />
+            <span className="text-xs text-zinc-400">relationship</span>
+          </div>
           <div className="flex items-center gap-1.5">
             <span className="inline-block w-4 h-0.5 rounded bg-zinc-600" />
             <span className="text-xs text-zinc-500">co-occurrence</span>
@@ -883,32 +852,63 @@ export default function Graph() {
               {!sharedLoading && sharedFacts.length === 0 && (
                 <p className="text-xs text-zinc-500">No shared memories found.</p>
               )}
-              {sharedFacts.map((fact) => (
-                <div
-                  key={fact.id}
-                  onClick={() => navigateRef.current(`/memory/facts/${fact.id}`)}
-                  className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 hover:border-zinc-600 cursor-pointer transition-colors"
-                >
-                  <p className="text-xs text-zinc-300 leading-relaxed">{fact.content}</p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <span
-                      className="text-[10px] px-1.5 py-0.5 rounded capitalize"
-                      style={{
-                        backgroundColor: `${CATEGORY_HEX[fact.category] ?? "#71717a"}22`,
-                        color: CATEGORY_HEX[fact.category] ?? "#71717a",
-                      }}
-                    >
-                      {fact.category}
-                    </span>
-                    {fact.kind !== "fact" && (
-                      <span className="text-[10px] text-zinc-500">{fact.kind}</span>
+              {!sharedLoading && (() => {
+                const relationFacts = sharedFacts.filter((f) => f.kind === "relation");
+                const otherFacts = sharedFacts.filter((f) => f.kind !== "relation");
+                const renderFact = (fact: SharedFact) => (
+                  <div
+                    key={fact.id}
+                    onClick={() => navigateRef.current(`/memory/facts/${fact.id}`)}
+                    className="rounded-lg border border-zinc-800 bg-zinc-950 p-3 hover:border-zinc-600 cursor-pointer transition-colors"
+                  >
+                    {fact.kind === "relation" && fact.relation_type && (
+                      <p className="text-[11px] font-medium text-purple-300 mb-1.5">
+                        {fact.from_entity ?? "?"}
+                        <span className="text-purple-400 mx-1">— {fact.relation_type} →</span>
+                        {fact.to_entity ?? "?"}
+                      </p>
                     )}
-                    <span className="text-[10px] text-zinc-600 ml-auto">
-                      {new Date(fact.created_at).toLocaleDateString()}
-                    </span>
+                    <p className="text-xs text-zinc-300 leading-relaxed">{fact.content}</p>
+                    <div className="flex items-center gap-2 mt-2">
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded capitalize"
+                        style={{
+                          backgroundColor: `${CATEGORY_HEX[fact.category] ?? "#71717a"}22`,
+                          color: CATEGORY_HEX[fact.category] ?? "#71717a",
+                        }}
+                      >
+                        {fact.category}
+                      </span>
+                      {fact.kind !== "fact" && (
+                        <span className="text-[10px] text-zinc-500">{fact.kind}</span>
+                      )}
+                      <span className="text-[10px] text-zinc-600 ml-auto">
+                        {new Date(fact.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+                return (
+                  <>
+                    {relationFacts.length > 0 && (
+                      <>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-purple-400">
+                          Relationship{relationFacts.length > 1 ? "s" : ""}
+                        </p>
+                        {relationFacts.map(renderFact)}
+                      </>
+                    )}
+                    {otherFacts.length > 0 && (
+                      <>
+                        <p className={`text-[11px] font-semibold uppercase tracking-wide text-zinc-500 ${relationFacts.length > 0 ? "pt-2" : ""}`}>
+                          Co-occurrences
+                        </p>
+                        {otherFacts.map(renderFact)}
+                      </>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </div>
         )}
