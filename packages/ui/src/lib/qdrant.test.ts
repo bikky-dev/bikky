@@ -57,6 +57,13 @@ describe("ui/lib/qdrant", () => {
       ]);
     });
 
+    it("maps canonical category filters to legacy stored categories", () => {
+      const f = buildFilter({ category: "engineering" });
+      assert.deepEqual(f.must, [
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
+      ]);
+    });
+
     it("lowercases the entity value", () => {
       const f = buildFilter({ entity: "Bikky" });
       assert.deepEqual(f.must, [{ key: "entities", match: { value: "bikky" } }]);

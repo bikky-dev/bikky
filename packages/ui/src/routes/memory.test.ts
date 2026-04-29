@@ -174,7 +174,10 @@ describe("ui/routes/memory", () => {
       const search = log.calls.find((c) => c.path.endsWith("/points/search"));
       assert.ok(search);
       assert.equal(search!.body.limit, 5);
-      assert.equal(search!.body.filter.must[0].match.value, "engineering");
+      assert.deepEqual(search!.body.filter.must[0], {
+        key: "category",
+        match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] },
+      });
       assert.deepEqual(search!.body.filter.must[1], {
         key: "memory_subtype",
         match: { value: "codebase_map" },
@@ -237,6 +240,21 @@ describe("ui/routes/memory", () => {
       assert.ok(scroll!.body.filter.must.some((cond: any) =>
         cond.key === "memory_subtype" && cond.match?.value === "workstream",
       ));
+    });
+
+    it("uses legacy category aliases for canonical category browse filters", async () => {
+      const log = installMock({
+        qdrantHandler: () => ({ result: { points: [], next_page_offset: null } }),
+      });
+      const app = buildApp();
+
+      await app.fetch(new Request("http://localhost/api/memory/browse?category=engineering"));
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.ok(scroll);
+      assert.deepEqual(scroll!.body.filter.must[0], {
+        key: "category",
+        match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] },
+      });
     });
   });
 
@@ -603,7 +621,7 @@ describe("ui/routes/memory", () => {
           }
           if (c.path.endsWith("/points/count")) {
             const must = c.body?.filter?.must ?? [];
-            if (must.some((cond: any) => cond.key === "category" && cond.match?.value === "engineering")) return { result: { count: 7 } };
+            if (must.some((cond: any) => cond.key === "category" && cond.match?.any?.includes("engineering"))) return { result: { count: 7 } };
             if (must.some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "codebase_map")) return { result: { count: 3 } };
             return { result: { count: 11 } };
           }
@@ -627,11 +645,11 @@ describe("ui/routes/memory", () => {
 
       const countCalls = log.calls.filter((c) => c.path.endsWith("/points/count"));
       const engineeringCount = countCalls.find((c) =>
-        (c.body?.filter?.must ?? []).some((cond: any) => cond.key === "category" && cond.match?.value === "engineering"),
+        (c.body?.filter?.must ?? []).some((cond: any) => cond.key === "category" && cond.match?.any?.includes("engineering")),
       );
       assert.ok(engineeringCount);
       assert.deepEqual(engineeringCount!.body.filter.must, [
-        { key: "category", match: { value: "engineering" } },
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
         { key: "kind", match: { value: "fact" } },
         { key: "source", match: { any: ["system", "daemon"] } },
       ]);

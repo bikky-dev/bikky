@@ -79,9 +79,24 @@ const SOURCE_FILTER_ALIASES: Record<string, string[]> = {
   docs: ["docs"],
 };
 
-const sourceFilterValue = (source: string): { value?: string; any?: string[] } => {
-  const values = SOURCE_FILTER_ALIASES[source] ?? [source];
+const CATEGORY_FILTER_ALIASES: Record<string, string[]> = {
+  engineering: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"],
+  product: ["product", "product_domain", "projects"],
+  human: ["human", "people", "preferences", "team"],
+  system: ["system"],
+};
+
+const aliasedFilterValue = (aliases: Record<string, string[]>, value: string): { value?: string; any?: string[] } => {
+  const values = aliases[value] ?? [value];
   return values.length === 1 ? { value: values[0] } : { any: values };
+};
+
+const sourceFilterValue = (source: string): { value?: string; any?: string[] } => {
+  return aliasedFilterValue(SOURCE_FILTER_ALIASES, source);
+};
+
+const categoryFilterValue = (category: string): { value?: string; any?: string[] } => {
+  return aliasedFilterValue(CATEGORY_FILTER_ALIASES, category);
 };
 
 // --- Client ---
@@ -180,7 +195,7 @@ export function buildFilter(opts: {
   const must: FilterCondition[] = [];
   const must_not: FilterCondition[] = [];
   if (opts.excludeSuperseded === true) must.push({ is_null: { key: "superseded_by" } });
-  if (opts.category) must.push({ key: "category", match: { value: opts.category } });
+  if (opts.category) must.push({ key: "category", match: categoryFilterValue(opts.category) });
   if (opts.domain) must.push({ key: "domain", match: { value: opts.domain } });
   if (opts.kind) must.push({ key: "kind", match: { value: opts.kind } });
   if (opts.memorySubtype) must.push({ key: "memory_subtype", match: { value: opts.memorySubtype } });
