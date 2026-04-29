@@ -434,6 +434,17 @@ describe("mcp/tools handlers", () => {
       assert.match(textOf(result), /No matching facts found/);
     });
 
+    it("returns parseable empty JSON when output_format=json and search has no results", async () => {
+      on("/points/search", () => ({ result: [] }));
+      const result = await invoke("memory_recall", { query: "nothing", output_format: "json" });
+      const parsed = JSON.parse(textOf(result));
+      assert.equal(parsed.query, "nothing");
+      assert.equal(parsed.result_count, 0);
+      assert.equal(parsed.related_count, 0);
+      assert.deepEqual(parsed.results, []);
+      assert.deepEqual(parsed.related, []);
+    });
+
     it("passes category, domain, kind, entity, since, until, and metadata into the Qdrant filter", async () => {
       let searchBody: Record<string, unknown> | null = null;
       on("/points/search", (call) => {
@@ -491,6 +502,81 @@ describe("mcp/tools handlers", () => {
       assert.match(lines[1]!, /\bC\b/);
     });
 
+    it("returns structured JSON with stable fact fields when output_format=json", async () => {
+      const now = new Date().toISOString();
+      on("/points/search", () => ({
+        result: [{
+          id: "fact-json",
+          score: 0.91,
+          payload: {
+            content: "JSON recall should be easy to parse",
+            category: "infrastructure",
+            domain: "work",
+            kind: "fact",
+            source: "user",
+            entities: ["mcp", "recall"],
+            confidence: 0.88,
+            importance: 0.7,
+            reinforcement_count: 2,
+            verification_count: 1,
+            useful_count: 3,
+            not_useful_count: 0,
+            metadata: { project: "bikky" },
+            created_at: now,
+            updated_at: now,
+          },
+        }],
+      }));
+
+      const result = await invoke("memory_recall", { query: "json recall", output_format: "json" });
+      const parsed = JSON.parse(textOf(result));
+      assert.equal(parsed.query, "json recall");
+      assert.equal(parsed.requested_limit, 10);
+      assert.equal(parsed.effective_limit, 10);
+      assert.equal(parsed.limit_clamped, false);
+      assert.equal(parsed.result_count, 1);
+      assert.equal(parsed.related_count, 0);
+      assert.equal(parsed.results.length, 1);
+      assert.equal(parsed.results[0].id, "fact-json");
+      assert.equal(parsed.results[0].content, "JSON recall should be easy to parse");
+      assert.equal(parsed.results[0].category, "infrastructure");
+      assert.deepEqual(parsed.results[0].entities, ["mcp", "recall"]);
+      assert.equal(parsed.results[0].confidence, 0.88);
+      assert.equal(parsed.results[0].score, 0.91);
+      assert.deepEqual(parsed.related, []);
+    });
+
+    it("clamps large recall limits and reports the effective limit in JSON", async () => {
+      const now = new Date().toISOString();
+      on("/points/search", () => {
+        return {
+          result: Array.from({ length: 60 }, (_, i) => ({
+            id: `fact-${i}`,
+            score: 1 - i / 100,
+            payload: {
+              content: `fact ${i}`,
+              category: "infrastructure",
+              entities: [],
+              confidence: 0.9,
+              reinforcement_count: 1,
+              created_at: now,
+            },
+          })),
+        };
+      });
+
+      const result = await invoke("memory_recall", { query: "many", limit: 999, output_format: "json" });
+      const parsed = JSON.parse(textOf(result));
+      const searchBody = callsTo("/points/search")[0]?.body as Record<string, unknown> | undefined;
+      assert.equal(searchBody?.limit, 100);
+      assert.equal(parsed.requested_limit, 999);
+      assert.equal(parsed.effective_limit, 50);
+      assert.equal(parsed.max_limit, 50);
+      assert.equal(parsed.limit_clamped, true);
+      assert.equal(parsed.results.length, 50);
+      assert.equal(parsed.result_count, 50);
+    });
+
     it("appends 1-hop related facts when graph_depth=1", async () => {
       // Primary search returns one fact mentioning entity 'a'.
       on("/points/search", () => ({
@@ -532,6 +618,64 @@ describe("mcp/tools handlers", () => {
       assert.match(text, /primary/);
       assert.match(text, /Related \(1-hop\)/);
       assert.match(text, /b is interesting/);
+    });
+
+    it("separates primary and 1-hop related facts in JSON output", async () => {
+      on("/points/search", () => ({
+        result: [{
+          id: "p1",
+          score: 0.9,
+          payload: {
+            content: "primary",
+            category: "infrastructure",
+            entities: ["a"],
+            confidence: 0.9,
+            reinforcement_count: 1,
+            created_at: new Date().toISOString(),
+          },
+        }],
+      }));
+      on("/points/scroll", (call) => {
+        const body = call.body as { filter: { must: Array<Record<string, unknown>> } };
+        const conditions = body.filter.must;
+        const fromCond = conditions.find((c) => c.key === "from_entity") as { match: { value: string } } | undefined;
+        const toCond = conditions.find((c) => c.key === "to_entity") as { match: { value: string } } | undefined;
+        const entitiesCond = conditions.find((c) => c.key === "entities") as { match: { value: string } } | undefined;
+
+        if (fromCond?.match.value === "a") {
+          return { result: { points: [{
+            id: "rel1",
+            payload: { content: "a -> b", category: "team", entities: ["a", "b"], from_entity: "a", to_entity: "b", relation_type: "uses", reinforcement_count: 1 },
+          }] } };
+        }
+        if (toCond?.match.value === "a") {
+          return { result: { points: [] } };
+        }
+        if (entitiesCond?.match.value === "b") {
+          return { result: { points: [{
+            id: "neighbor",
+            score: 0.7,
+            payload: {
+              content: "b is interesting",
+              category: "infrastructure",
+              entities: ["b"],
+              confidence: 0.8,
+              reinforcement_count: 1,
+              created_at: new Date().toISOString(),
+            },
+          }] } };
+        }
+        return { result: { points: [] } };
+      });
+
+      const result = await invoke("memory_recall", { query: "q", graph_depth: 1, limit: 5, output_format: "json" });
+      const parsed = JSON.parse(textOf(result));
+      assert.equal(parsed.graph_depth, 1);
+      assert.equal(parsed.result_count, 1);
+      assert.equal(parsed.related_count, 1);
+      assert.equal(parsed.results[0].id, "p1");
+      assert.equal(parsed.related[0].id, "neighbor");
+      assert.equal(parsed.related[0].content, "b is interesting");
     });
   });
 

@@ -8,6 +8,43 @@ import crypto from "node:crypto";
 import type { FactPayload, FilterParams, QdrantFilter, QdrantPoint } from "./types.js";
 import { DEFAULT_DOMAIN, getDecayHalfLife, STALENESS_DAYS } from "./taxonomy.js";
 
+export interface StructuredFact {
+  id: string;
+  content: string;
+  category: string;
+  domain?: string;
+  kind?: string;
+  memory_subtype?: string | null;
+  workspace_id?: string;
+  source?: string;
+  entities: string[];
+  confidence?: number;
+  effective_confidence?: number;
+  importance?: number;
+  reinforcement_count?: number;
+  verification_count?: number;
+  useful_count?: number;
+  not_useful_count?: number;
+  redaction?: FactPayload["redaction"];
+  metadata?: FactPayload["metadata"];
+  workstream_key?: string | null;
+  episode_id?: string | null;
+  task_key?: string | null;
+  repo?: string | null;
+  branch?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  last_activity_at?: string;
+  stale: boolean;
+  score?: number;
+  rank?: number;
+  relation?: {
+    from_entity?: string;
+    type?: string;
+    to_entity?: string;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Hashing
 // ---------------------------------------------------------------------------
@@ -242,4 +279,57 @@ export function formatFact(point: QdrantPoint): string {
   if (point.score !== undefined) parts.push(`score: ${point.score.toFixed(3)}`);
   if (point._combinedScore !== undefined) parts.push(`rank: ${point._combinedScore.toFixed(3)}`);
   return parts.join(" | ");
+}
+
+function roundMetric(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  return Math.round(value * 1000) / 1000;
+}
+
+/** Convert a Qdrant point into a stable structured object for agent parsing. */
+export function structuredFact(point: QdrantPoint): StructuredFact {
+  const p = point.payload;
+  const confidence = typeof p.confidence === "number" ? p.confidence : undefined;
+  const effectiveConfidence = confidence === undefined ? undefined : computeEffectiveConfidence(p);
+  const relation =
+    p.from_entity || p.relation_type || p.to_entity
+      ? {
+        ...(p.from_entity ? { from_entity: p.from_entity } : {}),
+        ...(p.relation_type ? { type: p.relation_type } : {}),
+        ...(p.to_entity ? { to_entity: p.to_entity } : {}),
+      }
+      : undefined;
+
+  return {
+    id: point.id,
+    content: p.content,
+    category: p.category,
+    ...(p.domain ? { domain: p.domain } : {}),
+    ...(p.kind ? { kind: p.kind } : {}),
+    ...(p.memory_subtype ? { memory_subtype: p.memory_subtype } : {}),
+    ...(p.workspace_id ? { workspace_id: p.workspace_id } : {}),
+    ...(p.source ? { source: p.source } : {}),
+    entities: p.entities ?? [],
+    ...(confidence !== undefined ? { confidence } : {}),
+    ...(effectiveConfidence !== undefined ? { effective_confidence: effectiveConfidence } : {}),
+    ...(p.importance !== undefined ? { importance: p.importance } : {}),
+    ...(p.reinforcement_count !== undefined ? { reinforcement_count: p.reinforcement_count } : {}),
+    ...(p.verification_count !== undefined ? { verification_count: p.verification_count } : {}),
+    ...(p.useful_count !== undefined ? { useful_count: p.useful_count } : {}),
+    ...(p.not_useful_count !== undefined ? { not_useful_count: p.not_useful_count } : {}),
+    ...(p.redaction ? { redaction: p.redaction } : {}),
+    ...(p.metadata && Object.keys(p.metadata).length > 0 ? { metadata: p.metadata } : {}),
+    ...(p.workstream_key ? { workstream_key: p.workstream_key } : {}),
+    ...(p.episode_id ? { episode_id: p.episode_id } : {}),
+    ...(p.task_key ? { task_key: p.task_key } : {}),
+    ...(p.repo ? { repo: p.repo } : {}),
+    ...(p.branch ? { branch: p.branch } : {}),
+    ...(p.created_at ? { created_at: p.created_at } : {}),
+    ...(p.updated_at ? { updated_at: p.updated_at } : {}),
+    ...(lastActivityDate(p) ? { last_activity_at: lastActivityDate(p) } : {}),
+    stale: isStale(p),
+    ...(roundMetric(point.score) !== undefined ? { score: roundMetric(point.score) } : {}),
+    ...(roundMetric(point._combinedScore) !== undefined ? { rank: roundMetric(point._combinedScore) } : {}),
+    ...(relation ? { relation } : {}),
+  };
 }

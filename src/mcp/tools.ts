@@ -39,6 +39,7 @@ import {
   computeCombinedScore,
   buildFilter,
   formatFact,
+  structuredFact,
   MEMORY_RECALL_EXCLUDED_KINDS,
 } from "./helpers.js";
 import {
@@ -75,6 +76,8 @@ import {
 // ---------------------------------------------------------------------------
 
 const NUDGE_INTERVAL_MS = 10 * 60 * 1000;
+const MEMORY_RECALL_DEFAULT_LIMIT = 10;
+const MEMORY_RECALL_MAX_LIMIT = 50;
 let lastStoreTime = Date.now();
 let heartbeatCount = 0;
 
@@ -168,10 +171,22 @@ function buildMemoryNudge(): string | null {
     "If yes, call memory_store now so future sessions inherit the knowledge.";
 }
 
+function clampRecallLimit(limit: number | undefined): number {
+  const rawLimit = limit ?? MEMORY_RECALL_DEFAULT_LIMIT;
+  const integerLimit = Math.trunc(rawLimit);
+  if (!Number.isFinite(integerLimit)) return MEMORY_RECALL_DEFAULT_LIMIT;
+  return Math.min(Math.max(integerLimit, 1), MEMORY_RECALL_MAX_LIMIT);
+}
+
+interface GraphTraversalResult {
+  points: QdrantPoint[];
+  error?: string;
+}
+
 /**
  * Entity-graph traversal for memory_recall.
  */
-async function graphTraversal(primaryResults: QdrantPoint[], limit: number, scope: WorkspaceScope): Promise<string[]> {
+async function graphTraversal(primaryResults: QdrantPoint[], limit: number, scope: WorkspaceScope): Promise<GraphTraversalResult> {
   try {
     const primaryEntities = new Set<string>();
     const primaryIds = new Set<string>();
@@ -182,7 +197,7 @@ async function graphTraversal(primaryResults: QdrantPoint[], limit: number, scop
       }
     }
 
-    if (primaryEntities.size === 0) return [];
+    if (primaryEntities.size === 0) return { points: [] };
 
     const relatedEntities = new Set<string>();
     for (const entity of primaryEntities) {
@@ -204,7 +219,7 @@ async function graphTraversal(primaryResults: QdrantPoint[], limit: number, scop
     }
 
     for (const e of primaryEntities) relatedEntities.delete(e);
-    if (relatedEntities.size === 0) return [];
+    if (relatedEntities.size === 0) return { points: [] };
 
     const relatedFacts: QdrantPoint[] = [];
     const maxPerEntity = Math.max(2, Math.floor(limit / relatedEntities.size));
@@ -222,11 +237,9 @@ async function graphTraversal(primaryResults: QdrantPoint[], limit: number, scop
       if (relatedFacts.length >= limit) break;
     }
 
-    return relatedFacts
-      .slice(0, Math.ceil(limit / 2))
-      .map((r) => formatFact(r));
+    return { points: relatedFacts.slice(0, Math.ceil(limit / 2)) };
   } catch (e) {
-    return [`(graph traversal failed: ${e instanceof Error ? e.message : String(e)})`];
+    return { points: [], error: e instanceof Error ? e.message : String(e) };
   }
 }
 
@@ -444,7 +457,7 @@ export function registerTools(mcp: McpServer): void {
     [
       "Persist one atomic fact to long-term memory.",
       "Call this whenever you learn something a future session would need: a service detail, a decision rationale, a workaround, a user preference, an ownership fact, a task-resume pointer. One fact per call — split compound observations into separate calls.",
-      "Dedup is automatic (content hash + vector similarity), so you do NOT need to recall first. The tool returns one of: inserted (new fact), reinforced (exact or near-duplicate found — counters bumped), or — if there are similar-but-different facts — a list of potential conflicts so you can decide whether to use 'supersedes'.",
+      "Dedup is automatic (content hash + vector similarity), so you do NOT need to recall first for deduplication. Recall first only when you intentionally need broader context to decide whether a new fact supersedes an older one. The tool returns one of: inserted (new fact), reinforced (exact or near-duplicate found — counters bumped), or — if there are similar-but-different facts — a list of potential conflicts so you can decide whether to use 'supersedes'.",
       "To create a typed edge between two entities at the same time, set the optional 'relation' field — no separate tool call needed.",
       "Do NOT use for ephemeral state (current cursor, in-flight todo). Use the harness task folder instead.",
     ].join(" "),
@@ -771,9 +784,10 @@ export function registerTools(mcp: McpServer): void {
       "Three main uses:",
       "  1. Session-start briefing — broad query like 'session briefing: user preferences, active projects, recent decisions'.",
       "  2. Per-prompt contextual recall — focused query derived from what the user just asked.",
-      "  3. Pre-store conflict check — recall similar facts before storing, so you can use 'supersedes' if the new fact replaces an older one.",
+      "  3. Conflict/replacement check — recall similar facts when you suspect new information may supersede an older fact. Deduplication during memory_store is automatic.",
       "Combine the natural-language query with structured filters (category, domain, entity, date range, metadata) for tighter results.",
       "If you have a known entity name and want everything about it, prefer memory_entity. For 'what does X own/use?' style questions, prefer memory_relations.",
+      `By default output is human-readable text. Use output_format=json for machine-parseable results with separate results and related arrays. Default limit is ${MEMORY_RECALL_DEFAULT_LIMIT}; maximum effective limit is ${MEMORY_RECALL_MAX_LIMIT}.`,
     ].join("\n"),
     {
       query: z.string().describe(
@@ -810,9 +824,14 @@ export function registerTools(mcp: McpServer): void {
       ),
       since: z.string().optional().describe("Only facts created on or after this ISO 8601 date or datetime."),
       until: z.string().optional().describe("Only facts created on or before this ISO 8601 date or datetime."),
-      limit: z.number().optional().default(10).describe("Max results to return (default 10)."),
+      limit: z.number().optional().default(MEMORY_RECALL_DEFAULT_LIMIT).describe(
+        `Max primary results to return (default ${MEMORY_RECALL_DEFAULT_LIMIT}, maximum ${MEMORY_RECALL_MAX_LIMIT}). Values above the maximum are clamped.`,
+      ),
       graph_depth: z.number().optional().default(0).describe(
-        "Entity-graph traversal depth. 0 = vector search only (fast, default). 1 = also surface 1-hop entity-related facts (slower; use when the user asks 'what's connected to X?').",
+        "Entity-graph traversal depth. 0 = vector search only (fast, default). 1 = also surface up to ceil(limit / 2) extra 1-hop entity-related facts (slower; use when the user asks 'what's connected to X?'). In JSON output these are returned separately as related.",
+      ),
+      output_format: z.enum(["text", "json"]).optional().default("text").describe(
+        "Response format. text = backward-compatible human-readable lines (default). json = parseable object with query, limit metadata, results, related, counts, and optional nudge.",
       ),
       metadata_filter: z.record(z.string(), z.string()).optional().describe(
         "Exact-match filter on the metadata map stored with each fact. All key/value pairs must match (AND logic).",
@@ -837,11 +856,13 @@ export function registerTools(mcp: McpServer): void {
       until,
       limit,
       graph_depth,
+      output_format,
       metadata_filter,
     }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
-      const requestedLimit = limit ?? 10;
+      const requestedLimit = limit ?? MEMORY_RECALL_DEFAULT_LIMIT;
+      const effectiveLimit = clampRecallLimit(limit);
       const scope = resolveScope(workspace_id, include_legacy_workspace);
       const redactedQuery = redactStorageText(query);
       const vector = await embed(redactedQuery.text);
@@ -874,10 +895,26 @@ export function registerTools(mcp: McpServer): void {
         metadata: metadata_filter,
         excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS,
       });
-      const results = await qdrantSearch(vector, filter, requestedLimit * 2);
+      const results = await qdrantSearch(vector, filter, effectiveLimit * 2);
 
       if (!results.result?.length) {
         const nudge = buildMemoryNudge();
+        if (output_format === "json") {
+          return { content: [{ type: "text", text: JSON.stringify({
+            query: redactedQuery.text,
+            requested_limit: requestedLimit,
+            effective_limit: effectiveLimit,
+            max_limit: MEMORY_RECALL_MAX_LIMIT,
+            limit_clamped: effectiveLimit !== requestedLimit,
+            graph_depth: graph_depth ?? 0,
+            result_count: 0,
+            related_count: 0,
+            results: [],
+            related: [],
+            ...(nudge ? { nudge } : {}),
+            ...(redactedQuery.redacted ? { query_redaction: redactedQuery } : {}),
+          }, null, 2) }] };
+        }
         const text = nudge ? `No matching facts found.\n\n${nudge}` : "No matching facts found.";
         return { content: [{ type: "text", text }] };
       }
@@ -885,20 +922,40 @@ export function registerTools(mcp: McpServer): void {
       const ranked = results.result
         .map((r) => ({ ...r, _combinedScore: computeCombinedScore(r) }))
         .sort((a, b) => b._combinedScore - a._combinedScore)
-        .slice(0, requestedLimit);
+        .slice(0, effectiveLimit);
 
       const lines = ranked.map((r) => formatFact(r));
+      let related: GraphTraversalResult = { points: [] };
 
       if ((graph_depth ?? 0) >= 1) {
-        const relatedLines = await graphTraversal(ranked, requestedLimit, scope);
-        if (relatedLines.length > 0) {
+        related = await graphTraversal(ranked, effectiveLimit, scope);
+        if (related.points.length > 0) {
           lines.push("", "── Related (1-hop) ──");
-          lines.push(...relatedLines);
+          lines.push(...related.points.map((r) => formatFact(r)));
+        } else if (related.error) {
+          lines.push("", `(graph traversal failed: ${related.error})`);
         }
       }
 
       const nudge = buildMemoryNudge();
       if (nudge) lines.push("", nudge);
+      if (output_format === "json") {
+        return { content: [{ type: "text", text: JSON.stringify({
+          query: redactedQuery.text,
+          requested_limit: requestedLimit,
+          effective_limit: effectiveLimit,
+          max_limit: MEMORY_RECALL_MAX_LIMIT,
+          limit_clamped: effectiveLimit !== requestedLimit,
+          graph_depth: graph_depth ?? 0,
+          result_count: ranked.length,
+          related_count: related.points.length,
+          results: ranked.map((r) => structuredFact(r)),
+          related: related.points.map((r) => structuredFact(r)),
+          ...(related.error ? { graph_error: related.error } : {}),
+          ...(nudge ? { nudge } : {}),
+          ...(redactedQuery.redacted ? { query_redaction: redactedQuery } : {}),
+        }, null, 2) }] };
+      }
       return { content: [{ type: "text", text: lines.join("\n") }] };
     },
   );
