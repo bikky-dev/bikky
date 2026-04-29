@@ -580,10 +580,13 @@ memoryRoutes.get("/graph", async (c) => {
   return c.json(payload);
 });
 
-// GET /api/memory/stats?refresh=
+// GET /api/memory/stats?kind=...&source=...&refresh=
 memoryRoutes.get("/stats", async (c) => {
   const refresh = c.req.query("refresh") === "true";
-  const cacheKey = "stats";
+  const kind = c.req.query("kind") || undefined;
+  const source = c.req.query("source") || undefined;
+  const statsFilter = { kind, source };
+  const cacheKey = `stats:kind=${kind ?? ""}:source=${source ?? ""}`;
   if (!refresh) {
     const hit = cacheGet<unknown>(cacheKey);
     if (hit) return c.json(hit);
@@ -599,10 +602,10 @@ memoryRoutes.get("/stats", async (c) => {
   // All counts in one Promise.all instead of several sequential awaits.
   const [info, catCounts, kindCounts, subtypeCounts, allCount] = await Promise.all([
     qdrant.collectionInfo(),
-    Promise.all(CATEGORY_VALUES.map(async (cat) => [cat, await safeCount(buildFilter({ category: cat }))] as const)),
-    Promise.all(KIND_VALUES.map(async (k) => [k, await safeCount(buildFilter({ kind: k }))] as const)),
-    Promise.all(MEMORY_SUBTYPE_VALUES.map(async (subtype) => [subtype, await safeCount(buildFilter({ memorySubtype: subtype }))] as const)),
-    safeCount({ must: [] }),
+    Promise.all(CATEGORY_VALUES.map(async (cat) => [cat, await safeCount(buildFilter({ ...statsFilter, category: cat }))] as const)),
+    Promise.all(KIND_VALUES.map(async (k) => [k, await safeCount(buildFilter({ source, kind: k }))] as const)),
+    Promise.all(MEMORY_SUBTYPE_VALUES.map(async (subtype) => [subtype, await safeCount(buildFilter({ ...statsFilter, memorySubtype: subtype }))] as const)),
+    safeCount(buildFilter(statsFilter)),
   ]);
 
   const payload = {

@@ -594,5 +594,57 @@ describe("ui/routes/memory", () => {
       assert.equal(body.byKind.fact, 10);
       assert.equal(body.bySubtype.codebase_map, 10);
     });
+
+    it("scopes category and subtype counts to source and kind filters", async () => {
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path === "/collections/test") {
+            return { result: { points_count: 100, vectors_count: 100 } };
+          }
+          if (c.path.endsWith("/points/count")) {
+            const must = c.body?.filter?.must ?? [];
+            if (must.some((cond: any) => cond.key === "category" && cond.match?.value === "engineering")) return { result: { count: 7 } };
+            if (must.some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "codebase_map")) return { result: { count: 3 } };
+            return { result: { count: 11 } };
+          }
+          return { result: {} };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/stats?kind=fact&source=system"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        active: number;
+        byCategory: Record<string, number>;
+        byKind: Record<string, number>;
+        bySubtype: Record<string, number>;
+      };
+      assert.equal(body.active, 11);
+      assert.equal(body.byCategory.engineering, 7);
+      assert.equal(body.bySubtype.codebase_map, 3);
+      assert.equal(body.byKind.fact, 11);
+
+      const countCalls = log.calls.filter((c) => c.path.endsWith("/points/count"));
+      const engineeringCount = countCalls.find((c) =>
+        (c.body?.filter?.must ?? []).some((cond: any) => cond.key === "category" && cond.match?.value === "engineering"),
+      );
+      assert.ok(engineeringCount);
+      assert.deepEqual(engineeringCount!.body.filter.must, [
+        { key: "category", match: { value: "engineering" } },
+        { key: "kind", match: { value: "fact" } },
+        { key: "source", match: { any: ["system", "daemon"] } },
+      ]);
+
+      const subtypeCount = countCalls.find((c) =>
+        (c.body?.filter?.must ?? []).some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "codebase_map"),
+      );
+      assert.ok(subtypeCount);
+      assert.deepEqual(subtypeCount!.body.filter.must, [
+        { key: "kind", match: { value: "fact" } },
+        { key: "memory_subtype", match: { value: "codebase_map" } },
+        { key: "source", match: { any: ["system", "daemon"] } },
+      ]);
+    });
   });
 });

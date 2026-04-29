@@ -91,10 +91,16 @@ export default function Memory() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState("");
 
-  // Load stats on mount (shared cache → no double fetch with Dashboard)
+  // Scope category/subtype counts to advanced metadata filters.
   useEffect(() => {
-    getStats().then(setStats).catch(() => {});
-  }, []);
+    let cancelled = false;
+    getStats({ kind, source })
+      .then((nextStats) => {
+        if (!cancelled) setStats(nextStats);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [kind, source]);
 
   const buildParams = useCallback(() => {
     const p: Record<string, string> = {};
