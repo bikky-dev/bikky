@@ -96,6 +96,33 @@ const LEGEND_CATEGORIES: Array<{ key: string; label: string }> = [
   { key: "system", label: "System" },
 ];
 
+// Named colors for the most common typed relations. Anything not listed here
+// falls back to a stable hash-based color so unknown relation types still get
+// a consistent, distinguishable hue across re-renders.
+const RELATION_COLORS: Record<string, string> = {
+  owns: "#a855f7",
+  uses: "#22d3ee",
+  "depends-on": "#22d3ee",
+  decided: "#f97316",
+  prefers: "#f472b6",
+  "works-on": "#34d399",
+  manages: "#facc15",
+  "part-of": "#60a5fa",
+  related: "#a3a3a3",
+};
+
+const RELATION_FALLBACK_PALETTE = [
+  "#a855f7", "#22d3ee", "#f97316", "#f472b6", "#34d399",
+  "#facc15", "#60a5fa", "#fb7185", "#4ade80", "#c084fc",
+];
+
+function relationColor(type: string): string {
+  if (RELATION_COLORS[type]) return RELATION_COLORS[type];
+  let hash = 0;
+  for (let i = 0; i < type.length; i++) hash = (hash * 31 + type.charCodeAt(i)) >>> 0;
+  return RELATION_FALLBACK_PALETTE[hash % RELATION_FALLBACK_PALETTE.length];
+}
+
 export default function Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -215,7 +242,10 @@ export default function Graph() {
         ctx.strokeStyle = "rgba(250, 250, 250, 0.7)";
         ctx.lineWidth = 2.5;
       } else if (edge.type !== "co-occurrence") {
-        ctx.strokeStyle = dimmed ? "rgba(168, 85, 247, 0.1)" : "rgba(168, 85, 247, 0.5)";
+        const baseColor = relationColor(edge.type);
+        ctx.strokeStyle = dimmed
+          ? `${baseColor}1f` // ~12% alpha
+          : `${baseColor}cc`; // ~80% alpha
         ctx.lineWidth = 2;
       } else {
         const baseAlpha = Math.min(0.15 + edge.weight * 0.05, 0.6);
@@ -229,7 +259,7 @@ export default function Graph() {
       if (edge.type !== "co-occurrence") {
         const mx = (source.x + target.x) / 2;
         const my = (source.y! + target.y!) / 2;
-        ctx.fillStyle = "rgba(168, 85, 247, 0.8)";
+        ctx.fillStyle = relationColor(edge.type);
         ctx.font = "9px system-ui";
         ctx.textAlign = "center";
         ctx.fillText(edge.type, mx, my - 4);
@@ -648,6 +678,18 @@ export default function Graph() {
       ).length
     : 0;
 
+  // Distinct typed relations actually present in the graph (sorted, capped) —
+  // drives the per-relation color legend in the header.
+  const relationTypesPresent = data
+    ? Array.from(
+        new Set(
+          data.edges
+            .filter((e) => e.type !== "co-occurrence")
+            .map((e) => e.type),
+        ),
+      ).sort()
+    : [];
+
   // Build a single concise prune note instead of stacking multiple banner lines.
   const pruneNotes: string[] = [];
   if (data?.truncated) {
@@ -746,6 +788,25 @@ export default function Graph() {
           </div>
         )}
       </div>
+
+      {data && relationTypesPresent.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 shrink-0">
+          <span className="text-xs uppercase tracking-wide text-zinc-500">Relations</span>
+          {relationTypesPresent.map((type) => (
+            <div key={type} className="flex items-center gap-1.5">
+              <span
+                className="inline-block w-4 h-0.5 rounded"
+                style={{ backgroundColor: relationColor(type) }}
+              />
+              <span className="text-xs text-zinc-400">{type}</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block w-4 h-0.5 rounded bg-zinc-600" />
+            <span className="text-xs text-zinc-500">co-occurrence</span>
+          </div>
+        </div>
+      )}
 
       {/* Tooltip */}
       {hoveredNode && (
