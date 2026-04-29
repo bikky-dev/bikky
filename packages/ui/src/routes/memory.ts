@@ -60,13 +60,6 @@ function parseLimit(raw: string | undefined, def: number, max: number): number {
   return Math.min(n, max);
 }
 
-function parseTopN(raw: string | undefined, max: number): number | null {
-  if (!raw) return null;
-  const n = parseInt(raw, 10);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.min(n, max);
-}
-
 function parseList(raw: string | undefined): string[] {
   if (!raw) return [];
   return raw.split(",").map((value) => value.trim()).filter(Boolean);
@@ -99,6 +92,13 @@ function cacheSet<T>(key: string, value: T, ttlMs: number): void {
 
 const STATS_TTL_MS = 30_000;
 const GRAPH_TTL_MS = 60_000;
+const GRAPH_DEFAULT_MAX_NODES = 75;
+const GRAPH_MAX_NODES_LIMIT = 500;
+const GRAPH_DEFAULT_MAX_EDGES = 300;
+const GRAPH_MAX_EDGES_LIMIT = 2_000;
+const GRAPH_DEFAULT_MIN_WEIGHT = 1;
+const GRAPH_MAX_MIN_WEIGHT = 20;
+const GRAPH_MAX_FACT_ENTITIES_FOR_CO_OCCURRENCE = 20;
 const KEYWORD_SEARCH_PAGE_SIZE = 100;
 const KEYWORD_SEARCH_SCAN_LIMIT = 5_000;
 
@@ -567,13 +567,15 @@ memoryRoutes.get("/relations", async (c) => {
   });
 });
 
-// GET /api/memory/graph?limit=&topN=&refresh=
+// GET /api/memory/graph?limit=&maxNodes=&maxEdges=&minWeight=&refresh=
 memoryRoutes.get("/graph", async (c) => {
   const limit = parseLimit(c.req.query("limit"), 2000, 5000);
-  const topN = parseTopN(c.req.query("topN"), 1000);
+  const maxNodes = parseLimit(c.req.query("maxNodes") ?? c.req.query("topN"), GRAPH_DEFAULT_MAX_NODES, GRAPH_MAX_NODES_LIMIT);
+  const maxEdges = parseLimit(c.req.query("maxEdges"), GRAPH_DEFAULT_MAX_EDGES, GRAPH_MAX_EDGES_LIMIT);
+  const minWeight = parseLimit(c.req.query("minWeight"), GRAPH_DEFAULT_MIN_WEIGHT, GRAPH_MAX_MIN_WEIGHT);
   const refresh = c.req.query("refresh") === "true";
 
-  const cacheKey = `graph:limit=${limit}:topN=${topN ?? ""}`;
+  const cacheKey = `graph:limit=${limit}:maxNodes=${maxNodes}:maxEdges=${maxEdges}:minWeight=${minWeight}`;
   if (!refresh) {
     const hit = cacheGet<unknown>(cacheKey);
     if (hit) return c.json(hit);
@@ -594,34 +596,52 @@ memoryRoutes.get("/graph", async (c) => {
 
   const entityStats = new Map<string, { factCount: number; categories: Set<string> }>();
   const edgeMap = new Map<string, { source: string; target: string; weight: number; type: string }>();
+  let denseFactsSkipped = 0;
+  let coOccurrenceEdgesSkipped = 0;
+
+  const addEntityStat = (entity: string | undefined, category?: string) => {
+    if (!entity) return;
+    const stat = entityStats.get(entity) ?? { factCount: 0, categories: new Set() };
+    stat.factCount++;
+    if (category) stat.categories.add(category);
+    entityStats.set(entity, stat);
+  };
 
   for (const fact of allFacts) {
-    const entities = fact.payload.entities ?? [];
+    const entities = Array.from(new Set(fact.payload.entities ?? []));
+    const entitySet = new Set(entities);
     const category = fact.payload.category;
 
     for (const e of entities) {
-      const stat = entityStats.get(e) ?? { factCount: 0, categories: new Set() };
-      stat.factCount++;
-      if (category) stat.categories.add(category);
-      entityStats.set(e, stat);
+      addEntityStat(e, category);
     }
 
-    for (let i = 0; i < entities.length; i++) {
-      for (let j = i + 1; j < entities.length; j++) {
-        const [a, b] = [entities[i]!, entities[j]!].sort();
-        const key = `${a}||${b}`;
-        const existing = edgeMap.get(key);
-        if (existing) { existing.weight++; }
-        else { edgeMap.set(key, { source: a, target: b, weight: 1, type: "co-occurrence" }); }
+    if (entities.length > GRAPH_MAX_FACT_ENTITIES_FOR_CO_OCCURRENCE) {
+      denseFactsSkipped++;
+      coOccurrenceEdgesSkipped += (entities.length * (entities.length - 1)) / 2;
+    } else {
+      for (let i = 0; i < entities.length; i++) {
+        for (let j = i + 1; j < entities.length; j++) {
+          const [a, b] = [entities[i]!, entities[j]!].sort();
+          const key = `${a}||${b}`;
+          const existing = edgeMap.get(key);
+          if (existing) { existing.weight++; }
+          else { edgeMap.set(key, { source: a, target: b, weight: 1, type: "co-occurrence" }); }
+        }
       }
     }
 
     if (fact.payload.from_entity && fact.payload.to_entity && fact.payload.relation_type) {
       const from = fact.payload.from_entity;
       const to = fact.payload.to_entity;
+      if (!entitySet.has(from)) addEntityStat(from, category);
+      if (!entitySet.has(to)) addEntityStat(to, category);
       const [a, b] = [from, to].sort();
       const key = `rel:${a}||${b}||${fact.payload.relation_type}`;
-      if (!edgeMap.has(key)) {
+      const existing = edgeMap.get(key);
+      if (existing) {
+        existing.weight += 2;
+      } else {
         edgeMap.set(key, { source: from, target: to, weight: 2, type: fact.payload.relation_type });
       }
     }
@@ -633,16 +653,24 @@ memoryRoutes.get("/graph", async (c) => {
     primaryCategory: Array.from(stat.categories).sort((a, b) => a.localeCompare(b))[0] ?? "engineering",
   }));
 
-  let edges = Array.from(edgeMap.values());
   const totalNodes = nodes.length;
-  let nodesPruned = 0;
+  nodes = [...nodes].sort((a, b) => b.factCount - a.factCount || a.id.localeCompare(b.id)).slice(0, maxNodes);
+  const nodesPruned = Math.max(totalNodes - nodes.length, 0);
+  const keep = new Set(nodes.map((n) => n.id));
 
-  if (topN !== null && nodes.length > topN) {
-    nodes = [...nodes].sort((a, b) => b.factCount - a.factCount).slice(0, topN);
-    const keep = new Set(nodes.map((n) => n.id));
-    edges = edges.filter((e) => keep.has(e.source) && keep.has(e.target));
-    nodesPruned = totalNodes - nodes.length;
-  }
+  const nodeScopedEdges = Array.from(edgeMap.values()).filter((e) => keep.has(e.source) && keep.has(e.target));
+  const weightScopedEdges = nodeScopedEdges.filter((e) => e.type !== "co-occurrence" || e.weight >= minWeight);
+  const totalEdges = weightScopedEdges.length;
+  const edgesFilteredByWeight = nodeScopedEdges.length - weightScopedEdges.length;
+  const edges = [...weightScopedEdges]
+    .sort((a, b) => {
+      const aTyped = a.type !== "co-occurrence";
+      const bTyped = b.type !== "co-occurrence";
+      if (aTyped !== bTyped) return aTyped ? -1 : 1;
+      return b.weight - a.weight || a.source.localeCompare(b.source) || a.target.localeCompare(b.target);
+    })
+    .slice(0, maxEdges);
+  const edgesPruned = Math.max(totalEdges - edges.length, 0);
 
   const payload = {
     nodes,
@@ -651,9 +679,17 @@ memoryRoutes.get("/graph", async (c) => {
     factsScanned,
     truncated,
     limit,
-    topN,
+    topN: maxNodes,
+    maxNodes,
+    maxEdges,
+    minWeight,
     nodesPruned,
     totalNodes,
+    edgesPruned,
+    totalEdges,
+    edgesFilteredByWeight,
+    denseFactsSkipped,
+    coOccurrenceEdgesSkipped,
   };
   cacheSet(cacheKey, payload, GRAPH_TTL_MS);
   return c.json(payload);

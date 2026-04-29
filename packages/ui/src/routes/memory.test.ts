@@ -642,6 +642,74 @@ describe("ui/routes/memory", () => {
       const b = body.nodes.find((n) => n.id === "b");
       assert.equal(b.factCount, 2);
     });
+
+    it("enforces node and edge budgets before returning graph data", async () => {
+      installMock({
+        qdrantHandler: () => ({
+          result: {
+            points: [
+              sampleFact({ entities: ["a", "b"], category: "engineering" }),
+              sampleFact({ entities: ["a", "c"], category: "product" }),
+              sampleFact({ entities: ["a", "d"], category: "human" }),
+            ],
+            next_page_offset: null,
+          },
+        }),
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/graph?maxNodes=4&maxEdges=1&minWeight=1&refresh=true"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as { nodes: any[]; edges: any[]; totalEdges: number; edgesPruned: number; maxNodes: number; maxEdges: number };
+      assert.equal(body.maxNodes, 4);
+      assert.equal(body.maxEdges, 1);
+      assert.equal(body.nodes.length, 4);
+      assert.equal(body.edges.length, 1);
+      assert.equal(body.totalEdges, 3);
+      assert.equal(body.edgesPruned, 2);
+      assert.equal(body.edges[0].source, "a");
+    });
+
+    it("skips dense co-occurrence expansion while retaining entities", async () => {
+      const denseEntities = Array.from({ length: 25 }, (_, i) => `entity-${i}`);
+      installMock({
+        qdrantHandler: () => ({
+          result: {
+            points: [sampleFact({ entities: denseEntities, category: "engineering" })],
+            next_page_offset: null,
+          },
+        }),
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/graph?maxNodes=30&maxEdges=10&minWeight=1&refresh=true"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as { nodes: any[]; edges: any[]; denseFactsSkipped: number; coOccurrenceEdgesSkipped: number };
+      assert.equal(body.nodes.length, 25);
+      assert.equal(body.edges.length, 0);
+      assert.equal(body.denseFactsSkipped, 1);
+      assert.equal(body.coOccurrenceEdgesSkipped, 300);
+    });
+
+    it("includes typed relation endpoints even when they are not listed as entities", async () => {
+      installMock({
+        qdrantHandler: () => ({
+          result: {
+            points: [sampleFact({ entities: [], from_entity: "alice", to_entity: "bob", relation_type: "owns" })],
+            next_page_offset: null,
+          },
+        }),
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/graph?maxNodes=10&maxEdges=10&minWeight=1&refresh=true"));
+      assert.equal(res.status, 200);
+      const body = await res.json() as { nodes: any[]; edges: any[] };
+      assert.ok(body.nodes.some((n) => n.id === "alice"));
+      assert.ok(body.nodes.some((n) => n.id === "bob"));
+      assert.equal(body.edges.length, 1);
+      assert.equal(body.edges[0].type, "owns");
+    });
   });
 
   describe("GET /stats", () => {

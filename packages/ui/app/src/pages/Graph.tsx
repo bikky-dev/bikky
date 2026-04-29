@@ -35,8 +35,16 @@ interface GraphData {
   truncated?: boolean;
   limit?: number;
   topN?: number | null;
+  maxNodes?: number;
+  maxEdges?: number;
+  minWeight?: number;
   nodesPruned?: number;
   totalNodes?: number;
+  edgesPruned?: number;
+  totalEdges?: number;
+  edgesFilteredByWeight?: number;
+  denseFactsSkipped?: number;
+  coOccurrenceEdgesSkipped?: number;
 }
 
 interface SharedFact {
@@ -73,6 +81,11 @@ const CATEGORY_HEX: Record<string, string> = {
   people: "#ec4899",
   team: "#ec4899",
 };
+
+const GRAPH_MAX_NODES = 75;
+const GRAPH_MAX_EDGES = 300;
+const GRAPH_SERVER_MIN_WEIGHT = 1;
+const MAX_SIMULATION_TICKS = 300;
 
 export default function Graph() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -124,9 +137,8 @@ export default function Graph() {
   });
 
   useEffect(() => {
-    // Default cap at top-200 nodes server-side to keep d3-force responsive on
-    // large corpora. Banner below surfaces if the server pruned anything.
-    apiFetch<GraphData>("/api/memory/graph?topN=200")
+    // Server-side graph budgets keep d3-force responsive on large memory stores.
+    apiFetch<GraphData>(`/api/memory/graph?maxNodes=${GRAPH_MAX_NODES}&maxEdges=${GRAPH_MAX_EDGES}&minWeight=${GRAPH_SERVER_MIN_WEIGHT}`)
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -250,16 +262,8 @@ export default function Graph() {
       (e) => e.type !== "co-occurrence" || e.weight >= minWeight,
     );
 
-    // Only include nodes that have at least one visible edge
-    const connectedIds = new Set<string>();
-    for (const e of filteredEdges) {
-      connectedIds.add(typeof e.source === "string" ? e.source : e.source.id);
-      connectedIds.add(typeof e.target === "string" ? e.target : e.target.id);
-    }
-    const filteredNodes = data.nodes.filter((n) => connectedIds.has(n.id));
-
     // Clone for simulation (d3 mutates these)
-    const nodes: GraphNode[] = filteredNodes.map((n) => ({ ...n }));
+    const nodes: GraphNode[] = data.nodes.map((n) => ({ ...n }));
     const edges: GraphEdge[] = filteredEdges.map((e) => ({
       ...e,
       source: typeof e.source === "string" ? e.source : e.source.id,
@@ -272,6 +276,7 @@ export default function Graph() {
     // Center transform
     transformRef.current = { x: w / 2, y: h / 2, k: 1 };
 
+    let tickCount = 0;
     const sim = forceSimulation(nodes)
       .force(
         "link",
@@ -283,7 +288,11 @@ export default function Graph() {
       .force("charge", forceManyBody().strength(-120))
       .force("center", forceCenter(0, 0))
       .force("collide", forceCollide<GraphNode>().radius((d) => Math.sqrt(d.factCount) * 3 + 15))
-      .on("tick", draw);
+      .on("tick", () => {
+        draw();
+        tickCount++;
+        if (tickCount >= MAX_SIMULATION_TICKS) sim.stop();
+      });
 
     simRef.current = sim;
 
@@ -497,6 +506,10 @@ export default function Graph() {
     };
   }, [draw]);
 
+  const visibleEdgeCount = data
+    ? data.edges.filter((e) => e.type !== "co-occurrence" || e.weight >= minWeight).length
+    : 0;
+
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
       <div className="flex items-center justify-between mb-4 shrink-0">
@@ -504,16 +517,28 @@ export default function Graph() {
           <h2 className="text-2xl font-bold">Entity Graph</h2>
           {data && (
             <p className="text-sm text-zinc-500 mt-1">
-              {data.nodes.length} entities · {data.edges.length} connections · {data.factCount} facts
+              {data.nodes.length} entities · {visibleEdgeCount} visible connections · {data.factCount} facts
             </p>
           )}
-          {data && (data.truncated || (data.nodesPruned ?? 0) > 0) && (
+          {data && (data.truncated || (data.nodesPruned ?? 0) > 0 || (data.edgesPruned ?? 0) > 0 || (data.denseFactsSkipped ?? 0) > 0) && (
             <p className="text-xs text-amber-400 mt-1">
               {data.truncated && `Graph based on first ${data.factsScanned?.toLocaleString() ?? data.factCount} facts (limit ${data.limit?.toLocaleString() ?? "?"}).`}
               {(data.nodesPruned ?? 0) > 0 && (
                 <>
                   {data.truncated ? " " : ""}
                   Showing top {data.nodes.length} of {data.totalNodes?.toLocaleString() ?? "?"} entities by fact count.
+                </>
+              )}
+              {(data.edgesPruned ?? 0) > 0 && (
+                <>
+                  {(data.truncated || (data.nodesPruned ?? 0) > 0) ? " " : ""}
+                  Showing strongest {data.edges.length} of {data.totalEdges?.toLocaleString() ?? "?"} eligible connections.
+                </>
+              )}
+              {(data.denseFactsSkipped ?? 0) > 0 && (
+                <>
+                  {(data.truncated || (data.nodesPruned ?? 0) > 0 || (data.edgesPruned ?? 0) > 0) ? " " : ""}
+                  Skipped dense co-occurrence expansion for {data.denseFactsSkipped.toLocaleString()} memories.
                 </>
               )}
             </p>
