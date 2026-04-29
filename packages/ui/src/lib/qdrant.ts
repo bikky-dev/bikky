@@ -12,6 +12,7 @@ export interface FactPayload {
   category: string;
   domain?: string;
   kind?: string;
+  memory_subtype?: string | null;
   entities: string[];
   source?: string;
   confidence: number;
@@ -166,6 +167,7 @@ export function buildFilter(opts: {
   category?: string;
   domain?: string;
   kind?: string;
+  memorySubtype?: string;
   entity?: string;
   source?: string;
   since?: string;
@@ -179,6 +181,7 @@ export function buildFilter(opts: {
   if (opts.category) must.push({ key: "category", match: { value: opts.category } });
   if (opts.domain) must.push({ key: "domain", match: { value: opts.domain } });
   if (opts.kind) must.push({ key: "kind", match: { value: opts.kind } });
+  if (opts.memorySubtype) must.push({ key: "memory_subtype", match: { value: opts.memorySubtype } });
   if (opts.entity) must.push({ key: "entities", match: { value: opts.entity.toLowerCase() } });
   if (opts.source) must.push({ key: "source", match: sourceFilterValue(opts.source) });
   if (opts.since) must.push({ key: "created_at", range: { gte: opts.since } });

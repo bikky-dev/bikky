@@ -46,12 +46,13 @@ describe("ui/lib/qdrant", () => {
       assert.deepEqual(f.must, [{ is_null: { key: "superseded_by" } }]);
     });
 
-    it("adds match conditions for category, domain, kind, source", () => {
-      const f = buildFilter({ category: "infra", domain: "work", kind: "fact", source: "agent" });
+    it("adds match conditions for category, domain, kind, subtype, source", () => {
+      const f = buildFilter({ category: "infra", domain: "work", kind: "fact", memorySubtype: "codebase_map", source: "agent" });
       assert.deepEqual(f.must, [
         { key: "category", match: { value: "infra" } },
         { key: "domain", match: { value: "work" } },
         { key: "kind", match: { value: "fact" } },
+        { key: "memory_subtype", match: { value: "codebase_map" } },
         { key: "source", match: { any: ["agent", "cortex"] } },
       ]);
     });

@@ -10,6 +10,39 @@ import { addRedactionPayload, combineRedactions, redactStorageText } from "../li
 
 export const memoryRoutes = new Hono();
 
+const CATEGORY_VALUES = [
+  "codebase",
+  "infrastructure",
+  "operations",
+  "decisions",
+  "product_domain",
+  "projects",
+  "people",
+  "preferences",
+  "observations",
+] as const;
+
+const KIND_VALUES = ["fact", "summary", "distilled", "relation", "telemetry"] as const;
+
+const MEMORY_SUBTYPE_VALUES = [
+  "codebase_map",
+  "architecture_decision",
+  "infra_topology",
+  "access_pattern",
+  "operational_procedure",
+  "domain_rule",
+  "troubleshooting_gotcha",
+  "preference",
+  "session_index",
+  "episode",
+  "workstream",
+  "convention",
+  "recall_event",
+  "feedback_event",
+  "outcome_event",
+  "aggregate_rollup",
+] as const;
+
 function formatPoint(p: QdrantPoint) {
   return { id: p.id, score: p.score ?? null, ...p.payload };
 }
@@ -48,7 +81,7 @@ function cacheSet<T>(key: string, value: T, ttlMs: number): void {
 const STATS_TTL_MS = 30_000;
 const GRAPH_TTL_MS = 60_000;
 
-// GET /api/memory/search?q=...&category=...&entity=...&domain=...&kind=...&limit=...
+// GET /api/memory/search?q=...&category=...&entity=...&domain=...&kind=...&memory_subtype=...&limit=...
 memoryRoutes.get("/search", async (c) => {
   const q = c.req.query("q");
   if (!q) return c.json({ error: "Missing query parameter 'q'" }, 400);
@@ -64,6 +97,7 @@ memoryRoutes.get("/search", async (c) => {
     category: c.req.query("category"),
     domain: c.req.query("domain"),
     kind: c.req.query("kind"),
+    memorySubtype: c.req.query("memory_subtype"),
     entity: c.req.query("entity"),
     source: c.req.query("source"),
     excludeEntityType: true,
@@ -76,7 +110,7 @@ memoryRoutes.get("/search", async (c) => {
   return c.json({ results: points.map(formatPoint), count: points.length });
 });
 
-// GET /api/memory/browse?category=...&entity=...&kind=...&domain=...&source=...&since=...&until=...&sort=...&limit=...&offset=...
+// GET /api/memory/browse?category=...&entity=...&kind=...&memory_subtype=...&domain=...&source=...&since=...&until=...&sort=...&limit=...&offset=...
 memoryRoutes.get("/browse", async (c) => {
   const qdrant = createQdrantClient();
 
@@ -84,6 +118,7 @@ memoryRoutes.get("/browse", async (c) => {
     category: c.req.query("category"),
     domain: c.req.query("domain"),
     kind: c.req.query("kind"),
+    memorySubtype: c.req.query("memory_subtype"),
     entity: c.req.query("entity"),
     source: c.req.query("source"),
     since: c.req.query("since"),
@@ -552,14 +587,12 @@ memoryRoutes.get("/stats", async (c) => {
     try { return await qdrant.count(filter); } catch { return 0; }
   };
 
-  const categories = ["infrastructure", "decisions", "observation", "preferences", "projects", "team"];
-  const kinds = ["fact", "summary", "distilled", "relation"];
-
-  // All counts in one Promise.all instead of three sequential awaits.
-  const [info, catCounts, kindCounts, allCount] = await Promise.all([
+  // All counts in one Promise.all instead of several sequential awaits.
+  const [info, catCounts, kindCounts, subtypeCounts, allCount] = await Promise.all([
     qdrant.collectionInfo(),
-    Promise.all(categories.map(async (cat) => [cat, await safeCount(buildFilter({ category: cat }))] as const)),
-    Promise.all(kinds.map(async (k) => [k, await safeCount(buildFilter({ kind: k }))] as const)),
+    Promise.all(CATEGORY_VALUES.map(async (cat) => [cat, await safeCount(buildFilter({ category: cat }))] as const)),
+    Promise.all(KIND_VALUES.map(async (k) => [k, await safeCount(buildFilter({ kind: k }))] as const)),
+    Promise.all(MEMORY_SUBTYPE_VALUES.map(async (subtype) => [subtype, await safeCount(buildFilter({ memorySubtype: subtype }))] as const)),
     safeCount({ must: [] }),
   ]);
 
@@ -569,6 +602,7 @@ memoryRoutes.get("/stats", async (c) => {
     superseded: info.points_count - allCount,
     byCategory: Object.fromEntries(catCounts),
     byKind: Object.fromEntries(kindCounts),
+    bySubtype: Object.fromEntries(subtypeCounts),
   };
   cacheSet(cacheKey, payload, STATS_TTL_MS);
   return c.json(payload);
