@@ -83,6 +83,7 @@ export default function Memory() {
   const [sort, setSort] = useState(searchParams.get("sort") ?? "newest");
   const [since, setSince] = useState(searchParams.get("since") ?? "");
   const [until, setUntil] = useState(searchParams.get("until") ?? "");
+  const [browseRevision, setBrowseRevision] = useState(0);
 
   const [results, setResults] = useState<Fact[]>([]);
   const [loading, setLoading] = useState(false);
@@ -170,7 +171,7 @@ export default function Memory() {
     fetchResults();
     setSearchParams(buildParams(), { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, kind, memorySubtype, source, entity, sort, since, until]);
+  }, [category, kind, memorySubtype, source, entity, sort, since, until, browseRevision]);
 
   const handleSearch = () => {
     setSearchParams(buildParams(), { replace: true });
@@ -189,8 +190,10 @@ export default function Memory() {
     "bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500";
 
   const applyCategory = (value: string) => {
+    setQuery("");
     setCategory(value);
     setMemorySubtype("");
+    setBrowseRevision((revision) => revision + 1);
   };
 
   const applyKind = (value: string) => {
@@ -201,11 +204,13 @@ export default function Memory() {
   };
 
   const applySubtype = (value: string) => {
+    setQuery("");
     setMemorySubtype(value);
     if (value) {
       setCategory("");
       setKind("");
     }
+    setBrowseRevision((revision) => revision + 1);
   };
 
   const clearOntologyFilters = () => {
