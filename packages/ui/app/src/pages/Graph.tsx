@@ -136,6 +136,12 @@ export default function Graph() {
     startY: 0,
   });
   const simRef = useRef<ReturnType<typeof forceSimulation<GraphNode>> | null>(null);
+  // Tick budget is shared with the pointer handler so a user-initiated
+  // drag/pan can reset it. Without resets the simulation hits the cap during
+  // initial settling and `sim.stop()` fires permanently — every subsequent
+  // alphaTarget().restart() runs one tick and stops, so dragged nodes never
+  // update visually. The drag appears "hung".
+  const tickBudgetRef = useRef({ remaining: MAX_SIMULATION_TICKS });
 
   // Stable ref-based callback for selecting an edge (called from event handlers)
   const selectEdgeRef = useRef((a: string, b: string) => {
@@ -338,6 +344,7 @@ export default function Graph() {
     transformRef.current = { x: w / 2, y: h / 2, k: 1 };
 
     let tickCount = 0;
+    tickBudgetRef.current.remaining = MAX_SIMULATION_TICKS;
     const sim = forceSimulation(nodes)
       .alphaDecay(0.03)
       .force(
@@ -385,7 +392,8 @@ export default function Graph() {
     sim.on("tick", () => {
       draw();
       tickCount++;
-      if (tickCount >= MAX_SIMULATION_TICKS) sim.stop();
+      tickBudgetRef.current.remaining--;
+      if (tickBudgetRef.current.remaining <= 0) sim.stop();
     });
     sim.alpha(0.6).restart();
 
@@ -548,7 +556,17 @@ export default function Graph() {
         dragRef.current = { node, startX: e.clientX, startY: e.clientY };
         node.fx = node.x;
         node.fy = node.y;
-        simRef.current?.alphaTarget(0.3).restart();
+        // Refill the simulation tick budget — a fresh user interaction needs
+        // ticks to render the node moving even after initial layout has stopped.
+        tickBudgetRef.current.remaining = Math.max(
+          tickBudgetRef.current.remaining,
+          MAX_SIMULATION_TICKS,
+        );
+        // Bump alpha directly above alphaMin (default 0.001). After initial
+        // layout settles, alpha decays to ~0; then alphaTarget(0.3).restart()
+        // alone won't run — d3 stops the timer on the very next tick because
+        // alpha is still below alphaMin when the stop check fires.
+        simRef.current?.alpha(0.5).alphaTarget(0.3).restart();
         canvas!.style.cursor = "grabbing";
       } else {
         isPanningRef.current = true;

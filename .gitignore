@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.tgz
 .env
+packages/ui/graph-drag-test.mjs
