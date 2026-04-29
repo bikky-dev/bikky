@@ -133,14 +133,13 @@ export default function Dashboard() {
             {Object.entries(byKind)
               .sort(([, a], [, b]) => b - a)
               .map(([kind, count]) => (
-                <Link
+                <div
                   key={kind}
-                  to={`/memory?kind=${kind}`}
-                  className="flex items-center justify-between px-3 py-2 rounded-md hover:bg-zinc-800 transition-colors"
+                  className="flex items-center justify-between px-3 py-2 rounded-md bg-zinc-950/40"
                 >
                   <Badge label={ontologyLabel(kind)} color={kind === "fact" ? "blue" : kind === "summary" ? "purple" : kind === "distilled" ? "amber" : kind === "telemetry" ? "red" : "cyan"} />
                   <span className="text-sm text-zinc-300">{count}</span>
-                </Link>
+                </div>
               ))}
           </div>
         </div>
@@ -170,7 +169,7 @@ export default function Dashboard() {
                   return (
                     <Link
                       key={subtype.value}
-                      to={`/memory?memory_subtype=${subtype.value}`}
+                      to={`/memory?memory_subtype=${encodeURIComponent(subtype.value)}`}
                       title={subtype.description}
                       className="inline-flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
                     >
@@ -194,10 +193,10 @@ export default function Dashboard() {
           Browse All Facts →
         </Link>
         <Link
-          to="/memory?kind=relation"
+          to="/graph"
           className="px-4 py-2 rounded-md bg-zinc-800 text-sm text-zinc-300 hover:bg-zinc-700 transition-colors"
         >
-          View Relations →
+          View Graph →
         </Link>
       </div>
     </div>

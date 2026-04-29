@@ -175,21 +175,23 @@ describe("ui/routes/memory", () => {
       assert.ok(search);
       assert.equal(search!.body.limit, 5);
       assert.deepEqual(search!.body.filter.must[0], {
-        key: "category",
-        match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] },
-      });
-      assert.deepEqual(search!.body.filter.must[1], {
-        key: "memory_subtype",
-        match: { value: "codebase_map" },
-      });
-      assert.deepEqual(search!.body.filter.must[2], {
         key: "source",
         match: { any: ["system", "daemon"] },
       });
-      assert.deepEqual(search!.body.filter.must[3], {
+      assert.deepEqual(search!.body.filter.must[1], {
         key: "actor_id",
         match: { value: "agent-1" },
       });
+      assert.deepEqual(search!.body.filter.should, [
+        {
+          key: "category",
+          match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] },
+        },
+        {
+          key: "memory_subtype",
+          match: { value: "codebase_map" },
+        },
+      ]);
     });
 
     it("clamps limit to 100", async () => {
@@ -205,13 +207,18 @@ describe("ui/routes/memory", () => {
   describe("GET /browse", () => {
     it("calls scroll with order_by when sort=newest", async () => {
       const log = installMock({
-        qdrantHandler: () => ({ result: { points: [sampleFact()], next_page_offset: "abc" } }),
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/count")) return { result: { count: 42 } };
+          return { result: { points: [sampleFact()], next_page_offset: "abc" } };
+        },
       });
       const app = buildApp();
 
       const res = await app.fetch(new Request("http://localhost/api/memory/browse?sort=newest&limit=10"));
       assert.equal(res.status, 200);
-      const body = await res.json() as { results: any[]; nextOffset: string };
+      const body = await res.json() as { results: any[]; count: number; nextOffset: string };
+      assert.equal(body.results.length, 1);
+      assert.equal(body.count, 42);
       assert.equal(body.nextOffset, "abc");
 
       const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
@@ -268,6 +275,27 @@ describe("ui/routes/memory", () => {
       assert.ok(scroll);
       assert.deepEqual(scroll!.body.filter.must, []);
       assert.deepEqual(scroll!.body.filter.should, [
+        { key: "memory_subtype", match: { value: "convention" } },
+        { key: "kind", match: { value: "distilled" } },
+      ]);
+    });
+
+    it("combines multiple category and subtype selections with OR", async () => {
+      const log = installMock({
+        qdrantHandler: () => ({ result: { points: [], next_page_offset: null } }),
+      });
+      const app = buildApp();
+
+      await app.fetch(new Request("http://localhost/api/memory/browse?category=engineering,product&memory_subtype=codebase_map,convention&entity=bikky"));
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.ok(scroll);
+      assert.deepEqual(scroll!.body.filter.must, [
+        { key: "entities", match: { value: "bikky" } },
+      ]);
+      assert.deepEqual(scroll!.body.filter.should, [
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
+        { key: "category", match: { any: ["product", "product_domain", "projects"] } },
+        { key: "memory_subtype", match: { value: "codebase_map" } },
         { key: "memory_subtype", match: { value: "convention" } },
         { key: "kind", match: { value: "distilled" } },
       ]);

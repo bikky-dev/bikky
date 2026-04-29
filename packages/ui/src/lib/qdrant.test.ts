@@ -73,6 +73,21 @@ describe("ui/lib/qdrant", () => {
       ]);
     });
 
+    it("combines selected categories and subtypes as OR filters", () => {
+      const f = buildFilter({
+        categories: ["engineering", "product"],
+        memorySubtypes: ["codebase_map", "convention"],
+      });
+      assert.deepEqual(f.must, []);
+      assert.deepEqual(f.should, [
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
+        { key: "category", match: { any: ["product", "product_domain", "projects"] } },
+        { key: "memory_subtype", match: { value: "codebase_map" } },
+        { key: "memory_subtype", match: { value: "convention" } },
+        { key: "kind", match: { value: "distilled" } },
+      ]);
+    });
+
     it("lowercases the entity value", () => {
       const f = buildFilter({ entity: "Bikky" });
       assert.deepEqual(f.must, [{ key: "entities", match: { value: "bikky" } }]);

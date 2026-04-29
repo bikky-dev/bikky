@@ -67,6 +67,20 @@ function parseTopN(raw: string | undefined, max: number): number | null {
   return Math.min(n, max);
 }
 
+function parseList(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw.split(",").map((value) => value.trim()).filter(Boolean);
+}
+
+function ontologyFilters(category: string | undefined, memorySubtype: string | undefined) {
+  const categories = parseList(category);
+  const memorySubtypes = parseList(memorySubtype);
+  if (categories.length > 1 || memorySubtypes.length > 1 || (categories.length > 0 && memorySubtypes.length > 0)) {
+    return { categories, memorySubtypes };
+  }
+  return { category: categories[0], memorySubtype: memorySubtypes[0] };
+}
+
 // --- TTL cache (module-scope, per-process) ---
 
 interface CacheEntry<T> { value: T; expiresAt: number; }
@@ -99,10 +113,9 @@ memoryRoutes.get("/search", async (c) => {
   const vector = await embed(q);
 
   const filter = buildFilter({
-    category: c.req.query("category"),
+    ...ontologyFilters(c.req.query("category"), c.req.query("memory_subtype")),
     domain: c.req.query("domain"),
     kind: c.req.query("kind"),
-    memorySubtype: c.req.query("memory_subtype"),
     entity: c.req.query("entity"),
     source: c.req.query("source"),
     actorId: c.req.query("actor_id"),
@@ -121,10 +134,9 @@ memoryRoutes.get("/browse", async (c) => {
   const qdrant = createQdrantClient();
 
   const filter = buildFilter({
-    category: c.req.query("category"),
+    ...ontologyFilters(c.req.query("category"), c.req.query("memory_subtype")),
     domain: c.req.query("domain"),
     kind: c.req.query("kind"),
-    memorySubtype: c.req.query("memory_subtype"),
     entity: c.req.query("entity"),
     source: c.req.query("source"),
     actorId: c.req.query("actor_id"),
@@ -143,9 +155,12 @@ memoryRoutes.get("/browse", async (c) => {
       ? { key: "created_at", direction: "desc" as const }
       : undefined;
 
-  const { points, nextOffset } = await qdrant.scroll(filter, limit, offset, orderBy);
+  const [{ points, nextOffset }, totalCount] = await Promise.all([
+    qdrant.scroll(filter, limit, offset, orderBy),
+    qdrant.count(filter),
+  ]);
 
-  return c.json({ results: points.map(formatPoint), count: points.length, nextOffset });
+  return c.json({ results: points.map(formatPoint), count: totalCount, nextOffset });
 });
 
 // GET /api/memory/facts/:id

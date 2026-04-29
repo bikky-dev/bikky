@@ -7,8 +7,6 @@ import FactCard, { type Fact } from "../components/FactCard";
 import {
   BROWSABLE_CATEGORY_OPTIONS,
   BROWSABLE_SUBTYPES_BY_CATEGORY,
-  KIND_OPTIONS,
-  SOURCE_OPTIONS,
   SUBTYPE_BY_VALUE,
   ontologyLabel,
 } from "../lib/ontology";
@@ -33,6 +31,17 @@ function isBrowsableCategory(value: string): boolean {
 function isBrowsableSubtype(value: string): boolean {
   const subtype = SUBTYPE_BY_VALUE[value];
   return Boolean(subtype && subtype.category !== "system");
+}
+
+function parseParamList(raw: string | null, isAllowed: (value: string) => boolean): string[] {
+  if (!raw) return [];
+  return raw.split(",").map((value) => value.trim()).filter((value, index, values) =>
+    Boolean(value) && isAllowed(value) && values.indexOf(value) === index,
+  );
+}
+
+function toggleValue(values: string[], value: string): string[] {
+  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
 }
 
 function presetSinceDate(days: number): string {
@@ -71,14 +80,10 @@ export default function Memory() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [query, setQuery] = useState(searchParams.get("q") ?? "");
-  const initialSubtypeParam = searchParams.get("memory_subtype") ?? "";
-  const initialSubtype = isBrowsableSubtype(initialSubtypeParam) ? initialSubtypeParam : "";
-  const initialCategoryParam = searchParams.get("category") ?? "";
-  const initialCategory = isBrowsableCategory(initialCategoryParam) ? initialCategoryParam : "";
-  const [category, setCategory] = useState(initialSubtype ? "" : initialCategory);
-  const [memorySubtype, setMemorySubtype] = useState(initialSubtype);
-  const [kind, setKind] = useState(searchParams.get("kind") ?? "");
-  const [source, setSource] = useState(searchParams.get("source") ?? "");
+  const initialCategories = parseParamList(searchParams.get("category"), isBrowsableCategory);
+  const initialSubtypes = parseParamList(searchParams.get("memory_subtype"), isBrowsableSubtype);
+  const [categories, setCategories] = useState<string[]>(initialCategories);
+  const [memorySubtypes, setMemorySubtypes] = useState<string[]>(initialSubtypes);
   const [entity, setEntity] = useState(searchParams.get("entity") ?? "");
   const [sort, setSort] = useState(searchParams.get("sort") ?? "newest");
   const [since, setSince] = useState(searchParams.get("since") ?? "");
@@ -92,30 +97,27 @@ export default function Memory() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState("");
 
-  // Scope category/subtype counts to advanced metadata filters.
   useEffect(() => {
     let cancelled = false;
-    getStats({ kind, source })
+    getStats()
       .then((nextStats) => {
         if (!cancelled) setStats(nextStats);
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [kind, source]);
+  }, []);
 
   const buildParams = useCallback(() => {
     const p: Record<string, string> = {};
     if (query) p.q = query;
-    if (category) p.category = category;
-    if (kind) p.kind = kind;
-    if (memorySubtype) p.memory_subtype = memorySubtype;
-    if (source) p.source = source;
+    if (categories.length) p.category = categories.join(",");
+    if (memorySubtypes.length) p.memory_subtype = memorySubtypes.join(",");
     if (entity) p.entity = entity;
     if (sort) p.sort = sort;
     if (since) p.since = since;
     if (until) p.until = until;
     return p;
-  }, [query, category, kind, memorySubtype, source, entity, sort, since, until]);
+  }, [query, categories, memorySubtypes, entity, sort, since, until]);
 
   const fetchResults = useCallback(
     async (append = false, offset = 0) => {
@@ -125,10 +127,8 @@ export default function Memory() {
         if (query.trim()) {
           const params = new URLSearchParams();
           params.set("q", query.trim());
-          if (category) params.set("category", category);
-          if (kind) params.set("kind", kind);
-          if (memorySubtype) params.set("memory_subtype", memorySubtype);
-          if (source) params.set("source", source);
+          if (categories.length) params.set("category", categories.join(","));
+          if (memorySubtypes.length) params.set("memory_subtype", memorySubtypes.join(","));
           if (entity) params.set("entity", entity);
           params.set("limit", String(append ? results.length + PAGE_SIZE : PAGE_SIZE));
 
@@ -141,10 +141,8 @@ export default function Memory() {
           setNextOffset(data.results.length < data.count ? data.results.length : null);
         } else {
           const params = new URLSearchParams();
-          if (category) params.set("category", category);
-          if (kind) params.set("kind", kind);
-          if (memorySubtype) params.set("memory_subtype", memorySubtype);
-          if (source) params.set("source", source);
+          if (categories.length) params.set("category", categories.join(","));
+          if (memorySubtypes.length) params.set("memory_subtype", memorySubtypes.join(","));
           if (entity) params.set("entity", entity);
           if (sort) params.set("sort", sort);
           if (since) params.set("since", new Date(since).toISOString());
@@ -163,7 +161,7 @@ export default function Memory() {
         setLoading(false);
       }
     },
-    [query, category, kind, memorySubtype, source, entity, sort, since, until, results],
+    [query, categories, memorySubtypes, entity, sort, since, until, results],
   );
 
   // Initial load and filter changes
@@ -171,7 +169,7 @@ export default function Memory() {
     fetchResults();
     setSearchParams(buildParams(), { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, kind, memorySubtype, source, entity, sort, since, until, browseRevision]);
+  }, [categories, memorySubtypes, entity, sort, since, until, browseRevision]);
 
   const handleSearch = () => {
     setSearchParams(buildParams(), { replace: true });
@@ -191,36 +189,23 @@ export default function Memory() {
 
   const applyCategory = (value: string) => {
     setQuery("");
-    setCategory(value);
-    setMemorySubtype("");
+    setCategories((current) => toggleValue(current, value));
     setBrowseRevision((revision) => revision + 1);
-  };
-
-  const applyKind = (value: string) => {
-    setKind(value);
-    if (value) {
-      setMemorySubtype("");
-    }
   };
 
   const applySubtype = (value: string) => {
     setQuery("");
-    setMemorySubtype(value);
-    if (value) {
-      setCategory("");
-    }
+    setMemorySubtypes((current) => toggleValue(current, value));
     setBrowseRevision((revision) => revision + 1);
   };
 
   const clearOntologyFilters = () => {
-    setCategory("");
-    setMemorySubtype("");
+    setCategories([]);
+    setMemorySubtypes([]);
   };
 
   const clearAllFilters = () => {
     clearOntologyFilters();
-    setKind("");
-    setSource("");
     setEntity("");
     setSince("");
     setUntil("");
@@ -234,17 +219,19 @@ export default function Memory() {
 
   const categoryCount = (value: string) => stats?.byCategory?.[value] ?? 0;
   const subtypeCount = (value: string) => stats?.bySubtype?.[value] ?? 0;
-  const selectedSubtype = memorySubtype ? SUBTYPE_BY_VALUE[memorySubtype] : undefined;
   const activeFilters: ActiveFilter[] = [
-    category ? { key: "category", label: "Category", value: ontologyLabel(category), onClear: () => setCategory("") } : null,
-    kind ? { key: "kind", label: "Kind", value: ontologyLabel(kind), onClear: () => setKind("") } : null,
-    memorySubtype ? {
-      key: "memory_subtype",
+    ...categories.map((category) => ({
+      key: `category:${category}`,
+      label: "Category",
+      value: `${ontologyLabel(category)} (${categoryCount(category).toLocaleString()})`,
+      onClear: () => setCategories((current) => current.filter((item) => item !== category)),
+    })),
+    ...memorySubtypes.map((subtype) => ({
+      key: `memory_subtype:${subtype}`,
       label: "Subtype",
-      value: selectedSubtype?.label ?? ontologyLabel(memorySubtype),
-      onClear: () => setMemorySubtype(""),
-    } : null,
-    source ? { key: "source", label: "Source", value: ontologyLabel(source), onClear: () => setSource("") } : null,
+      value: `${SUBTYPE_BY_VALUE[subtype]?.label ?? ontologyLabel(subtype)} (${subtypeCount(subtype).toLocaleString()})`,
+      onClear: () => setMemorySubtypes((current) => current.filter((item) => item !== subtype)),
+    })),
     entity ? { key: "entity", label: "Entity", value: entity, onClear: () => setEntity("") } : null,
     since ? { key: "since", label: "From", value: since, onClear: () => setSince("") } : null,
     until ? { key: "until", label: "Until", value: until, onClear: () => setUntil("") } : null,
@@ -302,43 +289,8 @@ export default function Memory() {
               Clear all
             </button>
           </div>
-          {selectedSubtype && (
-            <p className="mt-2 text-xs text-zinc-500">
-              Subtype is an ontology field. It filters by <span className="text-zinc-300">{selectedSubtype.label}</span> without also requiring a category filter.
-            </p>
-          )}
         </div>
       )}
-
-      <details className="mb-4 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3" defaultOpen={Boolean(kind || source)}>
-        <summary className="cursor-pointer text-sm font-medium text-zinc-300">
-          Advanced search
-          <span className="ml-2 text-xs font-normal text-zinc-500">kind and source</span>
-        </summary>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <select value={kind} onChange={(e) => applyKind(e.target.value)} className={selectCls}>
-            <option value="">All kinds</option>
-            {KIND_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-          <select value={source} onChange={(e) => setSource(e.target.value)} className={selectCls}>
-            <option value="">All sources</option>
-            {SOURCE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
-          {(kind || source) && (
-            <button
-              type="button"
-              onClick={() => { setKind(""); setSource(""); }}
-              className="px-2.5 py-1.5 rounded-md text-sm text-zinc-500 hover:text-zinc-300"
-            >
-              Clear advanced
-            </button>
-          )}
-        </div>
-      </details>
 
       {/* Ontology navigation */}
       <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
@@ -349,24 +301,16 @@ export default function Memory() {
               Pick a top-level category or a concrete subtype. There are no extra groups or sub-tabs.
             </p>
           </div>
-          {memorySubtype && (
+          {memorySubtypes.length > 0 && (
             <button
               type="button"
-              onClick={() => setMemorySubtype("")}
+              onClick={() => setMemorySubtypes([])}
               className="text-xs text-zinc-500 hover:text-zinc-300"
             >
-              Clear subtype
+              Clear subtypes
             </button>
           )}
         </div>
-        {selectedSubtype && (
-          <div className="mb-4 rounded-md border border-blue-500/20 bg-blue-500/10 px-3 py-2">
-            <p className="text-sm text-blue-200">
-              Showing subtype: <span className="font-medium">{selectedSubtype.label}</span>
-            </p>
-            <p className="mt-0.5 text-xs text-blue-200/70">{selectedSubtype.description}</p>
-          </div>
-        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {BROWSABLE_CATEGORY_OPTIONS.map((cat) => (
             <div key={cat.value} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
@@ -378,10 +322,10 @@ export default function Memory() {
                 <button
                   type="button"
                   onClick={() => applyCategory(cat.value)}
-                  className={pillCls(category === cat.value && !memorySubtype)}
+                  className={pillCls(categories.includes(cat.value))}
                   title={`${categoryCount(cat.value).toLocaleString()} facts`}
                 >
-                  Browse
+                  {categories.includes(cat.value) ? "Selected" : "Add"}
                   {stats && <span className="ml-1 text-zinc-500">{categoryCount(cat.value).toLocaleString()}</span>}
                 </button>
               </div>
@@ -393,7 +337,7 @@ export default function Memory() {
                       key={subtype.value}
                       type="button"
                       onClick={() => applySubtype(subtype.value)}
-                      className={pillCls(memorySubtype === subtype.value)}
+                      className={pillCls(memorySubtypes.includes(subtype.value))}
                       title={subtype.description}
                     >
                       {subtype.label}

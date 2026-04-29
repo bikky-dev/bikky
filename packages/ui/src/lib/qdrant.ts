@@ -107,6 +107,17 @@ const MEMORY_SUBTYPE_FILTER_ALIASES: Record<string, FilterCondition[]> = {
   ],
 };
 
+const categoryFilterConditions = (categories: string[]): FilterCondition[] => {
+  return categories.map((category) => ({ key: "category", match: categoryFilterValue(category) }));
+};
+
+const memorySubtypeFilterConditions = (subtypes: string[]): FilterCondition[] => {
+  return subtypes.flatMap((subtype) => {
+    const aliases = MEMORY_SUBTYPE_FILTER_ALIASES[subtype];
+    return aliases ?? [{ key: "memory_subtype", match: { value: subtype } }];
+  });
+};
+
 // --- Client ---
 
 export class QdrantClient {
@@ -189,9 +200,11 @@ export class QdrantClient {
 
 export function buildFilter(opts: {
   category?: string;
+  categories?: string[];
   domain?: string;
   kind?: string;
   memorySubtype?: string;
+  memorySubtypes?: string[];
   entity?: string;
   source?: string;
   actorId?: string;
@@ -208,9 +221,15 @@ export function buildFilter(opts: {
   if (opts.domain) must.push({ key: "domain", match: { value: opts.domain } });
   if (opts.kind) must.push({ key: "kind", match: { value: opts.kind } });
   if (opts.memorySubtype) {
-    const aliases = MEMORY_SUBTYPE_FILTER_ALIASES[opts.memorySubtype];
-    if (aliases) should.push(...aliases);
-    else must.push({ key: "memory_subtype", match: { value: opts.memorySubtype } });
+    const aliases = memorySubtypeFilterConditions([opts.memorySubtype]);
+    if (MEMORY_SUBTYPE_FILTER_ALIASES[opts.memorySubtype]) should.push(...aliases);
+    else must.push(...aliases);
+  }
+  if (opts.categories?.length || opts.memorySubtypes?.length) {
+    should.push(
+      ...categoryFilterConditions(opts.categories ?? []),
+      ...memorySubtypeFilterConditions(opts.memorySubtypes ?? []),
+    );
   }
   if (opts.entity) must.push({ key: "entities", match: { value: opts.entity.toLowerCase() } });
   if (opts.source) must.push({ key: "source", match: sourceFilterValue(opts.source) });
