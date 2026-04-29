@@ -17,6 +17,10 @@ export const CATEGORY_OPTIONS: OntologyOption[] = [
   { value: "system", label: "System", description: "Bikky lifecycle memory: sessions, episodes, workstreams, recall/feedback/outcome telemetry, and rollups." },
 ];
 
+export const BROWSABLE_CATEGORY_OPTIONS: OntologyOption[] = CATEGORY_OPTIONS.filter(
+  (category) => category.value !== "system",
+);
+
 export const DOMAIN_OPTIONS: OntologyOption[] = [
   { value: "software_engineering", label: "Software engineering" },
   { value: "product_strategy", label: "Product strategy" },
@@ -253,6 +257,13 @@ export const MEMORY_SUBTYPE_OPTIONS: MemorySubtypeOption[] = [
 
 export const SUBTYPES_BY_CATEGORY = Object.fromEntries(
   CATEGORY_OPTIONS.map((category) => [
+    category.value,
+    MEMORY_SUBTYPE_OPTIONS.filter((subtype) => subtype.category === category.value),
+  ]),
+) as Record<string, MemorySubtypeOption[]>;
+
+export const BROWSABLE_SUBTYPES_BY_CATEGORY = Object.fromEntries(
+  BROWSABLE_CATEGORY_OPTIONS.map((category) => [
     category.value,
     MEMORY_SUBTYPE_OPTIONS.filter((subtype) => subtype.category === category.value),
   ]),

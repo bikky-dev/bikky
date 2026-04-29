@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { ApiError } from "../lib/api";
 import { getStats, type MemoryStats } from "../lib/statsCache";
 import { CATEGORY_COLORS } from "../lib/format";
-import { CATEGORY_OPTIONS, SUBTYPES_BY_CATEGORY, ontologyLabel } from "../lib/ontology";
+import { BROWSABLE_CATEGORY_OPTIONS, BROWSABLE_SUBTYPES_BY_CATEGORY, ontologyLabel } from "../lib/ontology";
 import Badge from "../components/Badge";
 
 type LoadState<T> = { loading: true } | { loading: false; data: T } | { loading: false; error: string };
@@ -93,9 +93,11 @@ export default function Dashboard() {
   }
 
   const { active, superseded, total, byCategory, byKind, bySubtype } = stats.data;
-  const maxCat = Math.max(...Object.values(byCategory), 1);
-  const subtypeTotal = Object.values(bySubtype ?? {}).reduce((sum, count) => sum + count, 0);
-  const activeSubtypeCount = Object.values(bySubtype ?? {}).filter((count) => count > 0).length;
+  const categoryCounts = BROWSABLE_CATEGORY_OPTIONS.map((category) => [category.value, byCategory[category.value] ?? 0] as const);
+  const browsableSubtypes = BROWSABLE_CATEGORY_OPTIONS.flatMap((category) => BROWSABLE_SUBTYPES_BY_CATEGORY[category.value] ?? []);
+  const maxCat = Math.max(...categoryCounts.map(([, count]) => count), 1);
+  const subtypeTotal = browsableSubtypes.reduce((sum, subtype) => sum + (bySubtype?.[subtype.value] ?? 0), 0);
+  const activeSubtypeCount = browsableSubtypes.filter((subtype) => (bySubtype?.[subtype.value] ?? 0) > 0).length;
 
   return (
     <div>
@@ -105,7 +107,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <StatCard label="Active Facts" value={active} />
         <StatCard label="Total Stored" value={total} sub={`${superseded} superseded`} />
-        <StatCard label="Categories" value={Object.keys(byCategory).length} />
+        <StatCard label="Categories" value={BROWSABLE_CATEGORY_OPTIONS.length} />
         <StatCard label="Subtypes" value={activeSubtypeCount} sub={`${subtypeTotal.toLocaleString()} typed memories`} />
       </div>
 
@@ -114,7 +116,7 @@ export default function Dashboard() {
         <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
           <h3 className="text-sm font-medium text-zinc-400 mb-4">Facts by Category</h3>
           <div className="space-y-2.5">
-            {Object.entries(byCategory)
+            {categoryCounts
               .sort(([, a], [, b]) => b - a)
               .map(([cat, count]) => (
                 <Link key={cat} to={`/memory?category=${cat}`} className="block hover:opacity-80 transition-opacity">
@@ -149,11 +151,11 @@ export default function Dashboard() {
         <div className="mb-4">
           <h3 className="text-sm font-medium text-zinc-300">Browse by category and subtype</h3>
           <p className="mt-1 text-xs text-zinc-500">
-            Categories are the four top-level ontology areas. Subtypes are the concrete memory shapes inside each category.
+            Categories are the user-facing ontology areas. Subtypes are the concrete memory shapes inside each category.
           </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-          {CATEGORY_OPTIONS.map((category) => (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {BROWSABLE_CATEGORY_OPTIONS.map((category) => (
             <div key={category.value} className="rounded-md border border-zinc-800 bg-zinc-950/50 p-3">
               <Link
                 to={`/memory?category=${category.value}`}
@@ -163,7 +165,7 @@ export default function Dashboard() {
               </Link>
               <p className="mt-1 text-xs text-zinc-500">{category.description}</p>
               <div className="mt-3 flex flex-wrap gap-1.5">
-                {SUBTYPES_BY_CATEGORY[category.value].map((subtype) => {
+                {(BROWSABLE_SUBTYPES_BY_CATEGORY[category.value] ?? []).map((subtype) => {
                   const count = bySubtype?.[subtype.value] ?? 0;
                   return (
                     <Link

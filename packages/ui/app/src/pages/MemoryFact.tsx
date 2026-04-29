@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from "react-router";
 import { ArrowLeft, Pencil, Trash2, Loader2, Save, X } from "lucide-react";
 import { apiFetch, ApiError } from "../lib/api";
 import { relativeTime, CATEGORY_COLORS, KIND_COLORS } from "../lib/format";
-import { CATEGORY_OPTIONS, DOMAIN_OPTIONS, ontologyLabel } from "../lib/ontology";
+import { BROWSABLE_CATEGORY_OPTIONS, DOMAIN_OPTIONS, ontologyLabel } from "../lib/ontology";
 import Badge from "../components/Badge";
 import { EntityChip } from "../components/EntityChip";
 import type { Fact } from "../components/FactCard";
@@ -111,9 +111,9 @@ export default function MemoryFact() {
 
   const selectCls =
     "bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500";
-  const categoryOptions = CATEGORY_OPTIONS.some((c) => c.value === editCategory) || !editCategory
-    ? CATEGORY_OPTIONS
-    : [{ value: editCategory, label: `Legacy: ${editCategory}` }, ...CATEGORY_OPTIONS];
+  const categoryOptions = BROWSABLE_CATEGORY_OPTIONS.some((c) => c.value === editCategory) || !editCategory
+    ? BROWSABLE_CATEGORY_OPTIONS
+    : [{ value: editCategory, label: `Legacy: ${editCategory}` }, ...BROWSABLE_CATEGORY_OPTIONS];
   const domainOptions = DOMAIN_OPTIONS.some((d) => d.value === editDomain) || !editDomain
     ? DOMAIN_OPTIONS
     : [{ value: editDomain, label: `Legacy: ${editDomain}` }, ...DOMAIN_OPTIONS];
