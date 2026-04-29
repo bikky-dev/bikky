@@ -7,6 +7,7 @@ export interface OntologyOption {
 export interface MemorySubtypeOption extends OntologyOption {
   kind: string;
   category: string;
+  example?: string;
 }
 
 export interface OntologyGroup {
@@ -53,22 +54,134 @@ export const SOURCE_OPTIONS: OntologyOption[] = [
 ];
 
 export const MEMORY_SUBTYPE_OPTIONS: MemorySubtypeOption[] = [
-  { value: "codebase_map", label: "Codebase map", kind: "fact", category: "codebase" },
-  { value: "architecture_decision", label: "Architecture decision", kind: "fact", category: "decisions" },
-  { value: "infra_topology", label: "Infrastructure topology", kind: "fact", category: "infrastructure" },
-  { value: "access_pattern", label: "Access pattern", kind: "fact", category: "infrastructure" },
-  { value: "operational_procedure", label: "Operational procedure", kind: "fact", category: "operations" },
-  { value: "domain_rule", label: "Domain rule", kind: "fact", category: "product_domain" },
-  { value: "troubleshooting_gotcha", label: "Troubleshooting gotcha", kind: "fact", category: "operations" },
-  { value: "preference", label: "Preference", kind: "fact", category: "preferences" },
-  { value: "session_index", label: "Session index", kind: "summary", category: "projects" },
-  { value: "episode", label: "Episode", kind: "summary", category: "projects" },
-  { value: "workstream", label: "Workstream", kind: "summary", category: "projects" },
-  { value: "convention", label: "Convention", kind: "distilled", category: "observations" },
-  { value: "recall_event", label: "Recall event", kind: "telemetry", category: "observations" },
-  { value: "feedback_event", label: "Feedback event", kind: "telemetry", category: "observations" },
-  { value: "outcome_event", label: "Outcome event", kind: "telemetry", category: "observations" },
-  { value: "aggregate_rollup", label: "Aggregate rollup", kind: "telemetry", category: "observations" },
+  {
+    value: "codebase_map",
+    label: "Codebase map",
+    kind: "fact",
+    category: "codebase",
+    description: "Where code lives and how to navigate repos, modules, files, and APIs.",
+    example: "Use for repo maps, important files, entry points, or ownership notes.",
+  },
+  {
+    value: "architecture_decision",
+    label: "Architecture decision",
+    kind: "fact",
+    category: "decisions",
+    description: "A technical or product decision plus the rationale behind it.",
+    example: "Use for decisions that should guide future implementation choices.",
+  },
+  {
+    value: "infra_topology",
+    label: "Infrastructure topology",
+    kind: "fact",
+    category: "infrastructure",
+    description: "How runtime infrastructure, services, databases, queues, and networks fit together.",
+    example: "Use for deployment maps, cluster/service relationships, or data-flow topology.",
+  },
+  {
+    value: "access_pattern",
+    label: "Access pattern",
+    kind: "fact",
+    category: "infrastructure",
+    description: "How to access a system, environment, dashboard, API, or operational tool.",
+    example: "Use for safe connection paths, commands, URLs, or credential locations.",
+  },
+  {
+    value: "operational_procedure",
+    label: "Operational procedure",
+    kind: "fact",
+    category: "operations",
+    description: "Repeatable steps for running, deploying, maintaining, or recovering something.",
+    example: "Use for runbooks, rollout procedures, smoke checks, and recovery steps.",
+  },
+  {
+    value: "domain_rule",
+    label: "Domain rule",
+    kind: "fact",
+    category: "product_domain",
+    description: "A product, workflow, business, or data rule that should be applied consistently.",
+    example: "Use for invariant behavior, terminology, constraints, or product rules.",
+  },
+  {
+    value: "troubleshooting_gotcha",
+    label: "Troubleshooting gotcha",
+    kind: "fact",
+    category: "operations",
+    description: "A surprising failure mode, workaround, or diagnostic clue worth remembering.",
+    example: "Use for errors that look misleading or fixes that are easy to forget.",
+  },
+  {
+    value: "preference",
+    label: "Preference",
+    kind: "fact",
+    category: "preferences",
+    description: "A user, team, or workspace preference about style, tooling, defaults, or workflow.",
+    example: "Use for durable preferences that should shape future agent behavior.",
+  },
+  {
+    value: "session_index",
+    label: "Session index",
+    kind: "summary",
+    category: "projects",
+    description: "A compact index of what happened in a work session and where to resume.",
+    example: "Use for session closeouts and continuation pointers.",
+  },
+  {
+    value: "episode",
+    label: "Episode",
+    kind: "summary",
+    category: "projects",
+    description: "A meaningful chunk of work across one or more sessions.",
+    example: "Use for grouped implementation efforts, investigations, or releases.",
+  },
+  {
+    value: "workstream",
+    label: "Workstream",
+    kind: "summary",
+    category: "projects",
+    description: "Longer-running project continuity: goals, status, blockers, and next actions.",
+    example: "Use for active initiatives and roadmap-level progress.",
+  },
+  {
+    value: "convention",
+    label: "Convention",
+    kind: "distilled",
+    category: "observations",
+    description: "A reusable pattern, norm, or lesson distilled from repeated work.",
+    example: "Use for coding, operations, product, or collaboration conventions.",
+  },
+  {
+    value: "recall_event",
+    label: "Recall event",
+    kind: "telemetry",
+    category: "observations",
+    description: "A signal that a memory was recalled and potentially used.",
+    example: "Use for memory quality and relevance analysis.",
+  },
+  {
+    value: "feedback_event",
+    label: "Feedback event",
+    kind: "telemetry",
+    category: "observations",
+    description: "A user or agent signal about whether a memory was useful, stale, or wrong.",
+    example: "Use for memory quality feedback loops.",
+  },
+  {
+    value: "outcome_event",
+    label: "Outcome event",
+    kind: "telemetry",
+    category: "observations",
+    description: "A result signal connecting memory use to task outcomes.",
+    example: "Use for measuring whether memory helped complete work.",
+  },
+  {
+    value: "aggregate_rollup",
+    label: "Aggregate rollup",
+    kind: "telemetry",
+    category: "observations",
+    description: "An aggregated quality, usage, or outcome summary.",
+    example: "Use for dashboard-ready memory metrics.",
+  },
 ];
 
 export const ONTOLOGY_GROUPS: OntologyGroup[] = [

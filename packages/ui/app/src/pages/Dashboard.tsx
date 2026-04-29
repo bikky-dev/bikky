@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { ApiError } from "../lib/api";
 import { getStats, type MemoryStats } from "../lib/statsCache";
 import { CATEGORY_COLORS } from "../lib/format";
-import { MEMORY_SUBTYPE_OPTIONS, ONTOLOGY_GROUPS, SUBTYPE_BY_VALUE, ontologyLabel } from "../lib/ontology";
+import { ONTOLOGY_GROUPS, SUBTYPE_BY_VALUE, ontologyLabel } from "../lib/ontology";
 import Badge from "../components/Badge";
 
 type LoadState<T> = { loading: true } | { loading: false; data: T } | { loading: false; error: string };
@@ -27,6 +27,9 @@ function CategoryBar({ category, count, max }: { category: string; count: number
     amber: "bg-amber-500",
     green: "bg-green-500",
     cyan: "bg-cyan-500",
+    orange: "bg-orange-500",
+    indigo: "bg-indigo-500",
+    pink: "bg-pink-500",
     rose: "bg-rose-500",
     zinc: "bg-zinc-500",
   };
@@ -92,6 +95,7 @@ export default function Dashboard() {
   const { active, superseded, total, byCategory, byKind, bySubtype } = stats.data;
   const maxCat = Math.max(...Object.values(byCategory), 1);
   const subtypeTotal = Object.values(bySubtype ?? {}).reduce((sum, count) => sum + count, 0);
+  const activeSubtypeCount = Object.values(bySubtype ?? {}).filter((count) => count > 0).length;
 
   return (
     <div>
@@ -102,7 +106,7 @@ export default function Dashboard() {
         <StatCard label="Active Facts" value={active} />
         <StatCard label="Total Stored" value={total} sub={`${superseded} superseded`} />
         <StatCard label="Categories" value={Object.keys(byCategory).length} />
-        <StatCard label="Subtypes" value={Object.keys(bySubtype ?? {}).length} sub={`${subtypeTotal.toLocaleString()} typed`} />
+        <StatCard label="Subtypes" value={activeSubtypeCount} sub={`${subtypeTotal.toLocaleString()} typed memories`} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
@@ -142,11 +146,17 @@ export default function Dashboard() {
 
       {/* Subtype navigation */}
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5 mb-8">
-        <h3 className="text-sm font-medium text-zinc-400 mb-4">Browse by memory subtype</h3>
+        <div className="mb-4">
+          <h3 className="text-sm font-medium text-zinc-300">Browse by memory type</h3>
+          <p className="mt-1 text-xs text-zinc-500">
+            Subtypes are precise lenses. Pick one to open Memory with only that subtype filter active.
+          </p>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {ONTOLOGY_GROUPS.map((group) => (
             <div key={group.id} className="rounded-md border border-zinc-800 bg-zinc-950/50 p-3">
               <p className="text-sm font-medium text-zinc-200">{group.label}</p>
+              <p className="mt-1 text-xs text-zinc-500">{group.description}</p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {group.subtypes.map((subtypeValue) => {
                   const subtype = SUBTYPE_BY_VALUE[subtypeValue];
@@ -155,7 +165,8 @@ export default function Dashboard() {
                   return (
                     <Link
                       key={subtype.value}
-                      to={`/memory?category=${subtype.category}&kind=${subtype.kind}&memory_subtype=${subtype.value}`}
+                      to={`/memory?memory_subtype=${subtype.value}`}
+                      title={subtype.description}
                       className="inline-flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
                     >
                       <span>{subtype.label}</span>
@@ -165,17 +176,6 @@ export default function Dashboard() {
                 })}
               </div>
             </div>
-          ))}
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {MEMORY_SUBTYPE_OPTIONS.map((subtype) => (
-            <Link
-              key={subtype.value}
-              to={`/memory?category=${subtype.category}&kind=${subtype.kind}&memory_subtype=${subtype.value}`}
-              className="text-xs text-zinc-500 hover:text-zinc-300"
-            >
-              {subtype.label}
-            </Link>
           ))}
         </div>
       </div>

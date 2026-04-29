@@ -44,15 +44,15 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Badge label={ontologyLabel(fact.category)} color={CATEGORY_COLORS[fact.category]} />
+        <Badge label={`Area: ${ontologyLabel(fact.category)}`} color={CATEGORY_COLORS[fact.category]} />
         {fact.kind && fact.kind !== "fact" && (
-          <Badge label={ontologyLabel(fact.kind)} color={KIND_COLORS[fact.kind]} />
+          <Badge label={`Kind: ${ontologyLabel(fact.kind)}`} color={KIND_COLORS[fact.kind]} />
         )}
         {fact.memory_subtype && (
-          <Badge label={ontologyLabel(fact.memory_subtype)} color={CATEGORY_COLORS[fact.category]} />
+          <Badge label={`Type: ${ontologyLabel(fact.memory_subtype)}`} color={CATEGORY_COLORS[fact.category]} />
         )}
         {fact.domain && fact.domain !== "software_engineering" && (
-          <Badge label={ontologyLabel(fact.domain)} color="green" />
+          <Badge label={`Domain: ${ontologyLabel(fact.domain)}`} color="green" />
         )}
         {fact.entities.map((e) => (
           <EntityChip key={e} name={e} link={false} />

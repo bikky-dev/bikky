@@ -51,6 +51,13 @@ interface SearchResponse {
 
 const PAGE_SIZE = 20;
 
+interface ActiveFilter {
+  key: string;
+  label: string;
+  value: string;
+  onClear: () => void;
+}
+
 export default function Memory() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -179,10 +186,9 @@ export default function Memory() {
 
   const applySubtype = (value: string) => {
     setMemorySubtype(value);
-    const subtype = SUBTYPE_BY_VALUE[value];
-    if (subtype) {
-      setKind(subtype.kind);
-      setCategory(subtype.category);
+    if (value) {
+      setCategory("");
+      setKind("");
     }
   };
 
@@ -194,6 +200,20 @@ export default function Memory() {
     setSource("");
   };
 
+  const clearAdvancedFilters = () => {
+    setCategory("");
+    setDomain("");
+    setKind("");
+    setSource("");
+  };
+
+  const clearAllFilters = () => {
+    clearOntologyFilters();
+    setEntity("");
+    setSince("");
+    setUntil("");
+  };
+
   const pillCls = (active: boolean) =>
     "px-2 py-1 rounded-md border text-xs transition-colors " +
     (active
@@ -202,6 +222,22 @@ export default function Memory() {
 
   const categoryCount = (value: string) => stats?.byCategory?.[value] ?? 0;
   const subtypeCount = (value: string) => stats?.bySubtype?.[value] ?? 0;
+  const selectedSubtype = memorySubtype ? SUBTYPE_BY_VALUE[memorySubtype] : undefined;
+  const activeFilters: ActiveFilter[] = [
+    category ? { key: "category", label: "Area", value: ontologyLabel(category), onClear: () => setCategory("") } : null,
+    domain ? { key: "domain", label: "Domain", value: ontologyLabel(domain), onClear: () => setDomain("") } : null,
+    kind ? { key: "kind", label: "Kind", value: ontologyLabel(kind), onClear: () => setKind("") } : null,
+    memorySubtype ? {
+      key: "memory_subtype",
+      label: "Subtype",
+      value: selectedSubtype?.label ?? ontologyLabel(memorySubtype),
+      onClear: () => setMemorySubtype(""),
+    } : null,
+    source ? { key: "source", label: "Source", value: ontologyLabel(source), onClear: () => setSource("") } : null,
+    entity ? { key: "entity", label: "Entity", value: entity, onClear: () => setEntity("") } : null,
+    since ? { key: "since", label: "From", value: since, onClear: () => setSince("") } : null,
+    until ? { key: "until", label: "Until", value: until, onClear: () => setUntil("") } : null,
+  ].filter((filter): filter is ActiveFilter => filter !== null);
 
   return (
     <div>
@@ -240,77 +276,36 @@ export default function Memory() {
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        <select value={category} onChange={(e) => applyCategory(e.target.value)} className={selectCls}>
-          <option value="">All categories</option>
-          {CATEGORY_OPTIONS.map((c) => (
-            <option key={c.value} value={c.value}>{c.label}</option>
-          ))}
-        </select>
-        <select value={domain} onChange={(e) => setDomain(e.target.value)} className={selectCls}>
-          <option value="">All domains</option>
-          {DOMAIN_OPTIONS.map((d) => (
-            <option key={d.value} value={d.value}>{d.label}</option>
-          ))}
-        </select>
-        <select value={kind} onChange={(e) => applyKind(e.target.value)} className={selectCls}>
-          <option value="">All kinds</option>
-          {KIND_OPTIONS.map((k) => (
-            <option key={k.value} value={k.value}>{k.label}</option>
-          ))}
-        </select>
-        <select value={memorySubtype} onChange={(e) => applySubtype(e.target.value)} className={selectCls}>
-          <option value="">All subtypes</option>
-          {ONTOLOGY_GROUPS.map((group) => (
-            <optgroup key={group.id} label={group.label}>
-              {group.subtypes.map((subtypeValue) => {
-                const subtype = SUBTYPE_BY_VALUE[subtypeValue];
-                if (!subtype) return null;
-                return (
-                  <option key={subtype.value} value={subtype.value}>
-                    {subtype.label}
-                  </option>
-                );
-              })}
-            </optgroup>
-          ))}
-        </select>
-        <select value={source} onChange={(e) => setSource(e.target.value)} className={selectCls}>
-          <option value="">All sources</option>
-          {SOURCE_OPTIONS.map((s) => (
-            <option key={s.value} value={s.value}>{s.label}</option>
-          ))}
-        </select>
-        {(category || domain || kind || memorySubtype || source) && (
-          <button
-            type="button"
-            onClick={clearOntologyFilters}
-            className="px-2.5 py-1.5 rounded-md text-sm text-zinc-500 hover:text-zinc-300"
-          >
-            Clear ontology
-          </button>
-        )}
-        {entity && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-zinc-800 border border-zinc-700 rounded-md text-sm text-zinc-300">
-            entity: {entity}
+      {activeFilters.length > 0 && (
+        <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">Active filters</span>
+            {activeFilters.map((filter) => (
+              <ActiveFilterChip key={filter.key} filter={filter} />
+            ))}
             <button
-              onClick={() => setEntity("")}
-              className="ml-1 text-zinc-500 hover:text-zinc-300"
+              type="button"
+              onClick={clearAllFilters}
+              className="ml-auto text-xs text-zinc-500 hover:text-zinc-300"
             >
-              ×
+              Clear all
             </button>
           </div>
-        )}
-      </div>
+          {selectedSubtype && (
+            <p className="mt-2 text-xs text-zinc-500">
+              Subtype is a specific memory type. It filters by <span className="text-zinc-300">{selectedSubtype.label}</span> without also requiring a category or kind filter.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Ontology navigation */}
-      <div className="mb-6 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
-        <div className="flex items-start justify-between gap-4 mb-3">
+      <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+        <div className="flex items-start justify-between gap-4 mb-4">
           <div>
-            <h3 className="text-sm font-medium text-zinc-200">Explore by memory ontology</h3>
+            <h3 className="text-sm font-medium text-zinc-200">Browse by memory type</h3>
             <p className="text-xs text-zinc-500 mt-0.5">
-              Grouped by the canonical Bikky taxonomy so codebase, projects, observations, and telemetry are easy to browse.
+              Start with a broad area, or pick a specific subtype for a narrower, predictable filter.
             </p>
           </div>
           {memorySubtype && (
@@ -323,11 +318,20 @@ export default function Memory() {
             </button>
           )}
         </div>
+        {selectedSubtype && (
+          <div className="mb-4 rounded-md border border-blue-500/20 bg-blue-500/10 px-3 py-2">
+            <p className="text-sm text-blue-200">
+              Showing subtype: <span className="font-medium">{selectedSubtype.label}</span>
+            </p>
+            <p className="mt-0.5 text-xs text-blue-200/70">{selectedSubtype.description}</p>
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {ONTOLOGY_GROUPS.map((group) => (
             <div key={group.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
               <p className="text-sm font-medium text-zinc-200">{group.label}</p>
               <p className="text-xs text-zinc-500 mt-1 min-h-8">{group.description}</p>
+              <p className="mt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">Areas</p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {group.categories.map((cat) => (
                   <button
@@ -342,6 +346,7 @@ export default function Memory() {
                   </button>
                 ))}
               </div>
+              <p className="mt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">Specific types</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {group.subtypes.map((subtypeValue) => {
                   const subtype = SUBTYPE_BY_VALUE[subtypeValue];
@@ -352,7 +357,7 @@ export default function Memory() {
                       type="button"
                       onClick={() => applySubtype(subtype.value)}
                       className={pillCls(memorySubtype === subtype.value)}
-                      title={`${subtype.kind} / ${ontologyLabel(subtype.category)}`}
+                      title={subtype.description}
                     >
                       {subtype.label}
                       {stats && <span className="ml-1 text-zinc-500">{subtypeCount(subtype.value).toLocaleString()}</span>}
@@ -364,6 +369,49 @@ export default function Memory() {
           ))}
         </div>
       </div>
+
+      {/* Advanced filters */}
+      <details className="mb-6 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3" defaultOpen={Boolean(category || domain || kind || source)}>
+        <summary className="cursor-pointer text-sm font-medium text-zinc-300">
+          Advanced filters
+          <span className="ml-2 text-xs font-normal text-zinc-500">category, domain, kind, and source</span>
+        </summary>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <select value={category} onChange={(e) => applyCategory(e.target.value)} className={selectCls}>
+            <option value="">All areas</option>
+            {CATEGORY_OPTIONS.map((c) => (
+              <option key={c.value} value={c.value}>{c.label}</option>
+            ))}
+          </select>
+          <select value={domain} onChange={(e) => setDomain(e.target.value)} className={selectCls}>
+            <option value="">All domains</option>
+            {DOMAIN_OPTIONS.map((d) => (
+              <option key={d.value} value={d.value}>{d.label}</option>
+            ))}
+          </select>
+          <select value={kind} onChange={(e) => applyKind(e.target.value)} className={selectCls}>
+            <option value="">All kinds</option>
+            {KIND_OPTIONS.map((k) => (
+              <option key={k.value} value={k.value}>{k.label}</option>
+            ))}
+          </select>
+          <select value={source} onChange={(e) => setSource(e.target.value)} className={selectCls}>
+            <option value="">All sources</option>
+            {SOURCE_OPTIONS.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+          {(category || domain || kind || source) && (
+            <button
+              type="button"
+              onClick={clearAdvancedFilters}
+              className="px-2.5 py-1.5 rounded-md text-sm text-zinc-500 hover:text-zinc-300"
+            >
+              Clear advanced
+            </button>
+          )}
+        </div>
+      </details>
 
       {/* Sort & date range */}
       <div className="flex flex-wrap items-center gap-2 mb-6">
@@ -476,5 +524,22 @@ export default function Memory() {
         </>
       )}
     </div>
+  );
+}
+
+function ActiveFilterChip({ filter }: { filter: ActiveFilter }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300">
+      <span className="text-zinc-500">{filter.label}</span>
+      <span>{filter.value}</span>
+      <button
+        type="button"
+        onClick={filter.onClear}
+        className="text-zinc-500 hover:text-zinc-200"
+        aria-label={`Clear ${filter.label} filter`}
+      >
+        ×
+      </button>
+    </span>
   );
 }
