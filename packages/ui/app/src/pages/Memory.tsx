@@ -224,7 +224,7 @@ export default function Memory() {
   const subtypeCount = (value: string) => stats?.bySubtype?.[value] ?? 0;
   const selectedSubtype = memorySubtype ? SUBTYPE_BY_VALUE[memorySubtype] : undefined;
   const activeFilters: ActiveFilter[] = [
-    category ? { key: "category", label: "Area", value: ontologyLabel(category), onClear: () => setCategory("") } : null,
+    category ? { key: "category", label: "Category", value: ontologyLabel(category), onClear: () => setCategory("") } : null,
     domain ? { key: "domain", label: "Domain", value: ontologyLabel(domain), onClear: () => setDomain("") } : null,
     kind ? { key: "kind", label: "Kind", value: ontologyLabel(kind), onClear: () => setKind("") } : null,
     memorySubtype ? {
@@ -293,7 +293,7 @@ export default function Memory() {
           </div>
           {selectedSubtype && (
             <p className="mt-2 text-xs text-zinc-500">
-              Subtype is a specific memory type. It filters by <span className="text-zinc-300">{selectedSubtype.label}</span> without also requiring a category or kind filter.
+              Subtype is an ontology field. It filters by <span className="text-zinc-300">{selectedSubtype.label}</span> without also requiring a category or kind filter.
             </p>
           )}
         </div>
@@ -303,9 +303,9 @@ export default function Memory() {
       <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
-            <h3 className="text-sm font-medium text-zinc-200">Browse by memory type</h3>
+            <h3 className="text-sm font-medium text-zinc-200">Browse by category and subtype</h3>
             <p className="text-xs text-zinc-500 mt-0.5">
-              Start with a broad area, or pick a specific subtype for a narrower, predictable filter.
+              Categories are broad ontology buckets. Subtypes are narrower ontology buckets for specific memory shapes.
             </p>
           </div>
           {memorySubtype && (
@@ -331,7 +331,7 @@ export default function Memory() {
             <div key={group.id} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
               <p className="text-sm font-medium text-zinc-200">{group.label}</p>
               <p className="text-xs text-zinc-500 mt-1 min-h-8">{group.description}</p>
-              <p className="mt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">Areas</p>
+              <p className="mt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">Categories</p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {group.categories.map((cat) => (
                   <button
@@ -346,7 +346,7 @@ export default function Memory() {
                   </button>
                 ))}
               </div>
-              <p className="mt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">Specific types</p>
+              <p className="mt-3 text-[10px] font-medium uppercase tracking-wide text-zinc-600">Subtypes</p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {group.subtypes.map((subtypeValue) => {
                   const subtype = SUBTYPE_BY_VALUE[subtypeValue];
@@ -378,7 +378,7 @@ export default function Memory() {
         </summary>
         <div className="mt-3 flex flex-wrap gap-2">
           <select value={category} onChange={(e) => applyCategory(e.target.value)} className={selectCls}>
-            <option value="">All areas</option>
+            <option value="">All categories</option>
             {CATEGORY_OPTIONS.map((c) => (
               <option key={c.value} value={c.value}>{c.label}</option>
             ))}

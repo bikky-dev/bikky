@@ -222,7 +222,7 @@ export default function MemoryFact() {
             </>
           ) : (
             <>
-              <Badge label={`Area: ${ontologyLabel(fact.category)}`} color={CATEGORY_COLORS[fact.category]} size="md" />
+              <Badge label={`Category: ${ontologyLabel(fact.category)}`} color={CATEGORY_COLORS[fact.category]} size="md" />
               {fact.kind && <Badge label={`Kind: ${ontologyLabel(fact.kind)}`} color={KIND_COLORS[fact.kind]} size="md" />}
               {fact.memory_subtype && <Badge label={`Type: ${ontologyLabel(fact.memory_subtype)}`} color={CATEGORY_COLORS[fact.category]} size="md" />}
               {fact.domain && <Badge label={`Domain: ${ontologyLabel(fact.domain)}`} color={fact.domain === "personal_productivity" ? "green" : "zinc"} size="md" />}

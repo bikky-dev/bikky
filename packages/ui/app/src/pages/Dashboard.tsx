@@ -147,9 +147,9 @@ export default function Dashboard() {
       {/* Subtype navigation */}
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5 mb-8">
         <div className="mb-4">
-          <h3 className="text-sm font-medium text-zinc-300">Browse by memory type</h3>
+          <h3 className="text-sm font-medium text-zinc-300">Browse by subtype</h3>
           <p className="mt-1 text-xs text-zinc-500">
-            Subtypes are precise lenses. Pick one to open Memory with only that subtype filter active.
+            Subtypes are narrower ontology buckets. Pick one to open Memory with only that subtype filter active.
           </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

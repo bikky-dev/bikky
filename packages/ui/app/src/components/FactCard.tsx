@@ -44,7 +44,7 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Badge label={`Area: ${ontologyLabel(fact.category)}`} color={CATEGORY_COLORS[fact.category]} />
+        <Badge label={`Category: ${ontologyLabel(fact.category)}`} color={CATEGORY_COLORS[fact.category]} />
         {fact.kind && fact.kind !== "fact" && (
           <Badge label={`Kind: ${ontologyLabel(fact.kind)}`} color={KIND_COLORS[fact.kind]} />
         )}
