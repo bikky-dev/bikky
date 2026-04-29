@@ -3,12 +3,10 @@ import { useParams, useNavigate, Link } from "react-router";
 import { ArrowLeft, Pencil, Trash2, Loader2, Save, X } from "lucide-react";
 import { apiFetch, ApiError } from "../lib/api";
 import { relativeTime, CATEGORY_COLORS, KIND_COLORS } from "../lib/format";
+import { CATEGORY_OPTIONS, DOMAIN_OPTIONS, ontologyLabel } from "../lib/ontology";
 import Badge from "../components/Badge";
 import { EntityChip } from "../components/EntityChip";
 import type { Fact } from "../components/FactCard";
-
-const CATEGORIES = ["infrastructure", "decisions", "observation", "preferences", "projects", "team"];
-const DOMAINS = ["work", "personal"];
 
 export default function MemoryFact() {
   const { id } = useParams<{ id: string }>();
@@ -36,7 +34,7 @@ export default function MemoryFact() {
         setFact(f);
         setEditContent(f.content);
         setEditCategory(f.category);
-        setEditDomain(f.domain ?? "work");
+        setEditDomain(f.domain ?? "software_engineering");
         setEditEntities(f.entities.join(", "));
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : "Failed to load fact"))
@@ -83,7 +81,7 @@ export default function MemoryFact() {
     setEditing(false);
     setEditContent(fact.content);
     setEditCategory(fact.category);
-    setEditDomain(fact.domain ?? "work");
+    setEditDomain(fact.domain ?? "software_engineering");
     setEditEntities(fact.entities.join(", "));
   };
 
@@ -113,6 +111,12 @@ export default function MemoryFact() {
 
   const selectCls =
     "bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500";
+  const categoryOptions = CATEGORY_OPTIONS.some((c) => c.value === editCategory) || !editCategory
+    ? CATEGORY_OPTIONS
+    : [{ value: editCategory, label: `Legacy: ${editCategory}` }, ...CATEGORY_OPTIONS];
+  const domainOptions = DOMAIN_OPTIONS.some((d) => d.value === editDomain) || !editDomain
+    ? DOMAIN_OPTIONS
+    : [{ value: editDomain, label: `Legacy: ${editDomain}` }, ...DOMAIN_OPTIONS];
 
   return (
     <div>
@@ -206,22 +210,23 @@ export default function MemoryFact() {
           {editing ? (
             <>
               <select value={editCategory} onChange={(e) => setEditCategory(e.target.value)} className={selectCls}>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
+                {categoryOptions.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
                 ))}
               </select>
               <select value={editDomain} onChange={(e) => setEditDomain(e.target.value)} className={selectCls}>
-                {DOMAINS.map((d) => (
-                  <option key={d} value={d}>{d}</option>
+                {domainOptions.map((d) => (
+                  <option key={d.value} value={d.value}>{d.label}</option>
                 ))}
               </select>
             </>
           ) : (
             <>
-              <Badge label={fact.category} color={CATEGORY_COLORS[fact.category]} size="md" />
-              {fact.kind && <Badge label={fact.kind} color={KIND_COLORS[fact.kind]} size="md" />}
-              {fact.domain && <Badge label={fact.domain} color={fact.domain === "personal" ? "green" : "zinc"} size="md" />}
-              {fact.source && <Badge label={fact.source} size="md" />}
+              <Badge label={ontologyLabel(fact.category)} color={CATEGORY_COLORS[fact.category]} size="md" />
+              {fact.kind && <Badge label={ontologyLabel(fact.kind)} color={KIND_COLORS[fact.kind]} size="md" />}
+              {fact.memory_subtype && <Badge label={ontologyLabel(fact.memory_subtype)} color={CATEGORY_COLORS[fact.category]} size="md" />}
+              {fact.domain && <Badge label={ontologyLabel(fact.domain)} color={fact.domain === "personal_productivity" ? "green" : "zinc"} size="md" />}
+              {fact.source && <Badge label={ontologyLabel(fact.source)} size="md" />}
             </>
           )}
         </div>

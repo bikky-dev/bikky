@@ -1,6 +1,7 @@
 import Badge from "./Badge";
 import { EntityChip } from "./EntityChip";
 import { relativeTime, truncate, CATEGORY_COLORS, KIND_COLORS } from "../lib/format";
+import { ontologyLabel } from "../lib/ontology";
 
 export interface Fact {
   id: string;
@@ -8,6 +9,7 @@ export interface Fact {
   category: string;
   domain?: string;
   kind?: string;
+  memory_subtype?: string | null;
   entities: string[];
   source?: string;
   confidence: number;
@@ -42,12 +44,15 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Badge label={fact.category} color={CATEGORY_COLORS[fact.category]} />
+        <Badge label={ontologyLabel(fact.category)} color={CATEGORY_COLORS[fact.category]} />
         {fact.kind && fact.kind !== "fact" && (
-          <Badge label={fact.kind} color={KIND_COLORS[fact.kind]} />
+          <Badge label={ontologyLabel(fact.kind)} color={KIND_COLORS[fact.kind]} />
         )}
-        {fact.domain && fact.domain !== "work" && (
-          <Badge label={fact.domain} color="green" />
+        {fact.memory_subtype && (
+          <Badge label={ontologyLabel(fact.memory_subtype)} color={CATEGORY_COLORS[fact.category]} />
+        )}
+        {fact.domain && fact.domain !== "software_engineering" && (
+          <Badge label={ontologyLabel(fact.domain)} color="green" />
         )}
         {fact.entities.map((e) => (
           <EntityChip key={e} name={e} link={false} />

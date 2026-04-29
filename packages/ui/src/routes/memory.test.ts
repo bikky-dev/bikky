@@ -164,7 +164,7 @@ describe("ui/routes/memory", () => {
       });
       const app = buildApp();
 
-      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=hello&category=infrastructure&source=system&limit=5"));
+      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=hello&category=infrastructure&memory_subtype=codebase_map&source=system&limit=5"));
       assert.equal(res.status, 200);
       const body = await res.json() as { results: any[]; count: number };
       assert.equal(body.count, 1);
@@ -176,6 +176,10 @@ describe("ui/routes/memory", () => {
       assert.equal(search!.body.limit, 5);
       assert.equal(search!.body.filter.must[0].match.value, "infrastructure");
       assert.deepEqual(search!.body.filter.must[1], {
+        key: "memory_subtype",
+        match: { value: "codebase_map" },
+      });
+      assert.deepEqual(search!.body.filter.must[2], {
         key: "source",
         match: { any: ["system", "daemon"] },
       });
@@ -216,6 +220,19 @@ describe("ui/routes/memory", () => {
       await app.fetch(new Request("http://localhost/api/memory/browse?offset=cursor-1"));
       const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
       assert.equal(scroll!.body.offset, "cursor-1");
+    });
+
+    it("forwards memory_subtype to Qdrant filters", async () => {
+      const log = installMock({
+        qdrantHandler: () => ({ result: { points: [], next_page_offset: null } }),
+      });
+      const app = buildApp();
+
+      await app.fetch(new Request("http://localhost/api/memory/browse?memory_subtype=workstream"));
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.ok(scroll!.body.filter.must.some((cond: any) =>
+        cond.key === "memory_subtype" && cond.match?.value === "workstream",
+      ));
     });
   });
 
@@ -536,7 +553,7 @@ describe("ui/routes/memory", () => {
   });
 
   describe("GET /stats", () => {
-    it("returns total/active/superseded counts and per-category/per-kind breakdowns", async () => {
+    it("returns total/active/superseded counts and ontology breakdowns", async () => {
       let pointsCount = 100;
       installMock({
         qdrantHandler: (c) => {
@@ -556,12 +573,20 @@ describe("ui/routes/memory", () => {
 
       const res = await app.fetch(new Request("http://localhost/api/memory/stats"));
       assert.equal(res.status, 200);
-      const body = await res.json() as { total: number; active: number; superseded: number; byCategory: Record<string, number>; byKind: Record<string, number> };
+      const body = await res.json() as {
+        total: number;
+        active: number;
+        superseded: number;
+        byCategory: Record<string, number>;
+        byKind: Record<string, number>;
+        bySubtype: Record<string, number>;
+      };
       assert.equal(body.total, 100);
       assert.equal(body.active, 90);
       assert.equal(body.superseded, 10);
-      assert.equal(body.byCategory.infrastructure, 10);
+      assert.equal(body.byCategory.codebase, 10);
       assert.equal(body.byKind.fact, 10);
+      assert.equal(body.bySubtype.codebase_map, 10);
     });
   });
 });

@@ -56,11 +56,16 @@ interface SharedResponse {
 }
 
 const CATEGORY_HEX: Record<string, string> = {
+  codebase: "#3b82f6",
   infrastructure: "#3b82f6",
+  operations: "#f97316",
   decisions: "#a855f7",
+  product_domain: "#6366f1",
+  observations: "#f59e0b",
   observation: "#f59e0b",
   preferences: "#22c55e",
   projects: "#06b6d4",
+  people: "#ec4899",
   team: "#ec4899",
 };
 

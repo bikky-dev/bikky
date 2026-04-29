@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { ApiError } from "../lib/api";
 import { getStats, type MemoryStats } from "../lib/statsCache";
 import { CATEGORY_COLORS } from "../lib/format";
+import { MEMORY_SUBTYPE_OPTIONS, ONTOLOGY_GROUPS, SUBTYPE_BY_VALUE, ontologyLabel } from "../lib/ontology";
 import Badge from "../components/Badge";
 
 type LoadState<T> = { loading: true } | { loading: false; data: T } | { loading: false; error: string };
@@ -31,7 +32,7 @@ function CategoryBar({ category, count, max }: { category: string; count: number
   };
   return (
     <div className="flex items-center gap-3">
-      <span className="text-xs text-zinc-400 w-28 shrink-0 capitalize">{category}</span>
+      <span className="text-xs text-zinc-400 w-36 shrink-0">{ontologyLabel(category)}</span>
       <div className="flex-1 h-5 bg-zinc-800 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${bgMap[color] ?? "bg-zinc-500"}`} style={{ width: `${pct}%` }} />
       </div>
@@ -88,8 +89,9 @@ export default function Dashboard() {
     );
   }
 
-  const { active, superseded, total, byCategory, byKind } = stats.data;
+  const { active, superseded, total, byCategory, byKind, bySubtype } = stats.data;
   const maxCat = Math.max(...Object.values(byCategory), 1);
+  const subtypeTotal = Object.values(bySubtype ?? {}).reduce((sum, count) => sum + count, 0);
 
   return (
     <div>
@@ -100,7 +102,7 @@ export default function Dashboard() {
         <StatCard label="Active Facts" value={active} />
         <StatCard label="Total Stored" value={total} sub={`${superseded} superseded`} />
         <StatCard label="Categories" value={Object.keys(byCategory).length} />
-        <StatCard label="Kinds" value={Object.keys(byKind).length} />
+        <StatCard label="Subtypes" value={Object.keys(bySubtype ?? {}).length} sub={`${subtypeTotal.toLocaleString()} typed`} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
@@ -130,11 +132,51 @@ export default function Dashboard() {
                   to={`/memory?kind=${kind}`}
                   className="flex items-center justify-between px-3 py-2 rounded-md hover:bg-zinc-800 transition-colors"
                 >
-                  <Badge label={kind} color={kind === "fact" ? "blue" : kind === "summary" ? "purple" : kind === "distilled" ? "amber" : "cyan"} />
+                  <Badge label={ontologyLabel(kind)} color={kind === "fact" ? "blue" : kind === "summary" ? "purple" : kind === "distilled" ? "amber" : kind === "telemetry" ? "red" : "cyan"} />
                   <span className="text-sm text-zinc-300">{count}</span>
                 </Link>
               ))}
           </div>
+        </div>
+      </div>
+
+      {/* Subtype navigation */}
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5 mb-8">
+        <h3 className="text-sm font-medium text-zinc-400 mb-4">Browse by memory subtype</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {ONTOLOGY_GROUPS.map((group) => (
+            <div key={group.id} className="rounded-md border border-zinc-800 bg-zinc-950/50 p-3">
+              <p className="text-sm font-medium text-zinc-200">{group.label}</p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {group.subtypes.map((subtypeValue) => {
+                  const subtype = SUBTYPE_BY_VALUE[subtypeValue];
+                  if (!subtype) return null;
+                  const count = bySubtype?.[subtype.value] ?? 0;
+                  return (
+                    <Link
+                      key={subtype.value}
+                      to={`/memory?category=${subtype.category}&kind=${subtype.kind}&memory_subtype=${subtype.value}`}
+                      className="inline-flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 transition-colors"
+                    >
+                      <span>{subtype.label}</span>
+                      <span className="text-zinc-500">{count.toLocaleString()}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {MEMORY_SUBTYPE_OPTIONS.map((subtype) => (
+            <Link
+              key={subtype.value}
+              to={`/memory?category=${subtype.category}&kind=${subtype.kind}&memory_subtype=${subtype.value}`}
+              className="text-xs text-zinc-500 hover:text-zinc-300"
+            >
+              {subtype.label}
+            </Link>
+          ))}
         </div>
       </div>
 

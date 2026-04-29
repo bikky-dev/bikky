@@ -6,6 +6,7 @@ export interface MemoryStats {
   superseded: number;
   byCategory: Record<string, number>;
   byKind: Record<string, number>;
+  bySubtype: Record<string, number>;
 }
 
 const TTL_MS = 30_000;
