@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a reproducible problem in bikky or bikky-ui
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! Please include enough detail to reproduce it.
+
+  - type: input
+    id: package
+    attributes:
+      label: Package and version
+      description: e.g. `bikky@0.3.8` or `bikky-ui@0.1.10`
+      placeholder: bikky@0.3.8
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug. What did you expect, and what did you see instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps that trigger the bug. A small code snippet or command sequence is ideal.
+      placeholder: |
+        1. Run `npx bikky-ui`
+        2. Open http://localhost:3001
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Paste any relevant log output, stack traces, or error messages. Please redact secrets.
+      render: shell
+
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Node version, and (if relevant) MCP client (Copilot, Claude Code, Cursor, …).
+      placeholder: macOS 14.5, Node 22.3.0, Claude Code
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: I am on the latest minor release of the affected package (or have explained why I can't upgrade).
+          required: true
