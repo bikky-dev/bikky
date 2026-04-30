@@ -1,11 +1,26 @@
 # Configuration
 
-bikky is designed to start with one required setting: **where Qdrant lives**. Everything else has local defaults.
+bikky is designed to keep setup small. For the best first-time experience, run Qdrant locally and use hosted models for embeddings and extraction quality. For private, free, account-free testing, you can use local Ollama models instead.
 
 ```bash
 mkdir -p ~/.bikky
-echo '{ "qdrant_url": "http://localhost:6333", "qdrant_api_key": "" }' > ~/.bikky/config.json
-# qdrant_api_key is optional; leave it empty or omit it for local Qdrant.
+cat > ~/.bikky/config.json <<'JSON'
+{
+  "qdrant_url": "http://localhost:6333",
+  "qdrant_api_key": "",
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "api_key": "sk-..."
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "api_key": "sk-..."
+  }
+}
+JSON
 bikky status
 ```
 
@@ -17,15 +32,40 @@ If you know which path you want, start with the focused guide:
 
 | Scenario | Guide |
 |---|---|
+| Recommended first-time | [Hosted models config](config/hosted-models.md) |
 | Local and free | [Local config guide](config/local.md) |
 | Hosted Qdrant + local models | [Hosted Qdrant + local models](config/hosted-qdrant-local-models.md) |
 | Fully hosted | [Fully hosted config](config/fully-hosted.md) |
 
+### Recommended first-time
+
+Use this when you want the best first impression: Qdrant runs locally, while hosted embeddings and LLM calls provide stronger extraction and recall quality than small local models.
+
+```json
+{
+  "qdrant_url": "http://localhost:6333",
+  "qdrant_api_key": "",
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "api_key": "sk-..."
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "api_key": "sk-..."
+  }
+}
+```
+
+`qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant. Prefer env vars for hosted model auth? Omit `api_key` above and set `OPENAI_API_KEY` instead.
+
 ### Local and free
 
-Use this first for private, free testing. Qdrant runs locally and Ollama provides the default embedding + LLM models.
+Use this for private, free, account-free testing. Qdrant runs locally and Ollama provides the default embedding + LLM models.
 
-Local model quality depends on the models you run. For the strongest extraction and embedding quality while evaluating bikky, use the [fully hosted config](config/fully-hosted.md).
+Local model quality depends on the models you run. For the strongest extraction and embedding quality while evaluating bikky, use the [hosted models config](config/hosted-models.md).
 
 ```json
 {

@@ -42,22 +42,37 @@ Subtypes keep recall precise without making setup harder:
 
 ## Quick start
 
-The easiest way to try bikky is **100% local, free, and account-free**: Qdrant in Docker, embeddings via Ollama. bikky has one required setting: where Qdrant lives. Everything else has local defaults.
+The recommended first-time setup is **local Qdrant + hosted models**: Qdrant runs on your machine, while hosted embeddings and LLM calls give you the best extraction and recall quality out of the box.
 
 ```bash
 # 1. Pull and run Qdrant (vector store)
 docker run -d --name qdrant -p 6333:6333 -v qdrant_storage:/qdrant/storage qdrant/qdrant
 
-# 2. Install Ollama (https://ollama.com) and pull the default embedding model
-ollama pull qwen3-embedding:0.6b
-
-# 3. Install bikky
+# 2. Install bikky
 npm install -g bikky
 mkdir -p ~/.bikky
-echo '{ "qdrant_url": "http://localhost:6333", "qdrant_api_key": "" }' > ~/.bikky/config.json
+# Replace sk-... below with your hosted model API key.
+cat > ~/.bikky/config.json <<'JSON'
+{
+  "qdrant_url": "http://localhost:6333",
+  "qdrant_api_key": "",
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "api_key": "sk-..."
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "api_key": "sk-..."
+  }
+}
+JSON
 # qdrant_api_key is optional; leave it empty or omit it for local Qdrant.
+# Prefer env vars? Omit api_key above and set OPENAI_API_KEY instead.
 
-# 4. Register bikky with your editor and start the background service
+# 3. Register bikky with your editor and start the background service
 bikky setup            # writes MCP config for Copilot + Claude Code, then starts the daemon
 ```
 
@@ -67,15 +82,15 @@ Restart your editor. The memory tools appear automatically in supported MCP clie
 bikky status           # confirms Qdrant, embeddings, daemon, and UI health
 ```
 
-That's it. You can use the local setup forever, or swap in hosted pieces later.
+That's it. You can keep Qdrant local forever, or move the vector store to Qdrant Cloud later.
 
-Local Ollama models are great for private, free testing, but extraction and embedding quality depends on the models you run. If you're evaluating bikky for a team or want the strongest first impression, use the [fully hosted config](docs/config/fully-hosted.md) with hosted models.
+Prefer 100% local and account-free? Use the [local and free config](docs/config/local.md). Local Ollama models are great for private testing, but extraction and embedding quality depends on the models you run.
 
 ---
 
 ## Setup options
 
-Start with the local path for private, free testing. If you want the best extraction and embedding quality while evaluating bikky, choose the fully hosted setup.
+Start with the recommended first-time path for the best extraction and embedding quality. Choose the local path when privacy, offline use, or zero hosted-model cost matters most.
 
 ### What you need
 
@@ -83,15 +98,17 @@ Start with the local path for private, free testing. If you want the best extrac
 |---|---|---|
 | **Node.js** | ≥ 20 | `nvm install 20` or your package manager |
 | **Vector store** | Qdrant | Local Docker (recommended first) · [Qdrant Cloud](https://cloud.qdrant.io) · Self-hosted |
-| **Embeddings** | One provider | Ollama local by default · OpenAI / Bedrock / Portkey if you prefer hosted |
+| **Embeddings** | One provider | Hosted models recommended first · Ollama local for private/free use |
+| **LLM** | One provider | Hosted models recommended first · Ollama local for private/free use |
 | **Docker** *(optional)* | Only if you run Qdrant locally | Docker Desktop, OrbStack, colima, etc. |
 
 ### Choose a setup
 
 | Setup | Best for | Config |
 |---|---|---|
+| **Recommended first-time** | Best extraction and embedding quality with local Qdrant | [Hosted models config](docs/config/hosted-models.md) |
 | **Local and free** | Private, free testing and local-first use | [Local config guide](docs/config/local.md) |
-| **Hosted Qdrant + local Ollama** | Sharing memory across machines while keeping embeddings local | [Hosted Qdrant + local models](docs/config/hosted-qdrant-local-models.md) |
+| **Hosted Qdrant + local Ollama** | Sharing memory across machines while keeping model calls local | [Hosted Qdrant + local models](docs/config/hosted-qdrant-local-models.md) |
 | **Fully hosted** | Teams that want managed vector storage and hosted models | [Fully hosted config](docs/config/fully-hosted.md) |
 
 ### Configure
