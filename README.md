@@ -47,6 +47,7 @@ ollama pull qwen3-embedding:0.6b
 
 # 3. Install and start bikky
 npm install -g bikky
+mkdir -p ~/.bikky
 echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
 bikky setup            # writes MCP config for Copilot + Claude Code, then starts the daemon
 ```
@@ -104,6 +105,27 @@ export QDRANT_URL="http://localhost:6333"
 
 > 💡 **Tip:** Set `BIKKY_HOME` to relocate the config dir (defaults to `~/.bikky/`). Useful for tests, multiple profiles, or sandboxed setups.
 
+### Workspaces — isolating personal vs team memory
+
+A *workspace* is a logical namespace inside the same Qdrant collection. Use it to keep personal-project memory separate from your team's shared memory, or to split unrelated work surfaces.
+
+| Source (highest priority first) | How to set |
+|---|---|
+| Explicit param on a tool call | `memory_store({..., workspace_id: "team-x"})` |
+| Environment variable | `BIKKY_WORKSPACE=team-x` (set on the agent / MCP client process) |
+| Config default | `{"default_workspace": "team-x"}` in `~/.bikky/config.json` |
+| Unset | Writes are unscoped; reads return everything |
+
+The literal workspace name `"default"` has a special read semantic: queries scoped to `"default"` also return legacy facts that have no `workspace_id` payload. All other named workspaces are strict.
+
+```bash
+# Personal solo work — set in your shell profile
+export BIKKY_WORKSPACE="solo"
+
+# Team shared memory — typically set via config or per-MCP-client env
+echo '{"qdrant_url":"...","default_workspace":"team-x"}' > ~/.bikky/config.json
+```
+
 > 📖 **Full configuration reference** — providers, models, daemon settings, env vars, copy-paste examples for every stack: **[docs/configuration.md](docs/configuration.md)**
 >
 > 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md](CONTRIBUTING.md)** — it's a single-file change.
@@ -118,7 +140,7 @@ export QDRANT_URL="http://localhost:6333"
 
 **MCP Server** — tools your agent calls directly:
 
-`memory_store` · `memory_recall` · `memory_entity` · `memory_relations` · `memory_forget` · `memory_verify` · `memory_heartbeat` · `memory_review` · `configure_credentials` · `verify_connection`
+`memory_store` · `memory_recall` · `memory_entity` · `memory_relations` · `memory_forget` · `memory_verify` · `memory_mark_useful` · `memory_report_outcome` · `memory_session_summary` · `memory_distill` · `memory_heartbeat` · `memory_review` · `get_setup_status` · `configure_credentials` · `verify_connection`
 
 **Daemon** — background process that passively watches session logs, extracts structured facts, writes lightweight session indexes, captures coherent episode summaries, updates current-state workstream summaries, infers entity relationships from recently changed facts, and runs the consolidation pipeline. Lifecycle memory is daemon-owned so agents do not need to remember summary/distillation tool calls.
 
@@ -190,7 +212,7 @@ Raw fact accumulation creates noise. bikky keeps the knowledge store clean autom
 
 ## Web UI
 
-[`bikky-ui`](packages/ui) is a local dashboard for browsing and managing your team's memory — facts, entities, quality metrics, aggregate impact insights, and the relationship graph.
+[`bikky-ui`](https://www.npmjs.com/package/bikky-ui) is a local dashboard for browsing and managing your team's memory — facts, entities, quality metrics, aggregate impact insights, and the relationship graph.
 
 ```bash
 npx bikky-ui          # one-shot — no install needed
