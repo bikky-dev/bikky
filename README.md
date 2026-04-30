@@ -54,7 +54,8 @@ ollama pull qwen3-embedding:0.6b
 # 3. Install bikky
 npm install -g bikky
 mkdir -p ~/.bikky
-echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
+echo '{ "qdrant_url": "http://localhost:6333", "qdrant_api_key": "" }' > ~/.bikky/config.json
+# qdrant_api_key is optional; leave it empty or omit it for local Qdrant.
 
 # 4. Register bikky with your editor and start the background service
 bikky setup            # writes MCP config for Copilot + Claude Code, then starts the daemon

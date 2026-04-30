@@ -4,7 +4,8 @@ bikky is designed to start with one required setting: **where Qdrant lives**. Ev
 
 ```bash
 mkdir -p ~/.bikky
-echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
+echo '{ "qdrant_url": "http://localhost:6333", "qdrant_api_key": "" }' > ~/.bikky/config.json
+# qdrant_api_key is optional; leave it empty or omit it for local Qdrant.
 bikky status
 ```
 
@@ -26,9 +27,12 @@ Use this first. Qdrant runs locally and Ollama provides the default embedding + 
 
 ```json
 {
-  "qdrant_url": "http://localhost:6333"
+  "qdrant_url": "http://localhost:6333",
+  "qdrant_api_key": ""
 }
 ```
+
+`qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant.
 
 ### Hosted Qdrant, local models
 
@@ -40,6 +44,8 @@ Use this when you want the memory database shared across machines, but still wan
   "qdrant_api_key": "your-key"
 }
 ```
+
+`qdrant_api_key` is optional only for unauthenticated self-hosted Qdrant. Qdrant Cloud usually requires it.
 
 ### Hosted Qdrant and hosted models
 
@@ -63,6 +69,8 @@ Use this when you want the whole stack managed. This example uses OpenAI-compati
 }
 ```
 
+`qdrant_api_key` is optional only for unauthenticated self-hosted Qdrant. Qdrant Cloud usually requires it.
+
 After changing Qdrant or provider settings, restart long-running processes:
 
 ```bash
@@ -85,7 +93,7 @@ Useful basics:
 | Env var | Config field | Notes |
 |---|---|---|
 | `QDRANT_URL` | `qdrant_url` | Required unless set in config |
-| `QDRANT_API_KEY` | `qdrant_api_key` | Needed for Qdrant Cloud |
+| `QDRANT_API_KEY` | `qdrant_api_key` | Optional for local/unauthenticated Qdrant; usually needed for Qdrant Cloud |
 | `BIKKY_HOME` | — | Moves the config/log/state directory from `~/.bikky` |
 
 ## Provider options
@@ -107,7 +115,7 @@ You can keep the defaults unless you want hosted models.
 | Setting | Env var | Default | Description |
 |---|---|---|---|
 | `qdrant_url` | `QDRANT_URL` | none | Qdrant REST URL |
-| `qdrant_api_key` | `QDRANT_API_KEY` | none | Required for Qdrant Cloud/authenticated self-hosted Qdrant |
+| `qdrant_api_key` | `QDRANT_API_KEY` | none | Optional for local/unauthenticated Qdrant; required for Qdrant Cloud/authenticated self-hosted Qdrant |
 | `collection` | `BIKKY_COLLECTION` | `bikky` | Collection name |
 
 ### Embeddings
@@ -223,9 +231,12 @@ Example:
 ```json
 {
   "qdrant_url": "http://localhost:6333",
+  "qdrant_api_key": "",
   "default_workspace": "team"
 }
 ```
+
+`qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant.
 
 The literal workspace name `"default"` also reads legacy facts that do not have a `workspace_id` payload. Other named workspaces are strict.
 

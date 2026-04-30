@@ -22,6 +22,8 @@ Save this as `~/.bikky/config.json`:
 
 bikky will store memory in hosted Qdrant and keep model calls local through Ollama.
 
+`qdrant_api_key` is optional only for unauthenticated self-hosted Qdrant. Qdrant Cloud usually requires it.
+
 ## Check it
 
 ```bash
@@ -35,4 +37,3 @@ bikky stop && bikky start
 ```
 
 Then restart your editor so its MCP process reloads.
-

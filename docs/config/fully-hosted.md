@@ -28,6 +28,8 @@ Save this as `~/.bikky/config.json`:
 }
 ```
 
+`qdrant_api_key` is optional only for unauthenticated self-hosted Qdrant. Qdrant Cloud usually requires it.
+
 Set the API key as an environment variable so it does not have to live in the config file:
 
 ```bash
@@ -49,4 +51,3 @@ bikky stop && bikky start
 Then restart your editor so its MCP process reloads.
 
 For Bedrock, Portkey, custom base URLs, or model-specific dimensions, see the [full configuration guide](../configuration.md).
-

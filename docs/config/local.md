@@ -14,11 +14,14 @@ Save this as `~/.bikky/config.json`:
 
 ```json
 {
-  "qdrant_url": "http://localhost:6333"
+  "qdrant_url": "http://localhost:6333",
+  "qdrant_api_key": ""
 }
 ```
 
 That's the whole config. bikky uses local Ollama defaults for embeddings and background curation.
+
+`qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant.
 
 ## Check it
 
@@ -27,4 +30,3 @@ bikky status
 ```
 
 If you started from a fresh install, run `bikky setup` after writing the config, then restart your editor so its MCP process reloads.
-
