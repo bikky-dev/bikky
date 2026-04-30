@@ -15,7 +15,7 @@ bikky gives AI coding agents (GitHub Copilot, Claude Code, Cursor, and other MCP
   <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/diagrams/team-memory.svg" alt="Memory — facts flow from individual sessions into a self-curating knowledge store, shared across your team (or kept just for you)" width="720" />
 </p>
 
-<p align="center"><i>Knowledge flows from every session into a store that curates itself over time — deduplicating, distilling, and decaying stale facts — so every future session starts smarter. Share the workspace across a team, or keep it solo.</i></p>
+<p align="center"><i>Knowledge flows from every session into a store that curates itself over time — deduplicating, distilling, and decaying stale facts — so every future session starts smarter. Share it across a team, or keep it solo.</i></p>
 
 ---
 
@@ -36,7 +36,7 @@ The most valuable things you and your agents learn — why a config value exists
 
 ## Quick start
 
-The fastest way to try bikky: **100% local, free, no accounts** — Qdrant in Docker, embeddings via Ollama.
+The easiest way to try bikky is **100% local, free, and account-free**: Qdrant in Docker, embeddings via Ollama. bikky has one required setting: where Qdrant lives. Everything else has local defaults.
 
 ```bash
 # 1. Pull and run Qdrant (vector store)
@@ -45,66 +45,63 @@ docker run -d --name qdrant -p 6333:6333 -v qdrant_storage:/qdrant/storage qdran
 # 2. Install Ollama (https://ollama.com) and pull the default embedding model
 ollama pull qwen3-embedding:0.6b
 
-# 3. Install and start bikky
+# 3. Install bikky
 npm install -g bikky
+mkdir -p ~/.bikky
 echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
+
+# 4. Register bikky with your editor and start the background service
 bikky setup            # writes MCP config for Copilot + Claude Code, then starts the daemon
 ```
 
-Restart your editor — the memory tools (`memory_store`, `memory_recall`, …) appear automatically.
+Restart your editor. The memory tools appear automatically in supported MCP clients.
 
 ```bash
-bikky status           # validate config, Qdrant, embeddings, daemon, and UI health
+bikky status           # confirms Qdrant, embeddings, daemon, and UI health
 ```
 
-That's the whole thing. From here you can swap any piece (hosted Qdrant, OpenAI / Bedrock embeddings, a hosted LLM for richer daemon distillation) — see **Setup** below.
+That's it. You can use the local setup forever, or swap in hosted pieces later.
 
 ---
 
-## Setup
+## Setup options
 
-### Prerequisites
+Start with the local path unless you already know you want hosted infrastructure.
+
+### What you need
 
 | | Required | Options |
 |---|---|---|
 | **Node.js** | ≥ 20 | `nvm install 20` or your package manager |
-| **Vector store** | Qdrant | **Local Docker** (free, recommended for dev) · **[Qdrant Cloud](https://cloud.qdrant.io)** (free tier, 1 GB) · **Self-hosted** anywhere reachable |
-| **Embeddings** | One provider | **[Ollama](https://ollama.com)** local (free, default) · **OpenAI** · **AWS Bedrock** · **[Portkey](https://portkey.ai)** gateway |
-| **LLM** *(optional)* | Used by the daemon for distillation & extraction | Same provider list as embeddings — leave on Ollama for a fully-local stack |
+| **Vector store** | Qdrant | Local Docker (recommended first) · [Qdrant Cloud](https://cloud.qdrant.io) · Self-hosted |
+| **Embeddings** | One provider | Ollama local by default · OpenAI / Bedrock / Portkey if you prefer hosted |
 | **Docker** *(optional)* | Only if you run Qdrant locally | Docker Desktop, OrbStack, colima, etc. |
 
-### Install
+### Choose a setup
 
-```bash
-npm install -g bikky          # CLI + MCP server + daemon
-npm install -g bikky-ui       # optional web dashboard
-```
-
-### Pick your stack
-
-- **Fully local & free** — Qdrant in Docker + Ollama. Best for solo dev, no data leaves your machine. (See Quick start.)
-- **Hosted Qdrant + local Ollama** — Qdrant Cloud free tier for shared/team memory; embeddings still local.
-- **Fully hosted** — Qdrant Cloud + OpenAI / Bedrock / Portkey for embeddings and LLM. Best for teams that want a single shared memory across many machines.
+| Setup | Best for | Config |
+|---|---|---|
+| **Local and free** | First install, solo use, private testing | `{"qdrant_url":"http://localhost:6333"}` |
+| **Hosted Qdrant + local Ollama** | Sharing memory across machines while keeping embeddings local | Add your Qdrant Cloud URL and API key |
+| **Fully hosted** | Teams that want managed vector storage and hosted models | Add Qdrant plus provider settings in [`docs/configuration.md`](docs/configuration.md) |
 
 ### Configure
 
-Three ways to provide credentials, pick one:
+Most users only need one of these:
 
 ```bash
-# A) Let your agent do it
-> "Call configure_credentials with my Qdrant URL (and API key if needed)"
+mkdir -p ~/.bikky
 
-# B) Config file (~/.bikky/config.json)
+# Local Qdrant
 echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
 
-# C) Environment variables
-export QDRANT_URL="http://localhost:6333"
-# export QDRANT_API_KEY="…"   # only for Qdrant Cloud / authenticated self-hosted
+# Qdrant Cloud
+echo '{ "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333", "qdrant_api_key": "your-key" }' > ~/.bikky/config.json
 ```
 
-> 💡 **Tip:** Set `BIKKY_HOME` to relocate the config dir (defaults to `~/.bikky/`). Useful for tests, multiple profiles, or sandboxed setups.
+You can also set `QDRANT_URL` and `QDRANT_API_KEY` as environment variables. For hosted models, custom providers, multiple profiles, or advanced tuning, use the full configuration guide.
 
-> 📖 **Full configuration reference** — providers, models, daemon settings, env vars, copy-paste examples for every stack: **[docs/configuration.md](docs/configuration.md)**
+> 📖 **Full configuration guide:** [docs/configuration.md](docs/configuration.md)
 >
 > 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md](CONTRIBUTING.md)** — it's a single-file change.
 
@@ -116,62 +113,9 @@ export QDRANT_URL="http://localhost:6333"
   <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/diagrams/architecture.svg" alt="Architecture" width="600" />
 </p>
 
-**MCP Server** — tools your agent calls directly:
+**MCP tools** — your agent can store, recall, verify, and review memory without you wiring anything manually.
 
-`memory_store` · `memory_recall` · `memory_entity` · `memory_relations` · `memory_forget` · `memory_verify` · `memory_heartbeat` · `memory_review` · `configure_credentials` · `verify_connection`
-
-**Daemon** — background process that passively watches session logs, extracts structured facts, writes lightweight session indexes, captures coherent episode summaries, updates current-state workstream summaries, infers entity relationships from recently changed facts, and runs the consolidation pipeline. Lifecycle memory is daemon-owned so agents do not need to remember summary/distillation tool calls.
-
----
-
-## Memory ontology
-
-bikky separates what a memory is about from where it came from. New captures use four top-level categories, concrete subtypes, small object kinds, activity domains, and provenance fields:
-
-```text
-Workspace
-  Domain
-    Project / repo / surface
-      Workstream
-        Episodes
-          Facts, decisions, preferences, activity events, operational notes
-        Current-state summaries
-          What matters now, open questions, blockers
-    Cross-cutting memory
-      Durable patterns, entity relationships, telemetry
-```
-
-This gives each memory enough context to be recalled precisely without forcing every note into a rigid project hierarchy.
-
-`category` is the broad subject area:
-
-| Category | Captures |
-|----------|----------|
-| `engineering` | Codebase maps, architecture decisions, infrastructure topology, access patterns, operational procedures, troubleshooting gotchas, and engineering conventions |
-| `product` | Domain rules, product decisions, requirements, user workflows, roadmap items, success metrics, and market insight |
-| `human` | Preferences, person profiles, ownership notes, working agreements, and durable actor-action activity events |
-| `system` | Bikky lifecycle memory: session indexes, episodes, workstreams, recall/feedback/outcome telemetry, and aggregate rollups |
-
-`memory_subtype` is the precise capture shape inside a category:
-
-| Category | Subtypes |
-|----------|----------|
-| `engineering` | `codebase_map`, `architecture_decision`, `infra_topology`, `access_pattern`, `operational_procedure`, `troubleshooting_gotcha`, `convention` |
-| `product` | `domain_rule`, `product_decision`, `product_requirement`, `user_workflow`, `roadmap_item`, `success_metric`, `market_insight` |
-| `human` | `preference`, `person_profile`, `ownership_note`, `working_agreement`, `activity_event` |
-| `system` | `session_index`, `episode`, `workstream`, `recall_event`, `feedback_event`, `outcome_event`, `aggregate_rollup` |
-
-`domain` is an activity/knowledge profile. The initial canonical domains are:
-
-| Domain | Purpose |
-|--------|---------|
-| `software_engineering` | Default for coding-agent captures: repos, code, infrastructure, releases, incidents |
-| `product_strategy` | Roadmap, positioning, experiments, customer insight, product decisions |
-| `business_operations` | Company processes, vendors, compliance, obligations, recurring workflows |
-| `research` | Source-backed investigation, hypotheses, contradictions, synthesis |
-| `personal_productivity` | Individual goals, routines, preferences, projects, habits |
-
-`kind` stays small (`fact`, `summary`, `distilled`, `relation`, `telemetry`). `source` is the creator class (`agent`, `system`, `user`, or `docs`). `actor_id` records the stable person or agent associated with a capture/action, and `workspace_id` scopes shared team memory. Legacy stored categories are read through compatibility aliases; this release does not migrate existing stored memories in place.
+**Background service** — `bikky setup` starts a local daemon that keeps memory current. You do not need to manage sessions, summaries, or maintenance jobs yourself.
 
 ---
 
@@ -180,7 +124,7 @@ This gives each memory enough context to be recalled precisely without forcing e
 Raw fact accumulation creates noise. bikky keeps the knowledge store clean automatically:
 
 - **Deduplication** — content hash + vector similarity merges near-identical facts
-- **Ontology scope fields** — optional `workspace_id`, repo, workstream, and episode metadata make recall more precise
+- **Context fields** — repo, task, and source metadata make recall more precise when available
 - **Confidence decay** — old facts lose weight and surface for review
 - **Contradiction detection** — conflicting facts are resolved, not silently stacked
 - **Distillation** — recurring patterns across sessions consolidate into higher-level insights
@@ -190,7 +134,7 @@ Raw fact accumulation creates noise. bikky keeps the knowledge store clean autom
 
 ## Web UI
 
-[`bikky-ui`](packages/ui) is a local dashboard for browsing and managing your team's memory — facts, entities, quality metrics, aggregate impact insights, and the relationship graph.
+[`bikky-ui`](https://www.npmjs.com/package/bikky-ui) is a local dashboard for browsing and managing your team's memory — facts, entities, quality metrics, aggregate impact insights, and the relationship graph.
 
 ```bash
 npx bikky-ui          # one-shot — no install needed
@@ -229,26 +173,7 @@ bikky ui        # launch the local web dashboard
 bikky render    # render a prompt to JSON (for eval harnesses & debugging)
 ```
 
-`bikky status` is the first thing to run when setup feels wrong. It validates the
-config file, highlights env vars that override it, checks Qdrant reachability and
-payload-index readiness without mutating the collection, runs a live embedding
-smoke check, validates the configured LLM provider name without sending a chat
-request, and reports daemon maintenance plus UI health. Use `bikky status --json` for automation,
-`--no-live` to skip the embedding call, and `--no-ui` to skip the local UI probe.
-
-### `bikky render` — inspect prompts
-
-Render any of bikky'''s prompts to JSON without booting the MCP server. Useful for
-external evaluation harnesses, prompt debugging, and reproducing model calls.
-
-```bash
-bikky render --list                                    # list available prompts
-echo '''{"transcript":"..."}''' | bikky render extraction  # via stdin
-bikky render extraction --input case.json              # via file
-```
-
-Output: a JSON object with `promptName`, `messages`, `temperature`,
-`max_tokens`, and `response_format` — exactly what bikky sends to the LLM.
+`bikky status` is the first thing to run when setup feels wrong. It checks the config, Qdrant, embeddings, background daemon, and local UI health, then tells you what needs attention. Use `bikky status --json` for automation.
 
 ## License
 
