@@ -6,11 +6,10 @@
  * Active session detection scans ~/.copilot/session-state/ for lock files.
  */
 
-import { readFile, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { glob } from "node:fs/promises";
 
 import { loadConfig, STATE_DIR, EXTRACTION_HEALTH_PATH } from "../config.js";
 import type { BikkyConfig } from "../config.js";
@@ -186,25 +185,32 @@ const resolveLockFiles = async (): Promise<LockMapping[]> => {
   const mappings: LockMapping[] = [];
 
   try {
-    const pattern = join(copilotStateDir, "*/inuse.*.lock");
-    for await (const lockPath of glob(pattern)) {
-      const lockPathStr = String(lockPath);
-      const parts = lockPathStr.split("/");
-      const lockFile = parts.at(-1) ?? ""; // inuse.12345.lock
-      const uuid = parts.at(-2) ?? "";     // session UUID
+    const sessionDirs = await readdir(copilotStateDir, { withFileTypes: true });
+    for (const sessionDir of sessionDirs) {
+      if (!sessionDir.isDirectory()) continue;
 
-      const pidMatch = lockFile.match(/^inuse\.(\d+)\.lock$/);
-      if (!pidMatch || !uuid) continue;
+      const uuid = sessionDir.name;
+      const sessionPath = join(copilotStateDir, uuid);
+      const entries = await readdir(sessionPath, { withFileTypes: true });
 
-      const pid = parseInt(pidMatch[1]!, 10);
-      const eventsPath = join(copilotStateDir, uuid, "events.jsonl");
+      for (const entry of entries) {
+        if (!entry.isFile()) continue;
 
-      // Verify events.jsonl exists
-      try {
-        await stat(eventsPath);
-        mappings.push({ pid, uuid, eventsPath });
-      } catch {
-        // No events.jsonl — skip
+        const lockFile = entry.name; // inuse.12345.lock
+
+        const pidMatch = lockFile.match(/^inuse\.(\d+)\.lock$/);
+        if (!pidMatch || !uuid) continue;
+
+        const pid = parseInt(pidMatch[1]!, 10);
+        const eventsPath = join(copilotStateDir, uuid, "events.jsonl");
+
+        // Verify events.jsonl exists
+        try {
+          await stat(eventsPath);
+          mappings.push({ pid, uuid, eventsPath });
+        } catch {
+          // No events.jsonl — skip
+        }
       }
     }
   } catch (e) {
