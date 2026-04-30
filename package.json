@@ -1,6 +1,6 @@
 {
   "name": "bikky",
-  "version": "0.3.13",
+  "version": "0.3.14",
   "description": "Shared memory for AI coding sessions — MCP server + background daemon",
   "type": "module",
   "license": "AGPL-3.0-or-later",
@@ -15,8 +15,11 @@
     ".": "./dist/mcp/index.js"
   },
   "files": [
+    "CONTRIBUTING.md",
     "dist/",
     "bin/",
+    "docs/configuration.md",
+    "docs/config/",
     "docs/diagrams/",
     "docs/screenshots/"
   ],
