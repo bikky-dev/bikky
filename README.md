@@ -105,27 +105,6 @@ export QDRANT_URL="http://localhost:6333"
 
 > 💡 **Tip:** Set `BIKKY_HOME` to relocate the config dir (defaults to `~/.bikky/`). Useful for tests, multiple profiles, or sandboxed setups.
 
-### Workspaces — isolating personal vs team memory
-
-A *workspace* is a logical namespace inside the same Qdrant collection. Use it to keep personal-project memory separate from your team's shared memory, or to split unrelated work surfaces.
-
-| Source (highest priority first) | How to set |
-|---|---|
-| Explicit param on a tool call | `memory_store({..., workspace_id: "team-x"})` |
-| Environment variable | `BIKKY_WORKSPACE=team-x` (set on the agent / MCP client process) |
-| Config default | `{"default_workspace": "team-x"}` in `~/.bikky/config.json` |
-| Unset | Writes are unscoped; reads return everything |
-
-The literal workspace name `"default"` has a special read semantic: queries scoped to `"default"` also return legacy facts that have no `workspace_id` payload. All other named workspaces are strict.
-
-```bash
-# Personal solo work — set in your shell profile
-export BIKKY_WORKSPACE="solo"
-
-# Team shared memory — typically set via config or per-MCP-client env
-echo '{"qdrant_url":"...","default_workspace":"team-x"}' > ~/.bikky/config.json
-```
-
 > 📖 **Full configuration reference** — providers, models, daemon settings, env vars, copy-paste examples for every stack: **[docs/configuration.md](docs/configuration.md)**
 >
 > 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md](CONTRIBUTING.md)** — it's a single-file change.
