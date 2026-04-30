@@ -3,7 +3,7 @@
  * Ported from agent00 portal worker — adapted to use bikky config.
  */
 
-import { loadConfig } from "./config.js";
+import { loadConfig, getActiveWorkspace } from "./config.js";
 
 // --- Types ---
 
@@ -122,14 +122,29 @@ const memorySubtypeFilterConditions = (subtypes: string[]): FilterCondition[] =>
 
 export class QdrantClient {
   private readonly apiKey: string | null;
+  private readonly workspaceId: string | null;
 
   constructor(
     private url: string,
     apiKey: string | null | undefined,
     private collection: string,
+    workspaceId?: string | null,
   ) {
     this.url = url.replace(/\/+$/, "");
     this.apiKey = apiKey || null;
+    this.workspaceId = workspaceId?.trim() || null;
+  }
+
+  /**
+   * If a workspace is active, append `workspace_id == <ws>` to the filter's
+   * `must` clauses so every query is scoped to that workspace. Returns the
+   * filter unchanged when no workspace is active.
+   */
+  private scoped(filter?: QdrantFilter): QdrantFilter | undefined {
+    if (!this.workspaceId) return filter;
+    const cond: FilterCondition = { key: "workspace_id", match: { value: this.workspaceId } };
+    if (!filter) return { must: [cond] };
+    return { ...filter, must: [...filter.must, cond] };
   }
 
   private headers(): Record<string, string> {
@@ -151,13 +166,13 @@ export class QdrantClient {
 
   async search(vector: number[], filter?: QdrantFilter, limit = 10): Promise<QdrantPoint[]> {
     const res = await this.req<SearchResult>("POST", `/collections/${this.collection}/points/search`, {
-      vector, filter, limit, with_payload: true,
+      vector, filter: this.scoped(filter), limit, with_payload: true,
     });
     return res.result;
   }
 
   async scroll(filter: QdrantFilter, limit = 20, offset?: string | null, orderBy?: { key: string; direction: "asc" | "desc" }): Promise<{ points: QdrantPoint[]; nextOffset: string | null }> {
-    const body: Record<string, unknown> = { filter, limit, with_payload: true };
+    const body: Record<string, unknown> = { filter: this.scoped(filter), limit, with_payload: true };
     if (offset) body.offset = offset;
     if (orderBy) body.order_by = orderBy;
     const res = await this.req<ScrollResult>("POST", `/collections/${this.collection}/points/scroll`, body);
@@ -168,7 +183,12 @@ export class QdrantClient {
     const res = await this.req<{ result: QdrantPoint[] }>("POST", `/collections/${this.collection}/points`, {
       ids, with_payload: true,
     });
-    return res.result;
+    if (!this.workspaceId) return res.result;
+    // Filter by workspace post-fetch since /points doesn't accept a filter.
+    return res.result.filter((p) => {
+      const ws = (p.payload as unknown as { workspace_id?: string | null }).workspace_id;
+      return ws === this.workspaceId;
+    });
   }
 
   async upsert(id: string, vector: number[], payload: Record<string, unknown>): Promise<void> {
@@ -185,7 +205,8 @@ export class QdrantClient {
 
   async count(filter?: QdrantFilter): Promise<number> {
     const body: Record<string, unknown> = { exact: true };
-    if (filter) body.filter = filter;
+    const scoped = this.scoped(filter);
+    if (scoped) body.filter = scoped;
     const res = await this.req<CountResult>("POST", `/collections/${this.collection}/points/count`, body);
     return res.result.count;
   }
@@ -258,7 +279,7 @@ export function createQdrantClient(): QdrantClient {
   if (!cfg.qdrant_url) {
     throw new QdrantNotConfiguredError();
   }
-  return new QdrantClient(cfg.qdrant_url, cfg.qdrant_api_key, cfg.collection);
+  return new QdrantClient(cfg.qdrant_url, cfg.qdrant_api_key, cfg.collection, getActiveWorkspace());
 }
 
 export class QdrantNotConfiguredError extends Error {

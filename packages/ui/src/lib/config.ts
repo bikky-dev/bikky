@@ -15,6 +15,7 @@ export interface BikkyUIConfig {
   qdrant_url: string | null;
   qdrant_api_key: string | null;
   collection: string;
+  default_workspace: string | null;
   embedding: {
     provider: string;
     model: string;
@@ -29,6 +30,7 @@ const DEFAULTS: BikkyUIConfig = {
   qdrant_url: null,
   qdrant_api_key: null,
   collection: "bikky",
+  default_workspace: null,
   embedding: {
     provider: "ollama",
     model: "qwen3-embedding:0.6b",
@@ -52,6 +54,7 @@ export function loadConfig(): BikkyUIConfig {
       if (raw.qdrant_url) config.qdrant_url = raw.qdrant_url as string;
       if (raw.qdrant_api_key) config.qdrant_api_key = raw.qdrant_api_key as string;
       if (raw.collection) config.collection = raw.collection as string;
+      if (typeof raw.default_workspace === "string") config.default_workspace = raw.default_workspace;
       if (raw.embedding && typeof raw.embedding === "object") {
         const emb = raw.embedding as Record<string, unknown>;
         if (emb.provider) config.embedding.provider = emb.provider as string;
@@ -70,6 +73,11 @@ export function loadConfig(): BikkyUIConfig {
   if (process.env.QDRANT_URL) config.qdrant_url = process.env.QDRANT_URL;
   if (process.env.QDRANT_API_KEY) config.qdrant_api_key = process.env.QDRANT_API_KEY;
   if (process.env.BIKKY_COLLECTION) config.collection = process.env.BIKKY_COLLECTION;
+  // BIKKY_WORKSPACE overrides the configured default_workspace (mirrors MCP server).
+  if (process.env.BIKKY_WORKSPACE !== undefined) {
+    const ws = process.env.BIKKY_WORKSPACE.trim();
+    config.default_workspace = ws.length > 0 ? ws : null;
+  }
   if (process.env.EMBEDDING_PROVIDER) config.embedding.provider = process.env.EMBEDDING_PROVIDER;
   if (process.env.EMBEDDING_MODEL) config.embedding.model = process.env.EMBEDDING_MODEL;
   if (process.env.EMBEDDING_BASE_URL) config.embedding.base_url = process.env.EMBEDDING_BASE_URL;
@@ -85,6 +93,20 @@ export function loadConfig(): BikkyUIConfig {
 
   _config = config;
   return config;
+}
+
+/**
+ * Returns the active workspace_id used to scope Qdrant queries, or undefined
+ * if no workspace is configured (in which case queries see all workspaces).
+ *
+ * Resolution priority:
+ *   1. BIKKY_WORKSPACE env var (already folded into config by loadConfig)
+ *   2. config.default_workspace from ~/.bikky/config.json
+ *   3. undefined (unscoped)
+ */
+export function getActiveWorkspace(): string | undefined {
+  const ws = loadConfig().default_workspace?.trim();
+  return ws ? ws : undefined;
 }
 
 /**

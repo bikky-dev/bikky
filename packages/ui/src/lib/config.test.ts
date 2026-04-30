@@ -11,12 +11,13 @@ import os from "node:os";
 const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-ui-config-"));
 process.env.BIKKY_HOME = TEST_BIKKY_HOME;
 
-const { loadConfig, _resetConfig, CONFIG_PATH, BIKKY_DIR } = await import("./config.js");
+const { loadConfig, _resetConfig, CONFIG_PATH, BIKKY_DIR, getActiveWorkspace } = await import("./config.js");
 
 const ENV_KEYS = [
   "QDRANT_URL",
   "QDRANT_API_KEY",
   "BIKKY_COLLECTION",
+  "BIKKY_WORKSPACE",
   "EMBEDDING_PROVIDER",
   "EMBEDDING_MODEL",
   "EMBEDDING_BASE_URL",
@@ -138,5 +139,42 @@ describe("ui/lib/config", () => {
     const a = loadConfig();
     const b = loadConfig();
     assert.equal(a, b);
+  });
+
+  describe("default_workspace", () => {
+    it("defaults to null when nothing is configured", () => {
+      const cfg = loadConfig();
+      assert.equal(cfg.default_workspace, null);
+      assert.equal(getActiveWorkspace(), undefined);
+    });
+
+    it("loads default_workspace from the config file", () => {
+      fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({ default_workspace: "agent00" }));
+
+      const cfg = loadConfig();
+      assert.equal(cfg.default_workspace, "agent00");
+      assert.equal(getActiveWorkspace(), "agent00");
+    });
+
+    it("BIKKY_WORKSPACE env overrides the config file", () => {
+      fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({ default_workspace: "agent00" }));
+      process.env.BIKKY_WORKSPACE = "apate";
+
+      const cfg = loadConfig();
+      assert.equal(cfg.default_workspace, "apate");
+      assert.equal(getActiveWorkspace(), "apate");
+    });
+
+    it("BIKKY_WORKSPACE='' clears the configured workspace (unscoped)", () => {
+      fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({ default_workspace: "agent00" }));
+      process.env.BIKKY_WORKSPACE = "";
+
+      const cfg = loadConfig();
+      assert.equal(cfg.default_workspace, null);
+      assert.equal(getActiveWorkspace(), undefined);
+    });
   });
 });

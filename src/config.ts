@@ -99,6 +99,7 @@ export interface BikkyConfig {
   qdrant_url: string | null;
   qdrant_api_key: string | null;
   collection: string;
+  default_workspace: string | null;
   aws_profile: string | null;
   embedding: EmbeddingConfig;
   llm: LLMConfig;
@@ -131,6 +132,7 @@ const DEFAULTS: BikkyConfig = {
   qdrant_url: null,
   qdrant_api_key: null,
   collection: "bikky",
+  default_workspace: null,
   aws_profile: null,
   embedding: {
     provider: "ollama",
@@ -292,6 +294,7 @@ const configFileSchema = z.object({
   qdrant_url: z.string().nullable().optional(),
   qdrant_api_key: z.string().nullable().optional(),
   collection: z.string().optional(),
+  default_workspace: z.string().nullable().optional(),
   aws_profile: z.string().nullable().optional(),
   embedding: embeddingConfigFileSchema.optional(),
   llm: llmConfigFileSchema.optional(),
@@ -465,6 +468,7 @@ export function loadConfig(): BikkyConfig {
   if (process.env.QDRANT_URL) config.qdrant_url = process.env.QDRANT_URL;
   if (process.env.QDRANT_API_KEY) config.qdrant_api_key = process.env.QDRANT_API_KEY;
   if (process.env.BIKKY_COLLECTION) config.collection = process.env.BIKKY_COLLECTION;
+  if (process.env.BIKKY_DEFAULT_WORKSPACE) config.default_workspace = process.env.BIKKY_DEFAULT_WORKSPACE;
 
   // Embedding env overrides
   if (process.env.EMBEDDING_PROVIDER) config.embedding.provider = process.env.EMBEDDING_PROVIDER;

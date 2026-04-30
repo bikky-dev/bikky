@@ -101,7 +101,10 @@ interface WorkspaceScope {
 }
 
 function resolveScope(workspaceId?: string, includeLegacyWorkspace = false, actorId?: string): WorkspaceScope {
-  const resolved = workspaceId?.trim() || process.env.BIKKY_WORKSPACE?.trim() || undefined;
+  const resolved = workspaceId?.trim()
+    || process.env.BIKKY_WORKSPACE?.trim()
+    || loadConfig().default_workspace?.trim()
+    || undefined;
   return {
     workspaceId: resolved,
     actorId: normalizeActorId(actorId),
@@ -272,7 +275,9 @@ export function registerTools(mcp: McpServer): void {
     ].join(" "),
     {},
     async (): Promise<McpToolResult> => {
-      const activeWorkspace = process.env.BIKKY_WORKSPACE?.trim() || null;
+      const activeWorkspace = process.env.BIKKY_WORKSPACE?.trim()
+        || loadConfig().default_workspace?.trim()
+        || null;
       const status: Record<string, unknown> = {
         ready,
         qdrant_url: !!qdrantUrl,

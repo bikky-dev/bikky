@@ -442,7 +442,7 @@ const storeFact = async (fact: StoreFact): Promise<string> => {
     kind: normalizedKind,
     ...(normalizedLayer ? { layer: normalizedLayer } : {}),
     ...(normalizedSubtype ? { memory_subtype: normalizedSubtype } : {}),
-    ...((fact.workspace_id || process.env.BIKKY_WORKSPACE?.trim()) ? { workspace_id: fact.workspace_id || process.env.BIKKY_WORKSPACE!.trim() } : {}),
+    ...((fact.workspace_id || process.env.BIKKY_WORKSPACE?.trim() || loadConfig().default_workspace?.trim()) ? { workspace_id: fact.workspace_id || process.env.BIKKY_WORKSPACE?.trim() || loadConfig().default_workspace!.trim() } : {}),
     ...(fact.actor_id ? { actor_id: fact.actor_id } : {}),
     entities: redactedEntities.map((entity) => entity.text.toLowerCase()),
     source: normalizeSource(fact.source ?? "system"),
