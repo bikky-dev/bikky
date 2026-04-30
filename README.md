@@ -84,7 +84,7 @@ bikky status           # confirms Qdrant, embeddings, daemon, and UI health
 
 That's it. You can keep Qdrant local forever, or move the vector store to Qdrant Cloud later.
 
-For 100% local and account-free setup, use the [local and free config](docs/config/local.md). It is best for private testing rather than long-term team use, and extraction, embedding, and curation performance depends on the local models and hardware you run.
+For 100% local and account-free setup, use the [local and free config][local-config]. It is best for private testing rather than long-term team use, and extraction, embedding, and curation performance depends on the local models and hardware you run.
 
 ---
 
@@ -108,10 +108,10 @@ Both `embedding.provider` and `llm.provider` accept the same values: `ollama`, `
 
 | Setup                            | Best for                                                       | Config                                                                    |
 | -------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| **Fully hosted**                 | Best performance and teams; managed vector storage and models  | [Fully hosted config](docs/config/fully-hosted.md)                        |
-| **Local Qdrant + hosted models** | Local vector storage with hosted extraction and embedding      | [Hosted models config](docs/config/hosted-models.md)                      |
-| **Local and free**               | Private/free testing; quality depends on local models          | [Local config guide](docs/config/local.md)                                |
-| **Hosted Qdrant + local Ollama** | Shared vector storage while keeping model calls local          | [Hosted Qdrant + local models](docs/config/hosted-qdrant-local-models.md) |
+| **Fully hosted**                 | Best performance and teams; managed vector storage and models  | [Fully hosted config][fully-hosted-config]                              |
+| **Local Qdrant + hosted models** | Local vector storage with hosted extraction and embedding      | [Hosted models config][hosted-models-config]                            |
+| **Local and free**               | Private/free testing; quality depends on local models          | [Local config guide][local-config]                                      |
+| **Hosted Qdrant + local Ollama** | Shared vector storage while keeping model calls local          | [Hosted Qdrant + local models][hosted-qdrant-local-models-config]       |
 
 ### Configure
 
@@ -119,9 +119,16 @@ Pick the setup guide above for the copy-paste config. Config lives at `~/.bikky/
 
 For hosted models, custom providers, multiple profiles, or advanced tuning, use the full configuration guide.
 
-> 📖 **Full configuration guide:** [docs/configuration.md](docs/configuration.md)
+> 📖 **Full configuration guide:** [docs/configuration.md][configuration-guide]
 >
-> 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md](CONTRIBUTING.md)** — it's a single-file change.
+> 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md][contributing]** — it's a single-file change.
+
+[fully-hosted-config]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/config/fully-hosted.md
+[hosted-models-config]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/config/hosted-models.md
+[local-config]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/config/local.md
+[hosted-qdrant-local-models-config]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/config/hosted-qdrant-local-models.md
+[configuration-guide]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/configuration.md
+[contributing]: https://cdn.jsdelivr.net/npm/bikky@latest/CONTRIBUTING.md
 
 ---
 
