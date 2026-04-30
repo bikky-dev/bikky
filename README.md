@@ -25,6 +25,8 @@ The most valuable things you and your agents learn — why a config value exists
 
 ### How bikky solves it
 
+bikky gives your agent memory tools and runs a small background service after `bikky setup`. You keep working normally; bikky captures useful facts, recalls them in future sessions, and keeps the store tidy over time.
+
 | | |
 |---|---|
 | **Capture** | Facts are extracted automatically from session transcripts — no manual docs to write |
@@ -104,18 +106,6 @@ You can also set `QDRANT_URL` and `QDRANT_API_KEY` as environment variables. For
 > 📖 **Full configuration guide:** [docs/configuration.md](docs/configuration.md)
 >
 > 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md](CONTRIBUTING.md)** — it's a single-file change.
-
----
-
-## How it works
-
-<p align="center">
-  <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/diagrams/architecture.svg" alt="Architecture" width="600" />
-</p>
-
-**MCP tools** — your agent can store, recall, verify, and review memory without you wiring anything manually.
-
-**Background service** — `bikky setup` starts a local daemon that keeps memory current. You do not need to manage sessions, summaries, or maintenance jobs yourself.
 
 ---
 
