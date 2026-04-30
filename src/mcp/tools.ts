@@ -100,15 +100,19 @@ interface WorkspaceScope {
   includeLegacy: boolean;
 }
 
-function resolveScope(workspaceId?: string, includeLegacyWorkspace = false, actorId?: string): WorkspaceScope {
+export function resolveScope(workspaceId?: string, includeLegacyWorkspace = false, actorId?: string): WorkspaceScope {
   const resolved = workspaceId?.trim()
     || process.env.BIKKY_WORKSPACE?.trim()
     || loadConfig().default_workspace?.trim()
     || undefined;
+  // The literal "default" workspace also includes legacy facts that have no
+  // workspace_id payload (pre-migration data). Any other named workspace stays
+  // strict. An explicit includeLegacyWorkspace=true from the caller still wins.
+  const isDefault = resolved === "default";
   return {
     workspaceId: resolved,
     actorId: normalizeActorId(actorId),
-    includeLegacy: includeLegacyWorkspace,
+    includeLegacy: includeLegacyWorkspace || isDefault,
   };
 }
 

@@ -53,6 +53,12 @@ export interface FilterCondition {
   match?: { value?: string | number; any?: string[] };
   range?: { gte?: string; lte?: string };
   is_null?: { key: string };
+  is_empty?: { key: string };
+  // Nested sub-filter — Qdrant allows must/should/must_not entries to themselves
+  // be filter objects, which are AND/OR-combined like a parenthesised group.
+  must?: FilterCondition[];
+  should?: FilterCondition[];
+  must_not?: FilterCondition[];
 }
 
 export interface QdrantFilter {
@@ -136,13 +142,26 @@ export class QdrantClient {
   }
 
   /**
-   * If a workspace is active, append `workspace_id == <ws>` to the filter's
-   * `must` clauses so every query is scoped to that workspace. Returns the
-   * filter unchanged when no workspace is active.
+   * If a workspace is active, append a workspace filter to the query's `must`
+   * clauses so every query is scoped to that workspace.
+   *
+   * Special case: when the active workspace is the literal name `"default"`,
+   * we also include legacy facts that have no `workspace_id` payload (i.e.
+   * pre-migration data captured before workspaces existed). Implemented as a
+   * nested OR sub-filter so it ANDs cleanly with any existing `should` clauses
+   * (e.g. category alias OR groups) on the parent filter.
    */
   private scoped(filter?: QdrantFilter): QdrantFilter | undefined {
     if (!this.workspaceId) return filter;
-    const cond: FilterCondition = { key: "workspace_id", match: { value: this.workspaceId } };
+    const isDefault = this.workspaceId === "default";
+    const cond: FilterCondition = isDefault
+      ? {
+          should: [
+            { key: "workspace_id", match: { value: "default" } },
+            { is_empty: { key: "workspace_id" } },
+          ],
+        }
+      : { key: "workspace_id", match: { value: this.workspaceId } };
     if (!filter) return { must: [cond] };
     return { ...filter, must: [...filter.must, cond] };
   }
@@ -184,9 +203,11 @@ export class QdrantClient {
       ids, with_payload: true,
     });
     if (!this.workspaceId) return res.result;
+    const isDefault = this.workspaceId === "default";
     // Filter by workspace post-fetch since /points doesn't accept a filter.
     return res.result.filter((p) => {
       const ws = (p.payload as unknown as { workspace_id?: string | null }).workspace_id;
+      if (isDefault) return ws === "default" || ws == null || ws === "";
       return ws === this.workspaceId;
     });
   }

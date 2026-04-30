@@ -16,7 +16,7 @@
 import { describe, it, before, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { registerTools } from "./tools.js";
+import { registerTools, resolveScope } from "./tools.js";
 import {
   setQdrantUrl,
   setQdrantApiKey,
@@ -1005,5 +1005,33 @@ describe("mcp/tools handlers", () => {
       assert.equal(sp.superseded_by, parsed.distilled_id);
       assert.ok(sp.superseded_at);
     });
+  });
+});
+
+describe("resolveScope", () => {
+  const savedEnv = process.env.BIKKY_WORKSPACE;
+  before(() => {
+    delete process.env.BIKKY_WORKSPACE;
+  });
+  after(() => {
+    if (savedEnv === undefined) delete process.env.BIKKY_WORKSPACE;
+    else process.env.BIKKY_WORKSPACE = savedEnv;
+  });
+
+  it("auto-enables includeLegacy when scope resolves to literal 'default'", () => {
+    const scope = resolveScope("default");
+    assert.equal(scope.workspaceId, "default");
+    assert.equal(scope.includeLegacy, true);
+  });
+
+  it("keeps includeLegacy=false for any other named workspace", () => {
+    const scope = resolveScope("agent00");
+    assert.equal(scope.workspaceId, "agent00");
+    assert.equal(scope.includeLegacy, false);
+  });
+
+  it("honours explicit includeLegacyWorkspace=true regardless of workspace name", () => {
+    const scope = resolveScope("agent00", true);
+    assert.equal(scope.includeLegacy, true);
   });
 });

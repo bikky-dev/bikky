@@ -328,6 +328,40 @@ describe("ui/lib/qdrant", () => {
       const body = JSON.parse(String(calls[0]!.init.body));
       assert.deepEqual(body.filter, { must: [] });
     });
+
+    it('treats workspaceId="default" as default OR legacy (no workspace_id)', async () => {
+      const client = new QdrantClient("https://q.test:6333", null, "col", "default");
+      const calls = installMock(() => new Response(JSON.stringify({
+        result: { points: [], next_page_offset: null },
+      }), { status: 200 }));
+
+      await client.scroll({ must: [{ key: "kind", match: { value: "fact" } }] });
+      const body = JSON.parse(String(calls[0]!.init.body));
+      assert.deepEqual(body.filter.must, [
+        { key: "kind", match: { value: "fact" } },
+        {
+          should: [
+            { key: "workspace_id", match: { value: "default" } },
+            { is_empty: { key: "workspace_id" } },
+          ],
+        },
+      ]);
+    });
+
+    it('default workspace getPoints includes legacy facts with no workspace_id', async () => {
+      const client = new QdrantClient("https://q.test:6333", null, "col", "default");
+      installMock(() => new Response(JSON.stringify({
+        result: [
+          { id: "1", payload: { workspace_id: "default" } },
+          { id: "2", payload: { workspace_id: "agent00" } },
+          { id: "3", payload: {} },
+          { id: "4", payload: { workspace_id: null } },
+        ],
+      }), { status: 200 }));
+
+      const points = await client.getPoints(["1", "2", "3", "4"]);
+      assert.deepEqual(points.map((p) => p.id), ["1", "3", "4"]);
+    });
   });
 
   it("QdrantNotConfiguredError carries a helpful message", () => {
