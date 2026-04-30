@@ -87,25 +87,15 @@ Start with the local path unless you already know you want hosted infrastructure
 
 | Setup | Best for | Config |
 |---|---|---|
-| **Local and free** | First install, solo use, private testing | `{"qdrant_url":"http://localhost:6333"}` |
-| **Hosted Qdrant + local Ollama** | Sharing memory across machines while keeping embeddings local | Add your Qdrant Cloud URL and API key |
-| **Fully hosted** | Teams that want managed vector storage and hosted models | Add Qdrant plus provider settings in [`docs/configuration.md`](docs/configuration.md) |
+| **Local and free** | First install, solo use, private testing | [Local config guide](docs/config/local.md) |
+| **Hosted Qdrant + local Ollama** | Sharing memory across machines while keeping embeddings local | [Hosted Qdrant + local models](docs/config/hosted-qdrant-local-models.md) |
+| **Fully hosted** | Teams that want managed vector storage and hosted models | [Fully hosted config](docs/config/fully-hosted.md) |
 
 ### Configure
 
-Most users only need one of these:
+Pick the setup guide above for the copy-paste config. Config lives at `~/.bikky/config.json`, and you can also set `QDRANT_URL` and `QDRANT_API_KEY` as environment variables.
 
-```bash
-mkdir -p ~/.bikky
-
-# Local Qdrant
-echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
-
-# Qdrant Cloud
-echo '{ "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333", "qdrant_api_key": "your-key" }' > ~/.bikky/config.json
-```
-
-You can also set `QDRANT_URL` and `QDRANT_API_KEY` as environment variables. For hosted models, custom providers, multiple profiles, or advanced tuning, use the full configuration guide.
+For hosted models, custom providers, multiple profiles, or advanced tuning, use the full configuration guide.
 
 > 📖 **Full configuration guide:** [docs/configuration.md](docs/configuration.md)
 >

@@ -12,6 +12,14 @@ Config lives at `~/.bikky/config.json`, or at `BIKKY_HOME/config.json` when `BIK
 
 ## Common setups
 
+If you know which path you want, start with the focused guide:
+
+| Scenario | Guide |
+|---|---|
+| Local and free | [Local config guide](config/local.md) |
+| Hosted Qdrant + local models | [Hosted Qdrant + local models](config/hosted-qdrant-local-models.md) |
+| Fully hosted | [Fully hosted config](config/fully-hosted.md) |
+
 ### Local and free
 
 Use this first. Qdrant runs locally and Ollama provides the default embedding + LLM models.
