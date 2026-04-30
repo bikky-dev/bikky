@@ -153,10 +153,9 @@ You can keep the defaults unless you want hosted models.
 
 These sections are optional references for custom providers, tuning, scoping, and daemon internals.
 
-<details>
-<summary><strong>Full setting reference</strong></summary>
+### Full setting reference
 
-### Qdrant
+#### Qdrant
 
 | Setting          | Env var            | Default | Notes                          |
 | ---------------- | ------------------ | ------- | ------------------------------ |
@@ -166,7 +165,7 @@ These sections are optional references for custom providers, tuning, scoping, an
 
 `qdrant_api_key` is optional for local or unauthenticated self-hosted Qdrant. Qdrant Cloud usually requires it.
 
-### Embeddings
+#### Embeddings
 
 | Setting                | Env var                | Default                  | Notes                                           |
 | ---------------------- | ---------------------- | ------------------------ | ----------------------------------------------- |
@@ -188,7 +187,7 @@ Common model dimensions:
 
 If you change the embedding model, make sure `embedding.dimensions` matches the model output.
 
-### LLM
+#### LLM
 
 The LLM is used by background maintenance features. Ollama is the default.
 
@@ -200,7 +199,7 @@ The LLM is used by background maintenance features. Ollama is the default.
 | `llm.api_key`      | `OPENAI_API_KEY`                     | —                        | Provider API key; can also be set in config  |
 | `llm.extra.region` | `AWS_BEDROCK_REGION` / `AWS_REGION`  | `us-east-1`              | AWS Bedrock region                           |
 
-### Timeouts and retries
+#### Timeouts and retries
 
 | Setting                         | Env var                                  | Default |
 | ------------------------------- | ---------------------------------------- | ------- |
@@ -213,12 +212,9 @@ The LLM is used by background maintenance features. Ollama is the default.
 
 Retries use jittered exponential backoff for transient errors, rate limits, and timeouts. Authentication and bad-request errors fail fast.
 
-</details>
+### Portkey and Bedrock examples
 
-<details>
-<summary><strong>Portkey and Bedrock examples</strong></summary>
-
-### Portkey gateway
+#### Portkey gateway
 
 ```json
 {
@@ -239,7 +235,7 @@ Retries use jittered exponential backoff for transient errors, rate limits, and 
 }
 ```
 
-### AWS Bedrock
+#### AWS Bedrock
 
 ```json
 {
@@ -260,10 +256,7 @@ Retries use jittered exponential backoff for transient errors, rate limits, and 
 
 Bedrock reads `embedding.extra.region` and `llm.extra.region`. `AWS_BEDROCK_REGION` populates both, falling back to `AWS_REGION`; `aws_profile` or `AWS_PROFILE` selects the shared AWS profile when you are not using direct env credentials.
 
-</details>
-
-<details>
-<summary><strong>Workspace and metadata scoping</strong></summary>
+### Workspace and metadata scoping
 
 Most users do not need to manage scopes manually. bikky can store optional metadata such as `workspace_id`, `repo`, `branch`, `task_key`, `workstream_key`, and `episode_id` when an agent or daemon has that context.
 
@@ -288,35 +281,32 @@ Example:
 
 The literal workspace name `"default"` also reads legacy facts that do not have a `workspace_id` payload. Other named workspaces are strict.
 
-</details>
-
-<details>
-<summary><strong>Daemon, watchers, and logs</strong></summary>
+### Daemon, watchers, and logs
 
 You normally do not need to tune these. `bikky setup` starts the daemon and registers supported MCP clients.
 
-### Daemon settings
+#### Daemon settings
 
 | Setting                              | Default | Description                                      |
 | ------------------------------------ | ------- | ------------------------------------------------ |
 | `daemon.tick_interval_sec`           | `5`     | Seconds between daemon loop ticks                |
 | `daemon.extract_every_sec`           | `300`   | Seconds between extraction runs                  |
-| `daemon.extract_min_events`          | `10`    | Minimum events before extraction                    |
-| `daemon.consolidation_enabled`       | `true`  | Consolidate summaries into durable patterns         |
+| `daemon.extract_min_events`          | `10`    | Minimum events before extraction                 |
+| `daemon.consolidation_enabled`       | `true`  | Consolidate summaries into durable patterns      |
 | `daemon.relation_inference_enabled`  | `true`  | Infer entity relationships                       |
 | `daemon.entity_typing_enabled`       | `true`  | Classify entities for UI/graph filtering         |
 | `daemon.staleness_threshold_days`    | `30`    | Days before a fact is flagged as stale           |
 
-### Watcher settings
+#### Watcher settings
 
 | Setting                    | Default                    | Description                       |
 | -------------------------- | -------------------------- | --------------------------------- |
 | `watchers.copilot.enabled` | `true`                     | Watch GitHub Copilot session logs |
 | `watchers.copilot.path`    | `~/.copilot/session-state` | Path to Copilot session directory |
 | `watchers.claude.enabled`  | `true`                     | Watch Claude Code project logs    |
-| `watchers.claude.path`     | `~/.claude/projects`       | Path to Claude Code projects         |
+| `watchers.claude.path`     | `~/.claude/projects`       | Path to Claude Code projects      |
 
-### Logs
+#### Logs
 
 bikky writes logs to `~/.bikky/logs/`:
 
@@ -331,8 +321,6 @@ Pretty-print logs with:
 ```bash
 tail -f ~/.bikky/logs/daemon.log | npx pino-pretty
 ```
-
-</details>
 
 ## Troubleshooting
 
