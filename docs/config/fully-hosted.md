@@ -8,6 +8,8 @@ Best for performance and teams. This setup uses Qdrant Cloud for managed vector 
 - A Qdrant API key.
 - An OpenAI API key, or another hosted provider configured in the full configuration guide.
 
+For both `embedding.provider` and `llm.provider`, possible values are `openai`, `bedrock`, or `portkey` for hosted models. `ollama` is also supported when you want local model calls.
+
 ## Config
 
 Save this as `~/.bikky/config.json`:

@@ -102,6 +102,8 @@ bikky supports four common setup shapes. Pick based on where you want Qdrant to 
 | **LLM**                 | One provider                   | OpenAI · Ollama · Bedrock · Portkey                                                     |
 | **Docker** *(optional)* | Only if you run Qdrant locally | Docker Desktop, OrbStack, colima, etc.                                                   |
 
+Both `embedding.provider` and `llm.provider` accept the same values: `ollama`, `openai`, `bedrock`, or `portkey`.
+
 ### Choose a setup
 
 | Setup                            | Best for                                                       | Config                                                                    |

@@ -140,14 +140,14 @@ Useful basics:
 
 ## Provider options
 
-You can keep the defaults unless you want hosted models.
+Use these exact values in `embedding.provider` and `llm.provider`. Both fields accept the same provider values, and you can choose them independently.
 
-| Provider  | Best for                                | Auth                              |
-| --------- | --------------------------------------- | --------------------------------- |
-| `ollama`  | Local and free defaults                 | None                              |
-| `openai`  | Simple hosted models                    | `OPENAI_API_KEY` or `api_key`     |
-| `bedrock` | AWS-managed models                      | AWS credentials or IAM role       |
-| `portkey` | Gateway/routing over other providers    | Portkey API key                   |
+| Provider value | Works for embeddings | Works for LLM | Best for                             | Auth                              |
+| -------------- | -------------------- | ------------- | ------------------------------------ | --------------------------------- |
+| `ollama`       | Yes                  | Yes           | Local and free defaults              | None                              |
+| `openai`       | Yes                  | Yes           | Simple hosted models                 | `OPENAI_API_KEY` or `api_key`     |
+| `bedrock`      | Yes                  | Yes           | AWS-managed models                   | AWS credentials or IAM role       |
+| `portkey`      | Yes                  | Yes           | Gateway/routing over other providers | Portkey API key                   |
 
 ## Advanced configuration
 
@@ -169,7 +169,7 @@ These sections are optional references for custom providers, tuning, scoping, an
 
 | Setting                | Env var                | Default                  | Notes                                           |
 | ---------------------- | ---------------------- | ------------------------ | ----------------------------------------------- |
-| `embedding.provider`   | `EMBEDDING_PROVIDER`   | `ollama`                 | Embedding provider                              |
+| `embedding.provider`   | `EMBEDDING_PROVIDER`   | `ollama`                 | One of `ollama`, `openai`, `bedrock`, `portkey` |
 | `embedding.model`      | `EMBEDDING_MODEL`      | `qwen3-embedding:0.6b`   | Embedding model name                            |
 | `embedding.dimensions` | `EMBEDDING_DIMENSIONS` | `1024`                   | Must match the selected model output            |
 | `embedding.base_url`   | `EMBEDDING_BASE_URL`   | `http://localhost:11434` | Used by local or OpenAI-compatible providers    |
@@ -193,7 +193,7 @@ The LLM is used by background maintenance features. Ollama is the default.
 
 | Setting            | Env var                              | Default                  | Notes                                        |
 | ------------------ | ------------------------------------ | ------------------------ | -------------------------------------------- |
-| `llm.provider`     | `LLM_PROVIDER`                       | `ollama`                 | LLM provider                                 |
+| `llm.provider`     | `LLM_PROVIDER`                       | `ollama`                 | One of `ollama`, `openai`, `bedrock`, `portkey` |
 | `llm.model`        | `LLM_MODEL`                          | `qwen2.5:7b`             | LLM model name                               |
 | `llm.base_url`     | `LLM_BASE_URL`                       | `http://localhost:11434` | Used by local or OpenAI-compatible providers |
 | `llm.api_key`      | `OPENAI_API_KEY`                     | —                        | Provider API key; can also be set in config  |

@@ -7,6 +7,8 @@ This setup keeps Qdrant local while hosted embeddings and LLM calls handle extra
 - Qdrant running locally, usually with Docker.
 - An OpenAI API key, or another hosted provider configured in the full configuration guide.
 
+For both `embedding.provider` and `llm.provider`, possible values are `openai`, `bedrock`, or `portkey` for hosted models. `ollama` is also supported when you want local model calls.
+
 ## Config
 
 Save this as `~/.bikky/config.json`:
