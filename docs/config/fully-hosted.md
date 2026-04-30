@@ -1,6 +1,6 @@
 # Fully hosted config
 
-Use this path when you want managed vector storage and hosted models. This example uses Qdrant Cloud and OpenAI-compatible hosted models.
+Best for performance and teams. This setup uses Qdrant Cloud for managed vector storage and OpenAI-compatible hosted models for extraction, curation, and recall.
 
 ## What you need
 

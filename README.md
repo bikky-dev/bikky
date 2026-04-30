@@ -42,7 +42,7 @@ Subtypes keep recall precise without making setup harder:
 
 ## Quick start
 
-The recommended first-time setup is **local Qdrant + hosted models**: Qdrant runs on your machine, while hosted embeddings and LLM calls give you the best extraction and recall quality out of the box.
+This quick start uses **local Qdrant + hosted models**: Qdrant runs on your machine, while hosted embeddings and LLM calls provide strong extraction and recall quality without running local LLMs.
 
 ```bash
 # 1. Pull and run Qdrant (vector store)
@@ -84,20 +84,20 @@ bikky status           # confirms Qdrant, embeddings, daemon, and UI health
 
 That's it. You can keep Qdrant local forever, or move the vector store to Qdrant Cloud later.
 
-Prefer 100% local and account-free? Use the [local and free config](docs/config/local.md). It is best for private testing rather than long-term team use, and extraction, embedding, and curation performance depends on the local models and hardware you run.
+For 100% local and account-free setup, use the [local and free config](docs/config/local.md). It is best for private testing rather than long-term team use, and extraction, embedding, and curation performance depends on the local models and hardware you run.
 
 ---
 
 ## Setup options
 
-Start with the recommended first-time path for the best extraction and embedding quality. Choose the local path when privacy, offline use, or zero hosted-model cost matters most.
+bikky supports four common setup shapes. Pick based on where you want Qdrant to run and where model calls should happen.
 
 ### What you need
 
 | Component               | Required                       | Options                                                                                  |
 | ----------------------- | ------------------------------ | ---------------------------------------------------------------------------------------- |
 | **Node.js**             | ≥ 20                           | `nvm install 20` or your package manager                                                 |
-| **Vector store**        | Qdrant                         | Local Docker (recommended first) · [Qdrant Cloud](https://cloud.qdrant.io) · Self-hosted |
+| **Vector store**        | Qdrant                         | Local Docker · [Qdrant Cloud](https://cloud.qdrant.io) · Self-hosted                     |
 | **Embeddings**          | One provider                   | OpenAI · Ollama · Bedrock · Portkey                                                     |
 | **LLM**                 | One provider                   | OpenAI · Ollama · Bedrock · Portkey                                                     |
 | **Docker** *(optional)* | Only if you run Qdrant locally | Docker Desktop, OrbStack, colima, etc.                                                   |
@@ -106,10 +106,10 @@ Start with the recommended first-time path for the best extraction and embedding
 
 | Setup                            | Best for                                                       | Config                                                                    |
 | -------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| **Recommended first-time**       | Best extraction and embedding quality with local Qdrant        | [Hosted models config](docs/config/hosted-models.md)                      |
+| **Fully hosted**                 | Best performance and teams; managed vector storage and models  | [Fully hosted config](docs/config/fully-hosted.md)                        |
+| **Local Qdrant + hosted models** | Local vector storage with hosted extraction and embedding      | [Hosted models config](docs/config/hosted-models.md)                      |
 | **Local and free**               | Private/free testing; quality depends on local models          | [Local config guide](docs/config/local.md)                                |
-| **Hosted Qdrant + local Ollama** | Sharing memory across machines while keeping model calls local | [Hosted Qdrant + local models](docs/config/hosted-qdrant-local-models.md) |
-| **Fully hosted**                 | Teams that want managed vector storage and hosted models       | [Fully hosted config](docs/config/fully-hosted.md)                        |
+| **Hosted Qdrant + local Ollama** | Shared vector storage while keeping model calls local          | [Hosted Qdrant + local models](docs/config/hosted-qdrant-local-models.md) |
 
 ### Configure
 

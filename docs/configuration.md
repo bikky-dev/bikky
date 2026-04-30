@@ -1,6 +1,6 @@
 # Configuration
 
-bikky is designed to keep setup small. For the best first-time experience, run Qdrant locally and use hosted models for embeddings and extraction quality. For private, free, account-free testing, you can use local Ollama models instead.
+bikky is designed to keep setup small. The example below keeps Qdrant local and uses hosted models; the focused guides list the other common setup shapes.
 
 ```bash
 mkdir -p ~/.bikky
@@ -30,16 +30,40 @@ Config lives at `~/.bikky/config.json`, or at `BIKKY_HOME/config.json` when `BIK
 
 If you know which path you want, start with the focused guide:
 
-| Scenario | Guide |
-|---|---|
-| Recommended first-time | [Hosted models config](config/hosted-models.md) |
-| Local and free | [Local config guide](config/local.md) |
-| Hosted Qdrant + local models | [Hosted Qdrant + local models](config/hosted-qdrant-local-models.md) |
-| Fully hosted | [Fully hosted config](config/fully-hosted.md) |
+| Setup | Best for | Guide |
+|---|---|---|
+| Fully hosted | Best performance and teams; managed vector storage and models | [Fully hosted config](config/fully-hosted.md) |
+| Local Qdrant + hosted models | Local vector storage with hosted extraction and embedding | [Hosted models config](config/hosted-models.md) |
+| Local and free | Private/free testing; quality depends on local models | [Local config guide](config/local.md) |
+| Hosted Qdrant + local models | Shared vector storage while keeping model calls local | [Hosted Qdrant + local models](config/hosted-qdrant-local-models.md) |
 
-### Recommended first-time
+### Fully hosted
 
-Use this when you want the best first impression: Qdrant runs locally, while hosted embeddings and LLM calls provide stronger extraction and recall quality than small local models.
+Best for performance and teams. Qdrant Cloud stores vectors, and hosted embeddings + LLM calls handle extraction, curation, and recall.
+
+```json
+{
+  "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333",
+  "qdrant_api_key": "your-key",
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "api_key": "sk-..."
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "api_key": "sk-..."
+  }
+}
+```
+
+`qdrant_api_key` is optional only for unauthenticated self-hosted Qdrant. Qdrant Cloud usually requires it.
+
+### Local Qdrant + hosted models
+
+Best for local vector storage with hosted extraction and embedding quality.
 
 ```json
 {
@@ -65,7 +89,7 @@ Use this when you want the best first impression: Qdrant runs locally, while hos
 
 Use this for private, free, account-free testing. Qdrant runs locally and Ollama provides the default embedding + LLM models.
 
-This setup is usually not the best long-term choice for teams. Extraction, embedding, and curation performance depends on the local models and hardware you run. For the strongest quality while evaluating bikky, use the [hosted models config](config/hosted-models.md).
+This setup is usually not the best long-term choice for teams. Extraction, embedding, and curation performance depends on the local models and hardware you run.
 
 ```json
 {
@@ -84,30 +108,6 @@ Use this when you want the memory database shared across machines, but still wan
 {
   "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333",
   "qdrant_api_key": "your-key"
-}
-```
-
-`qdrant_api_key` is optional only for unauthenticated self-hosted Qdrant. Qdrant Cloud usually requires it.
-
-### Hosted Qdrant and hosted models
-
-Use this when you want the whole stack managed. This example uses OpenAI-compatible hosted models:
-
-```json
-{
-  "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333",
-  "qdrant_api_key": "your-key",
-  "embedding": {
-    "provider": "openai",
-    "model": "text-embedding-3-small",
-    "dimensions": 1536,
-    "api_key": "sk-..."
-  },
-  "llm": {
-    "provider": "openai",
-    "model": "gpt-4.1-mini",
-    "api_key": "sk-..."
-  }
 }
 ```
 

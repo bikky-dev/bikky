@@ -2,7 +2,7 @@
 
 Use this path if you want a private, free setup: Qdrant runs on your machine, and Ollama handles local models.
 
-This setup is great for private testing, but it is usually not the best long-term choice for teams. Extraction, embedding, and curation performance depends on the local models and hardware you run. If you're evaluating bikky for a team or want the strongest quality, use the [hosted models config](hosted-models.md).
+This setup is best for private/free testing rather than long-term team use. Extraction, embedding, and curation performance depends on the local models and hardware you run.
 
 ## What you need
 

@@ -1,6 +1,6 @@
-# Hosted models config
+# Local Qdrant + hosted models config
 
-Use this path for the best first-time experience: Qdrant runs locally, while hosted embeddings and LLM calls give bikky stronger extraction, curation, and recall quality out of the box.
+This setup keeps Qdrant local while hosted embeddings and LLM calls handle extraction, curation, and recall.
 
 ## What you need
 
