@@ -6,10 +6,8 @@ bikky gives AI coding agents (GitHub Copilot, Claude Code, Cursor, and other MCP
 
 ### Who it's for
 
-| | |
-|---|---|
-| 👥 **Teams & software factories** | What one engineer's agent learns today, every agent on the team can recall tomorrow. Shared memory turns institutional knowledge into something queryable instead of tribal — onboarding accelerates, conventions stop drifting, and the same lesson never gets re-learned twice. |
-| 🧑‍💻 **Solo AI power devs** | You run multiple Cursor / Claude Code / Copilot sessions every day and you're tired of re-explaining the codebase, the conventions, and last week's decisions to each new agent. bikky remembers across every session and every tool. |
+- 👥 **Teams & software factories** — What one engineer's agent learns today, every agent on the team can recall tomorrow. Shared memory turns institutional knowledge into something queryable instead of tribal — onboarding accelerates, conventions stop drifting, and the same lesson never gets re-learned twice.
+- 🧑‍💻 **Solo AI power devs** — You run multiple Cursor / Claude Code / Copilot sessions every day and you're tired of re-explaining the codebase, the conventions, and last week's decisions to each new agent. bikky remembers across every session and every tool.
 
 <p align="center">
   <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/diagrams/team-memory.svg" alt="Memory — facts flow from individual sessions into a self-curating knowledge store, shared across your team (or kept just for you)" width="720" />
@@ -25,32 +23,56 @@ The most valuable things you and your agents learn — why a config value exists
 
 ### How bikky solves it
 
-| | |
-|---|---|
-| **Capture** | Facts are extracted automatically from session transcripts — no manual docs to write |
-| **Recall** | Every new session — yours or a teammate's — recalls from the same store via semantic search |
-| **Curate** | Deduplication, confidence decay, contradiction detection, and distillation run autonomously |
-| **Compound** | Session 50 is dramatically better than session 1 — accumulated memory, not better prompts |
+bikky gives your agent memory tools and runs a small background service after `bikky setup`. You keep working normally; bikky captures useful facts, organizes them, recalls them in future sessions, and keeps the store tidy over time.
+
+- **Capture** — Facts are extracted automatically from session transcripts; no manual docs to write.
+- **Classify** — Memories are grouped as **engineering**, **product**, **human**, or **system** so they stay easy to browse and filter.
+- **Recall** — Every new session, yours or a teammate's, recalls from the same store via semantic search.
+- **Curate** — bikky merges duplicates, fades stale facts, resolves contradictions, distills recurring patterns, and builds an entity graph over time.
+- **Compound** — Session 50 is dramatically better than session 1 because memory accumulates.
+
+Subtypes keep recall precise without making setup harder:
+
+- **Engineering** — codebase maps, architecture decisions, infra topology, access patterns, operational procedures, troubleshooting gotchas, and conventions.
+- **Product** — domain rules, product decisions, requirements, user workflows, roadmap items, success metrics, and market insights.
+- **Human** — preferences, person profiles, ownership notes, working agreements, and activity events.
+- **System** — session indexes, episodes, workstreams, and feedback signals.
 
 ---
 
 ## Quick start
 
-The easiest way to try bikky is **100% local, free, and account-free**: Qdrant in Docker, embeddings via Ollama. bikky has one required setting: where Qdrant lives. Everything else has local defaults.
+This quick start uses **local Qdrant + hosted models**: Qdrant runs on your machine, while hosted embeddings and LLM calls provide strong extraction and recall quality without running local LLMs.
 
 ```bash
 # 1. Pull and run Qdrant (vector store)
 docker run -d --name qdrant -p 6333:6333 -v qdrant_storage:/qdrant/storage qdrant/qdrant
 
-# 2. Install Ollama (https://ollama.com) and pull the default embedding model
-ollama pull qwen3-embedding:0.6b
-
-# 3. Install bikky
+# 2. Install bikky
 npm install -g bikky
 mkdir -p ~/.bikky
-echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
+# Replace sk-... below with your hosted model API key.
+cat > ~/.bikky/config.json <<'JSON'
+{
+  "qdrant_url": "http://localhost:6333",
+  "qdrant_api_key": "",
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "api_key": "sk-..."
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "api_key": "sk-..."
+  }
+}
+JSON
+# qdrant_api_key is optional; leave it empty or omit it for local Qdrant.
+# Prefer env vars? Omit api_key above and set OPENAI_API_KEY instead.
 
-# 4. Register bikky with your editor and start the background service
+# 3. Register bikky with your editor and start the background service
 bikky setup            # writes MCP config for Copilot + Claude Code, then starts the daemon
 ```
 
@@ -60,75 +82,46 @@ Restart your editor. The memory tools appear automatically in supported MCP clie
 bikky status           # confirms Qdrant, embeddings, daemon, and UI health
 ```
 
-That's it. You can use the local setup forever, or swap in hosted pieces later.
+That's it. You can keep Qdrant local forever, or move the vector store to Qdrant Cloud later.
+
+For 100% local and account-free setup, use the [local and free config](docs/config/local.md). It is best for private testing rather than long-term team use, and extraction, embedding, and curation performance depends on the local models and hardware you run.
 
 ---
 
 ## Setup options
 
-Start with the local path unless you already know you want hosted infrastructure.
+bikky supports four common setup shapes. Pick based on where you want Qdrant to run and where model calls should happen.
 
 ### What you need
 
-| | Required | Options |
-|---|---|---|
-| **Node.js** | ≥ 20 | `nvm install 20` or your package manager |
-| **Vector store** | Qdrant | Local Docker (recommended first) · [Qdrant Cloud](https://cloud.qdrant.io) · Self-hosted |
-| **Embeddings** | One provider | Ollama local by default · OpenAI / Bedrock / Portkey if you prefer hosted |
-| **Docker** *(optional)* | Only if you run Qdrant locally | Docker Desktop, OrbStack, colima, etc. |
+| Component               | Required                       | Options                                                                                  |
+| ----------------------- | ------------------------------ | ---------------------------------------------------------------------------------------- |
+| **Node.js**             | ≥ 20                           | `nvm install 20` or your package manager                                                 |
+| **Vector store**        | Qdrant                         | Local Docker · [Qdrant Cloud](https://cloud.qdrant.io) · Self-hosted                     |
+| **Embeddings**          | One provider                   | OpenAI · Ollama · Bedrock · Portkey                                                     |
+| **LLM**                 | One provider                   | OpenAI · Ollama · Bedrock · Portkey                                                     |
+| **Docker** *(optional)* | Only if you run Qdrant locally | Docker Desktop, OrbStack, colima, etc.                                                   |
+
+Both `embedding.provider` and `llm.provider` accept the same values: `ollama`, `openai`, `bedrock`, or `portkey`.
 
 ### Choose a setup
 
-| Setup | Best for | Config |
-|---|---|---|
-| **Local and free** | First install, solo use, private testing | `{"qdrant_url":"http://localhost:6333"}` |
-| **Hosted Qdrant + local Ollama** | Sharing memory across machines while keeping embeddings local | Add your Qdrant Cloud URL and API key |
-| **Fully hosted** | Teams that want managed vector storage and hosted models | Add Qdrant plus provider settings in [`docs/configuration.md`](docs/configuration.md) |
+| Setup                            | Best for                                                       | Config                                                                    |
+| -------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **Fully hosted**                 | Best performance and teams; managed vector storage and models  | [Fully hosted config](docs/config/fully-hosted.md)                        |
+| **Local Qdrant + hosted models** | Local vector storage with hosted extraction and embedding      | [Hosted models config](docs/config/hosted-models.md)                      |
+| **Local and free**               | Private/free testing; quality depends on local models          | [Local config guide](docs/config/local.md)                                |
+| **Hosted Qdrant + local Ollama** | Shared vector storage while keeping model calls local          | [Hosted Qdrant + local models](docs/config/hosted-qdrant-local-models.md) |
 
 ### Configure
 
-Most users only need one of these:
+Pick the setup guide above for the copy-paste config. Config lives at `~/.bikky/config.json`, and you can also set `QDRANT_URL` and `QDRANT_API_KEY` as environment variables.
 
-```bash
-mkdir -p ~/.bikky
-
-# Local Qdrant
-echo '{ "qdrant_url": "http://localhost:6333" }' > ~/.bikky/config.json
-
-# Qdrant Cloud
-echo '{ "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333", "qdrant_api_key": "your-key" }' > ~/.bikky/config.json
-```
-
-You can also set `QDRANT_URL` and `QDRANT_API_KEY` as environment variables. For hosted models, custom providers, multiple profiles, or advanced tuning, use the full configuration guide.
+For hosted models, custom providers, multiple profiles, or advanced tuning, use the full configuration guide.
 
 > 📖 **Full configuration guide:** [docs/configuration.md](docs/configuration.md)
 >
 > 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md](CONTRIBUTING.md)** — it's a single-file change.
-
----
-
-## How it works
-
-<p align="center">
-  <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/diagrams/architecture.svg" alt="Architecture" width="600" />
-</p>
-
-**MCP tools** — your agent can store, recall, verify, and review memory without you wiring anything manually.
-
-**Background service** — `bikky setup` starts a local daemon that keeps memory current. You do not need to manage sessions, summaries, or maintenance jobs yourself.
-
----
-
-## Self-curation
-
-Raw fact accumulation creates noise. bikky keeps the knowledge store clean automatically:
-
-- **Deduplication** — content hash + vector similarity merges near-identical facts
-- **Context fields** — repo, task, and source metadata make recall more precise when available
-- **Confidence decay** — old facts lose weight and surface for review
-- **Contradiction detection** — conflicting facts are resolved, not silently stacked
-- **Distillation** — recurring patterns across sessions consolidate into higher-level insights
-- **Entity graph** — relationships between concepts are inferred incrementally for richer recall
 
 ---
 
