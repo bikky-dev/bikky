@@ -84,7 +84,7 @@ bikky status           # confirms Qdrant, embeddings, daemon, and UI health
 
 That's it. You can keep Qdrant local forever, or move the vector store to Qdrant Cloud later.
 
-Prefer 100% local and account-free? Use the [local and free config](docs/config/local.md). Local Ollama models are great for private testing, but extraction and embedding quality depends on the models you run.
+Prefer 100% local and account-free? Use the [local and free config](docs/config/local.md). It is best for private testing rather than long-term team use, and extraction, embedding, and curation performance depends on the local models and hardware you run.
 
 ---
 
@@ -107,7 +107,7 @@ Start with the recommended first-time path for the best extraction and embedding
 | Setup                            | Best for                                                       | Config                                                                    |
 | -------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | **Recommended first-time**       | Best extraction and embedding quality with local Qdrant        | [Hosted models config](docs/config/hosted-models.md)                      |
-| **Local and free**               | Private, free testing and local-first use                      | [Local config guide](docs/config/local.md)                                |
+| **Local and free**               | Private/free testing; quality depends on local models          | [Local config guide](docs/config/local.md)                                |
 | **Hosted Qdrant + local Ollama** | Sharing memory across machines while keeping model calls local | [Hosted Qdrant + local models](docs/config/hosted-qdrant-local-models.md) |
 | **Fully hosted**                 | Teams that want managed vector storage and hosted models       | [Fully hosted config](docs/config/fully-hosted.md)                        |
 

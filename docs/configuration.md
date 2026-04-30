@@ -65,7 +65,7 @@ Use this when you want the best first impression: Qdrant runs locally, while hos
 
 Use this for private, free, account-free testing. Qdrant runs locally and Ollama provides the default embedding + LLM models.
 
-Local model quality depends on the models you run. For the strongest extraction and embedding quality while evaluating bikky, use the [hosted models config](config/hosted-models.md).
+This setup is usually not the best long-term choice for teams. Extraction, embedding, and curation performance depends on the local models and hardware you run. For the strongest quality while evaluating bikky, use the [hosted models config](config/hosted-models.md).
 
 ```json
 {
