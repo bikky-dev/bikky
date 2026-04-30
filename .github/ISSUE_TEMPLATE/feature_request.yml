@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a new capability or improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the use case, not the solution. What are you trying to do, and why is it hard today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like this to work? CLI flag, MCP tool, UI affordance, config option, …
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you've tried, or other designs you considered.
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues and discussions for similar requests.
+          required: true
