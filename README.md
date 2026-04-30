@@ -94,22 +94,22 @@ Start with the recommended first-time path for the best extraction and embedding
 
 ### What you need
 
-| Component | Required | Options |
-|---|---|---|
-| **Node.js** | ≥ 20 | `nvm install 20` or your package manager |
-| **Vector store** | Qdrant | Local Docker (recommended first) · [Qdrant Cloud](https://cloud.qdrant.io) · Self-hosted |
-| **Embeddings** | One provider | Hosted models recommended first · Ollama local for private/free use |
-| **LLM** | One provider | Hosted models recommended first · Ollama local for private/free use |
-| **Docker** *(optional)* | Only if you run Qdrant locally | Docker Desktop, OrbStack, colima, etc. |
+| Component               | Required                       | Options                                                                                  |
+| ----------------------- | ------------------------------ | ---------------------------------------------------------------------------------------- |
+| **Node.js**             | ≥ 20                           | `nvm install 20` or your package manager                                                 |
+| **Vector store**        | Qdrant                         | Local Docker (recommended first) · [Qdrant Cloud](https://cloud.qdrant.io) · Self-hosted |
+| **Embeddings**          | One provider                   | OpenAI · Ollama · Bedrock · Portkey                                                     |
+| **LLM**                 | One provider                   | OpenAI · Ollama · Bedrock · Portkey                                                     |
+| **Docker** *(optional)* | Only if you run Qdrant locally | Docker Desktop, OrbStack, colima, etc.                                                   |
 
 ### Choose a setup
 
-| Setup | Best for | Config |
-|---|---|---|
-| **Recommended first-time** | Best extraction and embedding quality with local Qdrant | [Hosted models config](docs/config/hosted-models.md) |
-| **Local and free** | Private, free testing and local-first use | [Local config guide](docs/config/local.md) |
+| Setup                            | Best for                                                       | Config                                                                    |
+| -------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **Recommended first-time**       | Best extraction and embedding quality with local Qdrant        | [Hosted models config](docs/config/hosted-models.md)                      |
+| **Local and free**               | Private, free testing and local-first use                      | [Local config guide](docs/config/local.md)                                |
 | **Hosted Qdrant + local Ollama** | Sharing memory across machines while keeping model calls local | [Hosted Qdrant + local models](docs/config/hosted-qdrant-local-models.md) |
-| **Fully hosted** | Teams that want managed vector storage and hosted models | [Fully hosted config](docs/config/fully-hosted.md) |
+| **Fully hosted**                 | Teams that want managed vector storage and hosted models       | [Fully hosted config](docs/config/fully-hosted.md)                        |
 
 ### Configure
 
