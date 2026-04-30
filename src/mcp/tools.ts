@@ -101,8 +101,9 @@ interface WorkspaceScope {
 }
 
 function resolveScope(workspaceId?: string, includeLegacyWorkspace = false, actorId?: string): WorkspaceScope {
+  const resolved = workspaceId?.trim() || process.env.BIKKY_WORKSPACE?.trim() || undefined;
   return {
-    workspaceId: workspaceId?.trim() || undefined,
+    workspaceId: resolved,
     actorId: normalizeActorId(actorId),
     includeLegacy: includeLegacyWorkspace,
   };
@@ -271,6 +272,7 @@ export function registerTools(mcp: McpServer): void {
     ].join(" "),
     {},
     async (): Promise<McpToolResult> => {
+      const activeWorkspace = process.env.BIKKY_WORKSPACE?.trim() || null;
       const status: Record<string, unknown> = {
         ready,
         qdrant_url: !!qdrantUrl,
@@ -281,6 +283,7 @@ export function registerTools(mcp: McpServer): void {
         embedding_provider: getEmbeddingConfig().provider,
         embedding_model: getEmbeddingConfig().model,
         embedding_dimensions: getEmbeddingConfig().dimensions,
+        ...(activeWorkspace ? { active_workspace: activeWorkspace } : {}),
         ...(setupError ? { setup_error: setupError } : {}),
       };
       const missing = status["missing"] as string[];
