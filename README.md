@@ -6,10 +6,8 @@ bikky gives AI coding agents (GitHub Copilot, Claude Code, Cursor, and other MCP
 
 ### Who it's for
 
-| | |
-|---|---|
-| 👥 **Teams & software factories** | What one engineer's agent learns today, every agent on the team can recall tomorrow. Shared memory turns institutional knowledge into something queryable instead of tribal — onboarding accelerates, conventions stop drifting, and the same lesson never gets re-learned twice. |
-| 🧑‍💻 **Solo AI power devs** | You run multiple Cursor / Claude Code / Copilot sessions every day and you're tired of re-explaining the codebase, the conventions, and last week's decisions to each new agent. bikky remembers across every session and every tool. |
+- 👥 **Teams & software factories** — What one engineer's agent learns today, every agent on the team can recall tomorrow. Shared memory turns institutional knowledge into something queryable instead of tribal — onboarding accelerates, conventions stop drifting, and the same lesson never gets re-learned twice.
+- 🧑‍💻 **Solo AI power devs** — You run multiple Cursor / Claude Code / Copilot sessions every day and you're tired of re-explaining the codebase, the conventions, and last week's decisions to each new agent. bikky remembers across every session and every tool.
 
 <p align="center">
   <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/diagrams/team-memory.svg" alt="Memory — facts flow from individual sessions into a self-curating knowledge store, shared across your team (or kept just for you)" width="720" />
@@ -27,12 +25,10 @@ The most valuable things you and your agents learn — why a config value exists
 
 bikky gives your agent memory tools and runs a small background service after `bikky setup`. You keep working normally; bikky captures useful facts, recalls them in future sessions, and keeps the store tidy over time.
 
-| | |
-|---|---|
-| **Capture** | Facts are extracted automatically from session transcripts — no manual docs to write |
-| **Recall** | Every new session — yours or a teammate's — recalls from the same store via semantic search |
-| **Curate** | Deduplication, confidence decay, contradiction detection, and distillation run autonomously |
-| **Compound** | Session 50 is dramatically better than session 1 — accumulated memory, not better prompts |
+- **Capture** — Facts are extracted automatically from session transcripts; no manual docs to write.
+- **Recall** — Every new session, yours or a teammate's, recalls from the same store via semantic search.
+- **Curate** — bikky deduplicates repeats, fades stale facts, resolves contradictions, and distills recurring patterns automatically.
+- **Compound** — Session 50 is dramatically better than session 1 because memory accumulates.
 
 ---
 
@@ -72,7 +68,7 @@ Start with the local path unless you already know you want hosted infrastructure
 
 ### What you need
 
-| | Required | Options |
+| Component | Required | Options |
 |---|---|---|
 | **Node.js** | ≥ 20 | `nvm install 20` or your package manager |
 | **Vector store** | Qdrant | Local Docker (recommended first) · [Qdrant Cloud](https://cloud.qdrant.io) · Self-hosted |
@@ -106,19 +102,6 @@ You can also set `QDRANT_URL` and `QDRANT_API_KEY` as environment variables. For
 > 📖 **Full configuration guide:** [docs/configuration.md](docs/configuration.md)
 >
 > 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md](CONTRIBUTING.md)** — it's a single-file change.
-
----
-
-## Self-curation
-
-Raw fact accumulation creates noise. bikky keeps the knowledge store clean automatically:
-
-- **Deduplication** — content hash + vector similarity merges near-identical facts
-- **Context fields** — repo, task, and source metadata make recall more precise when available
-- **Confidence decay** — old facts lose weight and surface for review
-- **Contradiction detection** — conflicting facts are resolved, not silently stacked
-- **Distillation** — recurring patterns across sessions consolidate into higher-level insights
-- **Entity graph** — relationships between concepts are inferred incrementally for richer recall
 
 ---
 
