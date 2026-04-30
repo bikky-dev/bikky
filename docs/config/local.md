@@ -1,6 +1,8 @@
 # Local and free config
 
-Use this path first if you want the simplest setup: Qdrant runs on your machine, and Ollama handles local models.
+Use this path first if you want a private, free setup: Qdrant runs on your machine, and Ollama handles local models.
+
+Local model quality depends on the models you run. This setup is great for local-first use, but if you're evaluating bikky for a team or want the strongest extraction and embedding quality, use the [fully hosted config](fully-hosted.md).
 
 ## What you need
 

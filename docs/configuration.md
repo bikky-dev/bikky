@@ -23,7 +23,9 @@ If you know which path you want, start with the focused guide:
 
 ### Local and free
 
-Use this first. Qdrant runs locally and Ollama provides the default embedding + LLM models.
+Use this first for private, free testing. Qdrant runs locally and Ollama provides the default embedding + LLM models.
+
+Local model quality depends on the models you run. For the strongest extraction and embedding quality while evaluating bikky, use the [fully hosted config](config/fully-hosted.md).
 
 ```json
 {

@@ -69,11 +69,13 @@ bikky status           # confirms Qdrant, embeddings, daemon, and UI health
 
 That's it. You can use the local setup forever, or swap in hosted pieces later.
 
+Local Ollama models are great for private, free testing, but extraction and embedding quality depends on the models you run. If you're evaluating bikky for a team or want the strongest first impression, use the [fully hosted config](docs/config/fully-hosted.md) with hosted models.
+
 ---
 
 ## Setup options
 
-Start with the local path unless you already know you want hosted infrastructure.
+Start with the local path for private, free testing. If you want the best extraction and embedding quality while evaluating bikky, choose the fully hosted setup.
 
 ### What you need
 
@@ -88,7 +90,7 @@ Start with the local path unless you already know you want hosted infrastructure
 
 | Setup | Best for | Config |
 |---|---|---|
-| **Local and free** | First install, solo use, private testing | [Local config guide](docs/config/local.md) |
+| **Local and free** | Private, free testing and local-first use | [Local config guide](docs/config/local.md) |
 | **Hosted Qdrant + local Ollama** | Sharing memory across machines while keeping embeddings local | [Hosted Qdrant + local models](docs/config/hosted-qdrant-local-models.md) |
 | **Fully hosted** | Teams that want managed vector storage and hosted models | [Fully hosted config](docs/config/fully-hosted.md) |
 
