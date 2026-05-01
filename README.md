@@ -104,6 +104,8 @@ bikky supports four common setup shapes. Pick based on where you want Qdrant to 
 
 Both `embedding.provider` and `llm.provider` accept the same values: `ollama`, `openai`, `bedrock`, or `portkey`.
 
+> ⚠️ **Qdrant Cloud free tier does not include automatic backups.** Deleted collections cannot be recovered. If your memory data is valuable, use a paid Qdrant Cloud plan (which includes daily backups), run Qdrant locally with your own backup strategy, or periodically export snapshots via the [Qdrant snapshots API](https://qdrant.tech/documentation/concepts/snapshots/).
+
 ### Choose a setup
 
 | Setup                            | Best for                                                       | Config                                                                    |
