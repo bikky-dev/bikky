@@ -15,7 +15,6 @@ export interface StructuredFact {
   domain?: string;
   kind?: string;
   memory_subtype?: string | null;
-  workspace_id?: string;
   actor_id?: string;
   source?: string;
   entities: string[];
@@ -154,8 +153,6 @@ export function buildFilter(params: FilterParams = {}): QdrantFilter | undefined
     domain,
     kind,
     memory_subtype,
-    workspace_id,
-    includeLegacyWorkspace = false,
     actor_id,
     entity,
     session_id,
@@ -173,7 +170,6 @@ export function buildFilter(params: FilterParams = {}): QdrantFilter | undefined
   } = params;
   const must: QdrantFilter["must"] = [];
   const must_not: QdrantFilter["must_not"] = [];
-  const should: QdrantFilter["should"] = [];
 
   if (excludeSuperseded) {
     must.push({ is_null: { key: "superseded_by" } });
@@ -189,16 +185,6 @@ export function buildFilter(params: FilterParams = {}): QdrantFilter | undefined
   }
   if (memory_subtype) {
     must.push({ key: "memory_subtype", match: { value: memory_subtype } });
-  }
-  if (workspace_id) {
-    if (includeLegacyWorkspace) {
-      should.push(
-        { key: "workspace_id", match: { value: workspace_id } },
-        { is_empty: { key: "workspace_id" } },
-      );
-    } else {
-      must.push({ key: "workspace_id", match: { value: workspace_id } });
-    }
   }
   if (actor_id) {
     must.push({ key: "actor_id", match: { value: actor_id } });
@@ -235,10 +221,9 @@ export function buildFilter(params: FilterParams = {}): QdrantFilter | undefined
     must_not.push({ key: "kind", match: { value: excludedKind } });
   }
 
-  if (must.length === 0 && should.length === 0 && must_not.length === 0) return undefined;
+  if (must.length === 0 && must_not.length === 0) return undefined;
   return {
     must,
-    ...(should.length > 0 ? { should } : {}),
     ...(must_not.length > 0 ? { must_not } : {}),
   };
 }
@@ -257,7 +242,6 @@ export function formatFact(point: QdrantPoint): string {
   if (p.domain && p.domain !== DEFAULT_DOMAIN) parts.push(`domain: ${p.domain}`);
   if (p.kind && p.kind !== "fact") parts.push(`kind: ${p.kind}`);
   if (p.memory_subtype) parts.push(`subtype: ${p.memory_subtype}`);
-  if (p.workspace_id && p.workspace_id !== "default") parts.push(`workspace: ${p.workspace_id}`);
   if (p.actor_id) parts.push(`actor: ${p.actor_id}`);
   if (p.workstream_key) parts.push(`workstream: ${p.workstream_key}`);
   if (p.episode_id) parts.push(`episode: ${p.episode_id}`);
@@ -309,7 +293,6 @@ export function structuredFact(point: QdrantPoint): StructuredFact {
     ...(p.domain ? { domain: p.domain } : {}),
     ...(p.kind ? { kind: p.kind } : {}),
     ...(p.memory_subtype ? { memory_subtype: p.memory_subtype } : {}),
-    ...(p.workspace_id ? { workspace_id: p.workspace_id } : {}),
     ...(p.actor_id ? { actor_id: p.actor_id } : {}),
     ...(p.source ? { source: p.source } : {}),
     entities: p.entities ?? [],

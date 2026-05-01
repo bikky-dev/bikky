@@ -72,6 +72,8 @@ export interface QdrantGetResult {
 
 // ---------------------------------------------------------------------------
 // Fact payload (what's stored in Qdrant)
+// workspace_id removed in v0.4.0 — existing payloads may still carry it but
+// it is no longer indexed or filtered. Use destinations for physical separation.
 // ---------------------------------------------------------------------------
 
 export interface FactPayload {
@@ -81,7 +83,6 @@ export interface FactPayload {
   kind?: string;
   layer?: string | null;
   memory_subtype?: string | null;
-  workspace_id?: string;
   actor_id?: string;
   entities: string[];
   source?: string;
@@ -165,8 +166,6 @@ export interface FilterParams {
   domain?: string;
   kind?: string;
   memory_subtype?: string;
-  workspace_id?: string;
-  includeLegacyWorkspace?: boolean;
   actor_id?: string;
   entity?: string;
   session_id?: string;

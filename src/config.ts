@@ -95,11 +95,50 @@ export interface WatcherConfig {
   claude: { enabled: boolean; path: string };
 }
 
+/**
+ * One Qdrant routing target. Each destination is fully self-contained: its own
+ * URL, API key, collection name, and match rules. All fields in `match` are
+ * arrays of regex strings; OR semantics within a destination's match block,
+ * first-match-wins across destinations.
+ */
+export interface DestinationMatch {
+  /** Match against `process.cwd()`. */
+  cwd?: string[];
+  /** Match against any of the input `entities`. */
+  entity?: string[];
+  /** Match against the input `content`. */
+  content?: string[];
+  /** Per-key match against the input `metadata`. */
+  metadata?: Record<string, string[]>;
+}
+
+export interface Destination {
+  /** Stable, unique name. Used as the `destination` override on tool calls. */
+  name: string;
+  qdrant_url: string;
+  qdrant_api_key: string | null;
+  collection: string;
+  /** Marks this destination as the fallback when no rule matches. */
+  default?: boolean;
+  /** Routing rules. Omit for a destination that is only reachable by override. */
+  match?: DestinationMatch;
+}
+
 export interface BikkyConfig {
+  /**
+   * Top-level Qdrant fields. When `destinations` is empty, a single default
+   * destination is synthesized from these — keeps single-Qdrant configs
+   * working without changes.
+   */
   qdrant_url: string | null;
   qdrant_api_key: string | null;
   collection: string;
-  default_workspace: string | null;
+  /**
+   * One or more Qdrant routing targets. Memory operations resolve to a
+   * destination via override → cwd/entity/content/metadata regex match →
+   * default flag → first entry.
+   */
+  destinations: Destination[];
   aws_profile: string | null;
   embedding: EmbeddingConfig;
   llm: LLMConfig;
@@ -132,7 +171,7 @@ const DEFAULTS: BikkyConfig = {
   qdrant_url: null,
   qdrant_api_key: null,
   collection: "bikky",
-  default_workspace: null,
+  destinations: [],
   aws_profile: null,
   embedding: {
     provider: "ollama",
@@ -290,11 +329,29 @@ const identityConfigFileSchema = z.object({
   actor_label: z.string().nullable().optional(),
 }).passthrough();
 
+const regexArrayField = z.array(z.string()).optional();
+
+const destinationMatchSchema = z.object({
+  cwd: regexArrayField,
+  entity: regexArrayField,
+  content: regexArrayField,
+  metadata: z.record(z.array(z.string())).optional(),
+}).passthrough();
+
+const destinationFileSchema = z.object({
+  name: z.string().min(1),
+  qdrant_url: z.string().min(1),
+  qdrant_api_key: z.string().nullable().optional(),
+  collection: z.string().min(1),
+  default: z.boolean().optional(),
+  match: destinationMatchSchema.optional(),
+}).passthrough();
+
 const configFileSchema = z.object({
   qdrant_url: z.string().nullable().optional(),
   qdrant_api_key: z.string().nullable().optional(),
   collection: z.string().optional(),
-  default_workspace: z.string().nullable().optional(),
+  destinations: z.array(destinationFileSchema).optional(),
   aws_profile: z.string().nullable().optional(),
   embedding: embeddingConfigFileSchema.optional(),
   llm: llmConfigFileSchema.optional(),
@@ -389,6 +446,83 @@ export function validateConfigObject(raw: unknown): ConfigIssue[] {
 
   validateUrlLike(raw.qdrant_url, "qdrant_url", issues);
 
+  // Destinations validation
+  if (Array.isArray(raw.destinations)) {
+    const seenNames = new Set<string>();
+    let defaultCount = 0;
+    raw.destinations.forEach((entry, idx) => {
+      const base = `destinations[${idx}]`;
+      if (!isObject(entry)) {
+        issues.push({ severity: "error", path: base, message: "must be an object" });
+        return;
+      }
+      const name = entry.name;
+      if (typeof name === "string" && name.trim() !== "") {
+        if (seenNames.has(name)) {
+          issues.push({ severity: "error", path: `${base}.name`, message: `duplicate destination name '${name}'` });
+        }
+        seenNames.add(name);
+      }
+      validateUrlLike(entry.qdrant_url, `${base}.qdrant_url`, issues);
+      if (typeof entry.collection === "string" && entry.collection.trim() === "") {
+        issues.push({ severity: "error", path: `${base}.collection`, message: "must not be empty" });
+      }
+      if (entry.default === true) defaultCount++;
+
+      const match = childObject(entry, "match");
+      if (match) {
+        for (const field of ["cwd", "entity", "content"] as const) {
+          const value = match[field];
+          if (value === undefined) continue;
+          if (!Array.isArray(value)) {
+            issues.push({ severity: "error", path: `${base}.match.${field}`, message: "must be an array of regex strings" });
+            continue;
+          }
+          value.forEach((pattern, pIdx) => {
+            if (typeof pattern !== "string") {
+              issues.push({ severity: "error", path: `${base}.match.${field}[${pIdx}]`, message: "must be a string" });
+              return;
+            }
+            try { new RegExp(pattern); }
+            catch (e) {
+              issues.push({
+                severity: "error",
+                path: `${base}.match.${field}[${pIdx}]`,
+                message: `invalid regex: ${e instanceof Error ? e.message : String(e)}`,
+              });
+            }
+          });
+        }
+        const metadata = childObject(match, "metadata");
+        if (metadata) {
+          for (const [key, value] of Object.entries(metadata)) {
+            if (!Array.isArray(value)) {
+              issues.push({ severity: "error", path: `${base}.match.metadata.${key}`, message: "must be an array of regex strings" });
+              continue;
+            }
+            value.forEach((pattern, pIdx) => {
+              if (typeof pattern !== "string") {
+                issues.push({ severity: "error", path: `${base}.match.metadata.${key}[${pIdx}]`, message: "must be a string" });
+                return;
+              }
+              try { new RegExp(pattern); }
+              catch (e) {
+                issues.push({
+                  severity: "error",
+                  path: `${base}.match.metadata.${key}[${pIdx}]`,
+                  message: `invalid regex: ${e instanceof Error ? e.message : String(e)}`,
+                });
+              }
+            });
+          }
+        }
+      }
+    });
+    if (defaultCount > 1) {
+      issues.push({ severity: "error", path: "destinations", message: `at most one destination may set 'default: true' (found ${defaultCount})` });
+    }
+  }
+
   const embedding = childObject(raw, "embedding");
   if (embedding) validateUrlLike(embedding.base_url, "embedding.base_url", issues);
 
@@ -468,7 +602,6 @@ export function loadConfig(): BikkyConfig {
   if (process.env.QDRANT_URL) config.qdrant_url = process.env.QDRANT_URL;
   if (process.env.QDRANT_API_KEY) config.qdrant_api_key = process.env.QDRANT_API_KEY;
   if (process.env.BIKKY_COLLECTION) config.collection = process.env.BIKKY_COLLECTION;
-  if (process.env.BIKKY_DEFAULT_WORKSPACE) config.default_workspace = process.env.BIKKY_DEFAULT_WORKSPACE;
 
   // Embedding env overrides
   if (process.env.EMBEDDING_PROVIDER) config.embedding.provider = process.env.EMBEDDING_PROVIDER;
@@ -575,9 +708,34 @@ export function loadConfig(): BikkyConfig {
   if (config.qdrant_url) config.qdrant_url = config.qdrant_url.replace(/\/+$/, "");
   config.embedding.base_url = config.embedding.base_url.replace(/\/+$/, "");
   config.llm.base_url = config.llm.base_url.replace(/\/+$/, "");
+  for (const dest of config.destinations) {
+    if (dest.qdrant_url) dest.qdrant_url = dest.qdrant_url.replace(/\/+$/, "");
+  }
 
   _config = config;
   return config;
+}
+
+/**
+ * Resolve the effective list of destinations from the loaded config.
+ *
+ * - If `destinations` is non-empty, return as-is.
+ * - Otherwise synthesize a single fallback destination from the top-level
+ *   `qdrant_url` / `qdrant_api_key` / `collection` so existing single-Qdrant
+ *   configs keep working without changes.
+ * - If neither is configured, returns an empty array — callers should treat
+ *   that as "Qdrant not configured" the same way they did before.
+ */
+export function getEffectiveDestinations(config: BikkyConfig = loadConfig()): Destination[] {
+  if (config.destinations.length > 0) return config.destinations;
+  if (!config.qdrant_url) return [];
+  return [{
+    name: "default",
+    qdrant_url: config.qdrant_url,
+    qdrant_api_key: config.qdrant_api_key,
+    collection: config.collection,
+    default: true,
+  }];
 }
 
 /** Save config to disk (used by setup command). */
