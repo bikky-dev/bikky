@@ -177,6 +177,43 @@ bikky render    # render a prompt to JSON (for eval harnesses & debugging)
 
 `bikky status` is the first thing to run when setup feels wrong. It checks the config, Qdrant, embeddings, background daemon, and local UI health, then tells you what needs attention. Use `bikky status --json` for automation.
 
+## Multi-destination routing
+
+Bikky can route memory operations to **different Qdrant accounts** based on caller context — useful when you want to keep work / personal / per-client memory in separate vector stores while sharing one bikky install and one editor MCP connection.
+
+Configure `destinations[]` in `~/.bikky/config.json`. Each destination has its own credentials and an optional `match` block of regex patterns. The first destination whose pattern matches `cwd`, `entities`, `content`, or `metadata` wins; otherwise the destination flagged `default: true` (or the first one) is used.
+
+```jsonc
+{
+  "embedding": { "provider": "openai", "model": "text-embedding-3-small", "dimensions": 1536 },
+  "llm":       { "provider": "openai", "model": "gpt-4.1-mini" },
+  "destinations": [
+    {
+      "name": "acme-client",
+      "qdrant_url": "https://acme.cloud.qdrant.io:6333",
+      "qdrant_api_key": "...",
+      "collection": "bikky",
+      "match": {
+        "cwd":      ["^/Users/me/code/acme"],
+        "entity":   ["^acme-"],
+        "metadata": { "project": ["^acme$"] }
+      }
+    },
+    {
+      "name": "personal",
+      "qdrant_url": "http://localhost:6333",
+      "qdrant_api_key": "",
+      "collection": "bikky",
+      "default": true
+    }
+  ]
+}
+```
+
+Tools accept an optional `destination: "name"` argument to override routing explicitly. All embeddings share one provider/dimensions config, so destinations must use the same vector size.
+
+> **Migrating from `workspace_id` (pre-v0.4):** workspaces are removed in 0.4.0. Existing top-level `qdrant_url` / `qdrant_api_key` / `collection` are still honored as a single synthesized destination, so single-Qdrant setups need no changes. The `workspace_id` arg on memory tools is now a no-op.
+
 ## License
 
 AGPL-3.0 — see [LICENSE](LICENSE).
