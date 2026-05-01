@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router";
 import { apiFetch } from "../lib/api";
+import { useDestination } from "../lib/useDestination";
 import { CATEGORY_COLORS } from "../lib/format";
 import {
   forceSimulation,
@@ -117,6 +118,7 @@ export default function Graph() {
   const [selectedEdge, setSelectedEdge] = useState<{ a: string; b: string } | null>(null);
   const [sharedFacts, setSharedFacts] = useState<SharedFact[]>([]);
   const [sharedLoading, setSharedLoading] = useState(false);
+  const destination = useDestination();
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
@@ -162,12 +164,14 @@ export default function Graph() {
   });
 
   useEffect(() => {
+    setLoading(true);
+    setData(null);
     // Server-side graph budgets keep d3-force responsive on large memory stores.
     apiFetch<GraphData>(`/api/memory/graph?maxNodes=${GRAPH_MAX_NODES}&maxEdges=${GRAPH_MAX_EDGES}&minWeight=${GRAPH_SERVER_MIN_WEIGHT}`)
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [destination]);
 
   // draw reads all state from refs — stable function, no deps
   const draw = useCallback(() => {

@@ -267,59 +267,10 @@ describe("ui/lib/qdrant", () => {
       assert.deepEqual(body.filter, { must: [{ key: "kind", match: { value: "fact" } }] });
     });
 
-    it("appends workspace_id to filter.must on scroll", async () => {
-      const client = new QdrantClient("https://q.test:6333", null, "col", "agent00");
-      const calls = installMock(() => new Response(JSON.stringify({
-        result: { points: [], next_page_offset: null },
-      }), { status: 200 }));
-
-      await client.scroll({ must: [{ key: "kind", match: { value: "fact" } }] });
-      const body = JSON.parse(String(calls[0]!.init.body));
-      assert.deepEqual(body.filter.must, [
-        { key: "kind", match: { value: "fact" } },
-        { key: "workspace_id", match: { value: "agent00" } },
-      ]);
-    });
-
-    it("appends workspace_id on search and count", async () => {
-      const client = new QdrantClient("https://q.test:6333", null, "col", "agent00");
-      const calls = installMock(() => new Response(JSON.stringify({
-        result: [], // search shape
-      }), { status: 200 }));
-
-      await client.search([0.1], { must: [] });
-      const searchBody = JSON.parse(String(calls[0]!.init.body));
-      assert.deepEqual(searchBody.filter.must, [
-        { key: "workspace_id", match: { value: "agent00" } },
-      ]);
-
-      globalThis.fetch = realFetch;
-      const countCalls = installMock(() => new Response(JSON.stringify({
-        result: { count: 1 },
-      }), { status: 200 }));
-      await client.count();
-      const countBody = JSON.parse(String(countCalls[0]!.init.body));
-      assert.deepEqual(countBody.filter.must, [
-        { key: "workspace_id", match: { value: "agent00" } },
-      ]);
-    });
-
-    it("filters getPoints results by workspace post-fetch", async () => {
-      const client = new QdrantClient("https://q.test:6333", null, "col", "agent00");
-      installMock(() => new Response(JSON.stringify({
-        result: [
-          { id: "1", payload: { workspace_id: "agent00" } },
-          { id: "2", payload: { workspace_id: "apate" } },
-          { id: "3", payload: {} },
-        ],
-      }), { status: 200 }));
-
-      const points = await client.getPoints(["1", "2", "3"]);
-      assert.deepEqual(points.map((p) => p.id), ["1"]);
-    });
-
     it("trims whitespace-only workspaceId to disabled (unscoped)", async () => {
-      const client = new QdrantClient("https://q.test:6333", null, "col", "   ");
+      // Workspace scoping was removed in v0.4 — kept a basic test that scroll
+      // still passes the filter through unchanged.
+      const client = new QdrantClient("https://q.test:6333", null, "col");
       const calls = installMock(() => new Response(JSON.stringify({
         result: { points: [], next_page_offset: null },
       }), { status: 200 }));
@@ -327,40 +278,6 @@ describe("ui/lib/qdrant", () => {
       await client.scroll({ must: [] });
       const body = JSON.parse(String(calls[0]!.init.body));
       assert.deepEqual(body.filter, { must: [] });
-    });
-
-    it('treats workspaceId="default" as default OR legacy (no workspace_id)', async () => {
-      const client = new QdrantClient("https://q.test:6333", null, "col", "default");
-      const calls = installMock(() => new Response(JSON.stringify({
-        result: { points: [], next_page_offset: null },
-      }), { status: 200 }));
-
-      await client.scroll({ must: [{ key: "kind", match: { value: "fact" } }] });
-      const body = JSON.parse(String(calls[0]!.init.body));
-      assert.deepEqual(body.filter.must, [
-        { key: "kind", match: { value: "fact" } },
-        {
-          should: [
-            { key: "workspace_id", match: { value: "default" } },
-            { is_empty: { key: "workspace_id" } },
-          ],
-        },
-      ]);
-    });
-
-    it('default workspace getPoints includes legacy facts with no workspace_id', async () => {
-      const client = new QdrantClient("https://q.test:6333", null, "col", "default");
-      installMock(() => new Response(JSON.stringify({
-        result: [
-          { id: "1", payload: { workspace_id: "default" } },
-          { id: "2", payload: { workspace_id: "agent00" } },
-          { id: "3", payload: {} },
-          { id: "4", payload: { workspace_id: null } },
-        ],
-      }), { status: 200 }));
-
-      const points = await client.getPoints(["1", "2", "3", "4"]);
-      assert.deepEqual(points.map((p) => p.id), ["1", "3", "4"]);
     });
   });
 

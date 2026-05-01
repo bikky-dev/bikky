@@ -30,6 +30,7 @@ bikky gives your agent memory tools and runs a small background service after `b
 - **Recall** — Every new session, yours or a teammate's, recalls from the same store via semantic search.
 - **Curate** — bikky merges duplicates, fades stale facts, resolves contradictions, distills recurring patterns, and builds an entity graph over time.
 - **Compound** — Session 50 is dramatically better than session 1 because memory accumulates.
+- **Route** — Send memories to different Qdrant destinations based on cwd, entities, content, or metadata — keep work, personal, and per-client memory in separate vector stores from one install. See [Multi-destination routing](#multi-destination-routing).
 
 Subtypes keep recall precise without making setup harder:
 
@@ -194,23 +195,44 @@ Configure `destinations[]` in `~/.bikky/config.json`. Each destination has its o
       "qdrant_api_key": "...",
       "collection": "bikky",
       "match": {
+        // Any cwd starting with this path routes here
         "cwd":      ["^/Users/me/code/acme"],
+        // Entities matching the regex (case-sensitive by default — see tip below)
         "entity":   ["^acme-"],
+        // Substring match anywhere in the stored fact's content
+        "content":  ["acme corp", "ACME-\\d+"],
+        // Exact-value match on metadata keys
         "metadata": { "project": ["^acme$"] }
       }
     },
     {
-      "name": "personal",
+      "name": "personal-cloud",
+      "qdrant_url": "https://xxxx.cloud.qdrant.io:6333",
+      "qdrant_api_key": "...",
+      "collection": "bikky",
+      "match": {
+        // Case-insensitive substring "side-project" — JS regex has no (?i) flag,
+        // so use a character class to match any case.
+        "content": ["[Ss]ide[- ][Pp]roject"]
+      }
+    },
+    {
+      "name": "work",
       "qdrant_url": "http://localhost:6333",
       "qdrant_api_key": "",
       "collection": "bikky",
-      "default": true
+      "default": true   // catch-all when no other destination matches
     }
   ]
 }
 ```
 
-Tools accept an optional `destination: "name"` argument to override routing explicitly. All embeddings share one provider/dimensions config, so destinations must use the same vector size.
+**How matching works**
+- Within a destination's `match` block, *any* matching pattern across `cwd` / `entity` / `content` / `metadata` selects it (OR logic between fields and within each list).
+- Destinations are evaluated in array order; first match wins. List the most specific ones first.
+- Patterns are JavaScript `RegExp` strings (no flags). Use char classes like `[Bb]ikky` for case-insensitive matches — `(?i)` is not supported.
+- Tools accept an optional `destination: "name"` argument to override routing explicitly (e.g. `memory_store({ ..., destination: "acme-client" })`).
+- All destinations share one embedding provider, so they must use the same vector dimensions.
 
 > **Migrating from `workspace_id` (pre-v0.4):** workspaces are removed in 0.4.0. Existing top-level `qdrant_url` / `qdrant_api_key` / `collection` are still honored as a single synthesized destination, so single-Qdrant setups need no changes. The `workspace_id` arg on memory tools is now a no-op.
 

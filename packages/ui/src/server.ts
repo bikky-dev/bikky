@@ -13,7 +13,7 @@ import { serve, type ServerType } from "@hono/node-server";
 import { memoryRoutes } from "./routes/memory.js";
 
 import { isQdrantConfigured, QdrantNotConfiguredError } from "./lib/qdrant.js";
-import { loadConfig } from "./lib/config.js";
+import { loadConfig, getEffectiveDestinations, getDefaultDestination } from "./lib/config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -35,11 +35,26 @@ export function createApp(): Hono {
   // Health check
   app.get("/health", (c) => {
     const cfg = loadConfig();
+    const dests = getEffectiveDestinations();
     return c.json({
       ok: true,
       service: "bikky-ui",
       qdrant_configured: isQdrantConfigured(),
       collection: cfg.collection,
+      destinations: dests.length,
+    });
+  });
+
+  // List destinations (for the UI's destination selector)
+  app.get("/api/destinations", (c) => {
+    const dests = getEffectiveDestinations();
+    const def = getDefaultDestination();
+    return c.json({
+      destinations: dests.map((d) => ({
+        name: d.name,
+        collection: d.collection,
+        isDefault: d.name === def?.name,
+      })),
     });
   });
 

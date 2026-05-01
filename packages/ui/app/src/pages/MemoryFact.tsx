@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router";
 import { ArrowLeft, Pencil, Trash2, Loader2, Save, X } from "lucide-react";
 import { apiFetch, ApiError } from "../lib/api";
+import { useDestination } from "../lib/useDestination";
 import { relativeTime, CATEGORY_COLORS, KIND_COLORS } from "../lib/format";
 import { BROWSABLE_CATEGORY_OPTIONS, DOMAIN_OPTIONS, ontologyLabel } from "../lib/ontology";
 import Badge from "../components/Badge";
@@ -25,6 +26,7 @@ export default function MemoryFact() {
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const destination = useDestination();
 
   useEffect(() => {
     if (!id) return;
@@ -39,7 +41,7 @@ export default function MemoryFact() {
       })
       .catch((e) => setError(e instanceof ApiError ? e.message : "Failed to load fact"))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, destination]);
 
   const handleSave = async () => {
     if (!fact) return;

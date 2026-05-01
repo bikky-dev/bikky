@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { ApiError } from "../lib/api";
 import { getStats, type MemoryStats } from "../lib/statsCache";
+import { useDestination } from "../lib/useDestination";
 import { CATEGORY_COLORS } from "../lib/format";
 import { BROWSABLE_CATEGORY_OPTIONS, BROWSABLE_SUBTYPES_BY_CATEGORY, ontologyLabel } from "../lib/ontology";
 import Badge from "../components/Badge";
@@ -46,8 +47,10 @@ function CategoryBar({ category, count, max }: { category: string; count: number
 
 export default function Dashboard() {
   const [stats, setStats] = useState<LoadState<MemoryStats>>({ loading: true });
+  const destination = useDestination();
 
   useEffect(() => {
+    setStats({ loading: true });
     getStats()
       .then((data) => setStats({ loading: false, data }))
       .catch((e) => {
@@ -55,7 +58,7 @@ export default function Dashboard() {
         const msg = e instanceof Error ? e.message : "unknown";
         setStats({ loading: false, error: code === "NOT_CONFIGURED" ? "NOT_CONFIGURED" : msg });
       });
-  }, []);
+  }, [destination]);
 
   if (stats.loading) {
     return (
