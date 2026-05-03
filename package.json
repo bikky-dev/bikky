@@ -6,10 +6,10 @@
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bikky-dev/bikky.git"
+    "url": "git+https://github.com/bikky-dev/bikky.git"
   },
   "bin": {
-    "bikky": "./bin/bikky.js"
+    "bikky": "bin/bikky.js"
   },
   "exports": {
     ".": "./dist/mcp/index.js"
