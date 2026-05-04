@@ -38,7 +38,7 @@
   "dependencies": {
     "@hono/node-server": "^1.13.0",
     "hono": "^4.7.0",
-    "open": "^10.1.0"
+    "open": "^11.0.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.0",
