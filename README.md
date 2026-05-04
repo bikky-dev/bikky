@@ -77,6 +77,8 @@ JSON
 bikky setup            # writes MCP config for Copilot + Claude Code, then starts the daemon
 ```
 
+`npm install -g bikky` runs a best-effort postinstall setup hook for convenience. It never fails the install, and you should still run `bikky setup` after writing your config to make setup explicit and repeatable.
+
 Restart your editor. The memory tools appear automatically in supported MCP clients.
 
 ```bash
@@ -214,6 +216,26 @@ bikky render    # render a prompt to JSON (for eval harnesses & debugging)
 ```
 
 `bikky status` is the first thing to run when setup feels wrong. It checks the config, Qdrant, embeddings, background daemon, and local UI health, then tells you what needs attention. Use `bikky status --json` for automation.
+
+## Privacy and transcript capture
+
+bikky stores memory in the Qdrant destination you configure. The daemon runs locally and reads supported coding-agent transcript locations so it can extract durable facts for future sessions:
+
+- GitHub Copilot session state: `~/.copilot/session-state`
+- Claude Code project transcripts: `~/.claude/projects`
+
+Only the configured daemon process reads these files. Extracted facts are redacted before storage, but they are still sent to your configured LLM provider for extraction unless you use a local provider such as Ollama. To disable transcript capture, set the relevant watcher to `false` in `~/.bikky/config.json`:
+
+```json
+{
+  "watchers": {
+    "copilot": { "enabled": false },
+    "claude": { "enabled": false }
+  }
+}
+```
+
+You can also set `daemon.extract_every_sec` to `0` to disable background extraction while keeping MCP recall tools available.
 
 ## License
 

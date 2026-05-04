@@ -8,6 +8,10 @@
     "type": "git",
     "url": "git+https://github.com/bikky-dev/bikky.git"
   },
+  "bugs": {
+    "url": "https://github.com/bikky-dev/bikky/issues"
+  },
+  "homepage": "https://github.com/bikky-dev/bikky#readme",
   "bin": {
     "bikky": "bin/bikky.js"
   },
@@ -16,7 +20,16 @@
   },
   "files": [
     "CONTRIBUTING.md",
-    "dist/",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "SUPPORT.md",
+    "CHANGELOG.md",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.itest.js",
+    "!dist/**/*.itest.d.ts",
     "bin/",
     "docs/configuration.md",
     "docs/config/",
@@ -54,6 +67,9 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "mcp",
