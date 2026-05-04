@@ -372,6 +372,8 @@ You normally do not need to tune these. `bikky setup` starts the daemon and regi
 
 Claude Code ingestion reads top-level `*.jsonl` transcripts inside each project directory under `watchers.claude.path`. It captures user/assistant text and skips tool calls, tool results, attachments, file snapshots, permission records, and thinking blocks.
 
+Set either watcher `enabled` field to `false` to disable that transcript source. Set `daemon.extract_every_sec` to `0` to disable background extraction entirely while keeping MCP recall/search tools available.
+
 #### Logs
 
 bikky writes logs to `~/.bikky/logs/`:
