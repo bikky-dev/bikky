@@ -441,6 +441,10 @@ export function registerTools(mcp: McpServer): void {
       const warnings: string[] = [];
       try {
         status["watcher_path"] = cfg.watchers.copilot.path;
+        status["watcher_paths"] = {
+          copilot: cfg.watchers.copilot.path,
+          claude: cfg.watchers.claude.path,
+        };
         for (const issue of inspectWatcherPaths(cfg)) {
           warnings.push(formatIssue(issue));
         }
@@ -453,22 +457,29 @@ export function registerTools(mcp: McpServer): void {
             last_active_session_at?: string | null;
             active_session_count?: number;
             watcher_path?: string;
+            sources?: Record<string, {
+              enabled?: boolean;
+              watcher_path?: string;
+              active_session_count?: number;
+              last_active_session_at?: string | null;
+            }>;
           };
           status["extraction_last_tick_at"] = health.last_tick_at ?? null;
           status["extraction_last_active_session_at"] = health.last_active_session_at ?? null;
           status["extraction_active_session_count"] = health.active_session_count ?? 0;
+          if (health.sources) status["extraction_sources"] = health.sources;
           if (health.last_active_session_at) {
             const hours = (Date.now() - Date.parse(health.last_active_session_at)) / 3_600_000;
             status["extraction_hours_since_active_session"] = Math.round(hours * 10) / 10;
             if (hours > 6) {
               warnings.push(
-                `Watcher has not seen any active Copilot sessions for ${Math.round(hours)}h — ` +
+                `Watcher has not seen any active transcript sources for ${Math.round(hours)}h — ` +
                 `check watcher_path (${health.watcher_path ?? "unknown"}) and that the daemon is running.`,
               );
             }
           } else {
             status["extraction_hours_since_active_session"] = null;
-            warnings.push("Daemon has never observed an active Copilot session — extraction may be stalled.");
+            warnings.push("Daemon has never observed an active transcript source — extraction may be stalled.");
           }
         } else {
           status["extraction_last_tick_at"] = null;

@@ -370,6 +370,8 @@ You normally do not need to tune these. `bikky setup` starts the daemon and regi
 | `watchers.claude.enabled`  | `true`                     | Watch Claude Code project logs    |
 | `watchers.claude.path`     | `~/.claude/projects`       | Path to Claude Code projects      |
 
+Claude Code ingestion reads top-level `*.jsonl` transcripts inside each project directory under `watchers.claude.path`. It captures user/assistant text and skips tool calls, tool results, attachments, file snapshots, permission records, and thinking blocks.
+
 #### Logs
 
 bikky writes logs to `~/.bikky/logs/`:

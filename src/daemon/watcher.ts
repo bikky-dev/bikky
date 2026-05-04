@@ -1,6 +1,5 @@
 /**
- * Copilot session watcher — detects active sessions by scanning
- * ~/.copilot/session-state/ for directories with events.jsonl files.
+ * Session watcher helpers for supported coding-agent transcript directories.
  */
 
 import fs from "node:fs";
@@ -10,7 +9,8 @@ import { loadConfig } from "../config.js";
 export interface WatchedSession {
   uuid: string;
   eventsPath: string;
-  active: boolean;  // has inuse.*.lock file
+  active: boolean;
+  source?: "copilot" | "claude";
 }
 
 export function discoverSessions(): WatchedSession[] {
@@ -40,7 +40,60 @@ export function discoverSessions(): WatchedSession[] {
       uuid: entry,
       eventsPath,
       active: lockFiles.length > 0,
+      source: "copilot",
     });
   }
+  return sessions;
+}
+
+export function discoverClaudeSessions(): WatchedSession[] {
+  const cfg = loadConfig();
+  if (!cfg.watchers.claude.enabled) return [];
+
+  const baseDir = cfg.watchers.claude.path;
+  if (!fs.existsSync(baseDir)) return [];
+
+  const sessions: WatchedSession[] = [];
+  for (const entry of fs.readdirSync(baseDir)) {
+    const projectPath = path.join(baseDir, entry);
+
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(projectPath);
+    } catch {
+      continue;
+    }
+
+    if (stat.isFile() && entry.endsWith(".jsonl")) {
+      sessions.push({
+        uuid: path.basename(entry, ".jsonl"),
+        eventsPath: projectPath,
+        active: true,
+        source: "claude",
+      });
+      continue;
+    }
+
+    if (!stat.isDirectory()) continue;
+
+    for (const file of fs.readdirSync(projectPath)) {
+      const transcriptPath = path.join(projectPath, file);
+      let transcriptStat: fs.Stats;
+      try {
+        transcriptStat = fs.statSync(transcriptPath);
+      } catch {
+        continue;
+      }
+      if (!transcriptStat.isFile() || !file.endsWith(".jsonl")) continue;
+
+      sessions.push({
+        uuid: path.basename(file, ".jsonl"),
+        eventsPath: transcriptPath,
+        active: true,
+        source: "claude",
+      });
+    }
+  }
+
   return sessions;
 }
