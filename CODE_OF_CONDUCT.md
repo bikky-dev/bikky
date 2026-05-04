@@ -45,7 +45,7 @@ or harmful.
 ## Scope
 
 This Code of Conduct applies within all community spaces (issues, PRs,
-Discussions, Discord/Slack if any), and also applies when an individual is
+Discord/Slack if any), and also applies when an individual is
 officially representing the community in public spaces.
 
 ## Enforcement
