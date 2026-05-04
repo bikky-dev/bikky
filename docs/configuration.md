@@ -32,12 +32,12 @@ If you know which path you want, start with the focused guide:
 
 | Setup                         | Best for                                                     | Guide                                                                    |
 | ----------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| Fully hosted                  | Best performance and teams; managed vector storage and models | [Fully hosted config](config/fully-hosted.md)                            |
-| Local Qdrant + hosted models  | Local vector storage with hosted extraction and embedding    | [Hosted models config](config/hosted-models.md)                          |
-| Local and free                | Local evaluation; quality depends on local models            | [Local config guide](config/local.md)                                    |
-| Hosted Qdrant + local models  | Shared vector storage while keeping model calls local        | [Hosted Qdrant + local models](config/hosted-qdrant-local-models.md)     |
+| Fully hosted                  | Best performance and teams; managed vector storage and models | [Fully hosted config](https://github.com/bikky-dev/bikky/blob/main/docs/config/fully-hosted.md)                            |
+| Local Qdrant + hosted models  | Local vector storage with hosted extraction and embedding    | [Hosted models config](https://github.com/bikky-dev/bikky/blob/main/docs/config/hosted-models.md)                          |
+| Local and free                | Local evaluation; quality depends on local models            | [Local config guide](https://github.com/bikky-dev/bikky/blob/main/docs/config/local.md)                                    |
+| Hosted Qdrant + local models  | Shared vector storage while keeping model calls local        | [Hosted Qdrant + local models](https://github.com/bikky-dev/bikky/blob/main/docs/config/hosted-qdrant-local-models.md)     |
 
-Privacy-conscious users should also read the [privacy-first quickstart](privacy-first.md), which combines local Qdrant, local Ollama models, and transcript-capture disable controls.
+Privacy-conscious users should also read the [privacy-first quickstart](https://github.com/bikky-dev/bikky/blob/main/docs/privacy-first.md), which combines local Qdrant, local Ollama models, and transcript-capture disable controls.
 
 ### Fully hosted
 

@@ -47,4 +47,4 @@ bikky status
 
 If you started from a fresh install, run `bikky setup` after writing the config, then restart your editor so its MCP process reloads.
 
-For Bedrock, Portkey, custom base URLs, or model-specific dimensions, see the [full configuration guide](../configuration.md).
+For Bedrock, Portkey, custom base URLs, or model-specific dimensions, see the [full configuration guide](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md).

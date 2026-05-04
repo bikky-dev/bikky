@@ -10,7 +10,7 @@ bikky gives AI coding agents (GitHub Copilot, Claude Code, Cursor, and other MCP
 - 🤖 **Multi-agent engineering workflows** — Multiple Cursor / Claude Code / Copilot sessions can share codebase context, conventions, and recent decisions instead of re-learning them from scratch.
 
 <p align="center">
-  <img src="https://cdn.jsdelivr.net/npm/bikky@latest/docs/diagrams/team-memory.svg" alt="Memory — facts flow from individual sessions into a self-curating knowledge store shared across your team" width="720" />
+  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/team-memory.svg" alt="Memory — facts flow from individual sessions into a self-curating knowledge store shared across your team" width="720" />
 </p>
 
 <p align="center"><i>Knowledge flows from every session into a store that curates itself over time — deduplicating, distilling, and decaying stale facts — so every future session starts smarter across the team.</i></p>
@@ -165,15 +165,15 @@ Most installs use one Qdrant destination. If you need clean separation later, re
 
 That is enough for explicit selection in the UI and tools. Add routing rules only when you want automatic placement by cwd, entity, content, or metadata. Search tools can also use `search_scope: "all"` or a named/listed scope when context may span stores. Existing single-Qdrant configs continue to work.
 
-> 📖 **Details:** [multi-destination configuration](docs/configuration.md#multi-destination-routing)
+> 📖 **Details:** [multi-destination configuration](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md#multi-destination-routing)
 
-[fully-hosted-config]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/config/fully-hosted.md
-[hosted-models-config]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/config/hosted-models.md
-[local-config]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/config/local.md
-[hosted-qdrant-local-models-config]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/config/hosted-qdrant-local-models.md
-[configuration-guide]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/configuration.md
-[privacy-quickstart]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/privacy-first.md
-[contributing]: https://cdn.jsdelivr.net/npm/bikky@latest/CONTRIBUTING.md
+[fully-hosted-config]: https://github.com/bikky-dev/bikky/blob/main/docs/config/fully-hosted.md
+[hosted-models-config]: https://github.com/bikky-dev/bikky/blob/main/docs/config/hosted-models.md
+[local-config]: https://github.com/bikky-dev/bikky/blob/main/docs/config/local.md
+[hosted-qdrant-local-models-config]: https://github.com/bikky-dev/bikky/blob/main/docs/config/hosted-qdrant-local-models.md
+[configuration-guide]: https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md
+[privacy-quickstart]: https://github.com/bikky-dev/bikky/blob/main/docs/privacy-first.md
+[contributing]: https://github.com/bikky-dev/bikky/blob/main/CONTRIBUTING.md
 
 ---
 
@@ -189,17 +189,17 @@ bikky-ui              # opens http://localhost:1422
 ```
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Dashboard — overview stats, category breakdown, recent facts" width="720" />
+  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/screenshots/dashboard.png" alt="Dashboard — overview stats, category breakdown, recent facts" width="720" />
 </p>
 <p align="center"><i>Dashboard — memory stats, category breakdown, and recent facts at a glance</i></p>
 
 <p align="center">
-  <img src="docs/screenshots/memory.png" alt="Memory browser — search, filter, and browse all stored facts" width="720" />
+  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/screenshots/memory.png" alt="Memory browser — search, filter, and browse all stored facts" width="720" />
 </p>
 <p align="center"><i>Memory browser — search, filter by category/kind/source, and browse all stored facts</i></p>
 
 <p align="center">
-  <img src="docs/screenshots/graph.png" alt="Entity graph — interactive visualization of entity relationships" width="720" />
+  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/screenshots/graph.png" alt="Entity graph — interactive visualization of entity relationships" width="720" />
 </p>
 <p align="center"><i>Entity graph — interactive visualization of how concepts, people, and services relate</i></p>
 
@@ -248,4 +248,4 @@ For questions, bugs, and feature requests, please use [GitHub issues](https://gi
 
 ## License
 
-AGPL-3.0 — see [LICENSE](LICENSE).
+AGPL-3.0 — see [LICENSE](https://github.com/bikky-dev/bikky/blob/main/LICENSE).
