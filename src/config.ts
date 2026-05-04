@@ -95,10 +95,71 @@ export interface WatcherConfig {
   claude: { enabled: boolean; path: string };
 }
 
+/**
+ * One Qdrant routing target. Each destination is fully self-contained: its own
+ * URL, API key, collection name, and match rules. All fields in `match` are
+ * arrays of regex strings; OR semantics within a destination's match block,
+ * first-match-wins across destinations.
+ */
+export interface DestinationMatch {
+  /** Match against `process.cwd()`. */
+  cwd?: string[];
+  /** Match against any of the input `entities`. */
+  entity?: string[];
+  /** Match against the input `content`. */
+  content?: string[];
+  /** Per-key match against the input `metadata`. */
+  metadata?: Record<string, string[]>;
+}
+
+export interface Destination {
+  /** Stable, unique name. Used as the `destination` override on tool calls. */
+  name: string;
+  /** Human-readable guidance for LLMs/users about when to use this destination. */
+  description?: string;
+  qdrant_url: string;
+  qdrant_api_key: string | null;
+  collection: string;
+  /** Marks this destination as the fallback when no rule matches. */
+  default?: boolean;
+  /** Routing rules. Omit for a destination that is only reachable by override. */
+  match?: DestinationMatch;
+}
+
+export type SearchScopeTarget = "routed" | "all" | string | string[];
+
+export interface SearchScopeDefinition {
+  /** Stable scope name that MCP clients can pass as `search_scope`. */
+  name: string;
+  /** Guidance for LLMs/users about when this scope should be used. */
+  description: string;
+  /** Destination selector: "routed", "all", a destination name, or destination names. */
+  destinations: SearchScopeTarget;
+}
+
 export interface BikkyConfig {
+  /**
+   * Top-level Qdrant fields. When `destinations` is empty, a single default
+   * destination is synthesized from these — keeps single-Qdrant configs
+   * working without changes.
+   */
   qdrant_url: string | null;
   qdrant_api_key: string | null;
   collection: string;
+  /**
+   * One or more Qdrant routing targets. Memory operations resolve to a
+   * destination via override → cwd/entity/content/metadata regex match →
+   * default flag → first entry.
+   */
+  destinations: Destination[];
+  /**
+   * Default read/search scope. "routed" preserves historical behavior
+   * (one destination via routing rules); "all" fans out to every destination;
+   * a destination name or list searches only those destinations.
+   */
+  default_search_scope: SearchScopeTarget;
+  /** Optional named search scopes exposed to MCP clients with descriptions. */
+  search_scopes: SearchScopeDefinition[];
   aws_profile: string | null;
   embedding: EmbeddingConfig;
   llm: LLMConfig;
@@ -131,6 +192,9 @@ const DEFAULTS: BikkyConfig = {
   qdrant_url: null,
   qdrant_api_key: null,
   collection: "bikky",
+  destinations: [],
+  default_search_scope: "routed",
+  search_scopes: [],
   aws_profile: null,
   embedding: {
     provider: "ollama",
@@ -288,10 +352,43 @@ const identityConfigFileSchema = z.object({
   actor_label: z.string().nullable().optional(),
 }).passthrough();
 
+const regexArrayField = z.array(z.string()).optional();
+
+const destinationMatchSchema = z.object({
+  cwd: regexArrayField,
+  entity: regexArrayField,
+  content: regexArrayField,
+  metadata: z.record(z.array(z.string())).optional(),
+}).passthrough();
+
+const destinationFileSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  qdrant_url: z.string().min(1),
+  qdrant_api_key: z.string().nullable().optional(),
+  collection: z.string().min(1),
+  default: z.boolean().optional(),
+  match: destinationMatchSchema.optional(),
+}).passthrough();
+
+const searchScopeTargetSchema = z.union([
+  z.string().min(1),
+  z.array(z.string().min(1)).min(1),
+]);
+
+const searchScopeDefinitionFileSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  destinations: searchScopeTargetSchema,
+}).passthrough();
+
 const configFileSchema = z.object({
   qdrant_url: z.string().nullable().optional(),
   qdrant_api_key: z.string().nullable().optional(),
   collection: z.string().optional(),
+  destinations: z.array(destinationFileSchema).optional(),
+  default_search_scope: searchScopeTargetSchema.optional(),
+  search_scopes: z.array(searchScopeDefinitionFileSchema).optional(),
   aws_profile: z.string().nullable().optional(),
   embedding: embeddingConfigFileSchema.optional(),
   llm: llmConfigFileSchema.optional(),
@@ -385,6 +482,142 @@ export function validateConfigObject(raw: unknown): ConfigIssue[] {
   }
 
   validateUrlLike(raw.qdrant_url, "qdrant_url", issues);
+
+  // Destinations validation
+  if (Array.isArray(raw.destinations)) {
+    const seenNames = new Set<string>();
+    let defaultCount = 0;
+    raw.destinations.forEach((entry, idx) => {
+      const base = `destinations[${idx}]`;
+      if (!isObject(entry)) {
+        issues.push({ severity: "error", path: base, message: "must be an object" });
+        return;
+      }
+      const name = entry.name;
+      if (typeof name === "string" && name.trim() !== "") {
+        if (seenNames.has(name)) {
+          issues.push({ severity: "error", path: `${base}.name`, message: `duplicate destination name '${name}'` });
+        }
+        seenNames.add(name);
+      }
+      validateUrlLike(entry.qdrant_url, `${base}.qdrant_url`, issues);
+      if (typeof entry.collection === "string" && entry.collection.trim() === "") {
+        issues.push({ severity: "error", path: `${base}.collection`, message: "must not be empty" });
+      }
+      if (entry.default === true) defaultCount++;
+
+      const match = childObject(entry, "match");
+      if (match) {
+        for (const field of ["cwd", "entity", "content"] as const) {
+          const value = match[field];
+          if (value === undefined) continue;
+          if (!Array.isArray(value)) {
+            issues.push({ severity: "error", path: `${base}.match.${field}`, message: "must be an array of regex strings" });
+            continue;
+          }
+          value.forEach((pattern, pIdx) => {
+            if (typeof pattern !== "string") {
+              issues.push({ severity: "error", path: `${base}.match.${field}[${pIdx}]`, message: "must be a string" });
+              return;
+            }
+            try { new RegExp(pattern); }
+            catch (e) {
+              issues.push({
+                severity: "error",
+                path: `${base}.match.${field}[${pIdx}]`,
+                message: `invalid regex: ${e instanceof Error ? e.message : String(e)}`,
+              });
+            }
+          });
+        }
+        const metadata = childObject(match, "metadata");
+        if (metadata) {
+          for (const [key, value] of Object.entries(metadata)) {
+            if (!Array.isArray(value)) {
+              issues.push({ severity: "error", path: `${base}.match.metadata.${key}`, message: "must be an array of regex strings" });
+              continue;
+            }
+            value.forEach((pattern, pIdx) => {
+              if (typeof pattern !== "string") {
+                issues.push({ severity: "error", path: `${base}.match.metadata.${key}[${pIdx}]`, message: "must be a string" });
+                return;
+              }
+              try { new RegExp(pattern); }
+              catch (e) {
+                issues.push({
+                  severity: "error",
+                  path: `${base}.match.metadata.${key}[${pIdx}]`,
+                  message: `invalid regex: ${e instanceof Error ? e.message : String(e)}`,
+                });
+              }
+            });
+          }
+        }
+      }
+    });
+    if (defaultCount > 1) {
+      issues.push({ severity: "error", path: "destinations", message: `at most one destination may set 'default: true' (found ${defaultCount})` });
+    }
+  }
+
+  const destinationNames = new Set<string>();
+  if (Array.isArray(raw.destinations)) {
+    for (const entry of raw.destinations) {
+      if (isObject(entry) && typeof entry.name === "string" && entry.name.trim() !== "") {
+        destinationNames.add(entry.name);
+      }
+    }
+  }
+
+  const searchScopeNames = new Set<string>();
+  if (Array.isArray(raw.search_scopes)) {
+    for (const entry of raw.search_scopes) {
+      if (isObject(entry) && typeof entry.name === "string" && entry.name.trim() !== "") {
+        searchScopeNames.add(entry.name);
+      }
+    }
+  }
+
+  const validateSearchScopeTarget = (target: unknown, pathName: string): void => {
+    const values = Array.isArray(target) ? target : [target];
+    for (const [idx, value] of values.entries()) {
+      const valuePath = Array.isArray(target) ? `${pathName}[${idx}]` : pathName;
+      if (typeof value !== "string" || value.trim() === "") continue;
+      const normalized = value.trim();
+      if (normalized === "all" || normalized === "routed" || destinationNames.size === 0) continue;
+      if (searchScopeNames.has(normalized)) continue;
+      if (!destinationNames.has(normalized)) {
+        issues.push({
+          severity: "warning",
+          path: valuePath,
+          message: `references unknown destination '${normalized}'`,
+        });
+      }
+    }
+  };
+
+  if (Object.prototype.hasOwnProperty.call(raw, "default_search_scope")) {
+    validateSearchScopeTarget(raw.default_search_scope, "default_search_scope");
+  }
+
+  if (Array.isArray(raw.search_scopes)) {
+    const seenScopeNames = new Set<string>();
+    raw.search_scopes.forEach((entry, idx) => {
+      const base = `search_scopes[${idx}]`;
+      if (!isObject(entry)) {
+        issues.push({ severity: "error", path: base, message: "must be an object" });
+        return;
+      }
+      const name = entry.name;
+      if (typeof name === "string" && name.trim() !== "") {
+        if (seenScopeNames.has(name)) {
+          issues.push({ severity: "error", path: `${base}.name`, message: `duplicate search scope name '${name}'` });
+        }
+        seenScopeNames.add(name);
+      }
+      validateSearchScopeTarget(entry.destinations, `${base}.destinations`);
+    });
+  }
 
   const embedding = childObject(raw, "embedding");
   if (embedding) validateUrlLike(embedding.base_url, "embedding.base_url", issues);
@@ -571,9 +804,35 @@ export function loadConfig(): BikkyConfig {
   if (config.qdrant_url) config.qdrant_url = config.qdrant_url.replace(/\/+$/, "");
   config.embedding.base_url = config.embedding.base_url.replace(/\/+$/, "");
   config.llm.base_url = config.llm.base_url.replace(/\/+$/, "");
+  for (const dest of config.destinations) {
+    if (dest.qdrant_url) dest.qdrant_url = dest.qdrant_url.replace(/\/+$/, "");
+  }
 
   _config = config;
   return config;
+}
+
+/**
+ * Resolve the effective list of destinations from the loaded config.
+ *
+ * - If `destinations` is non-empty, return as-is.
+ * - Otherwise synthesize a single fallback destination from the top-level
+ *   `qdrant_url` / `qdrant_api_key` / `collection` so existing single-Qdrant
+ *   configs keep working without changes.
+ * - If neither is configured, returns an empty array — callers should treat
+ *   that as "Qdrant not configured" the same way they did before.
+ */
+export function getEffectiveDestinations(config: BikkyConfig = loadConfig()): Destination[] {
+  if (config.destinations.length > 0) return config.destinations;
+  if (!config.qdrant_url) return [];
+  return [{
+    name: "default",
+    description: "Default Qdrant destination synthesized from the top-level qdrant_url, qdrant_api_key, and collection settings.",
+    qdrant_url: config.qdrant_url,
+    qdrant_api_key: config.qdrant_api_key,
+    collection: config.collection,
+    default: true,
+  }];
 }
 
 /** Save config to disk (used by setup command). */

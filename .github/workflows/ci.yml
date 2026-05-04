@@ -75,3 +75,32 @@ jobs:
 
       - name: Audit (production deps, fail on high+)
         run: npm audit --omit=dev --audit-level=high
+
+  package-verification:
+    name: package verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            packages/ui/package-lock.json
+
+      - name: Install core dependencies
+        run: npm ci
+
+      - name: Build core package
+        run: npm run build
+
+      - name: Install and build UI package
+        working-directory: packages/ui
+        run: |
+          npm ci
+          npm run build
+
+      - name: Verify package contents and smoke installs
+        run: npm run verify:package

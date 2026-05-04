@@ -1,4 +1,5 @@
 import { apiFetch } from "./api";
+import { getSelectedDestination, subscribeDestination } from "./destinationStore";
 
 export interface MemoryStats {
   total: number;
@@ -19,6 +20,13 @@ const TTL_MS = 30_000;
 const cached = new Map<string, { data: MemoryStats; expiresAt: number }>();
 const inflight = new Map<string, Promise<MemoryStats>>();
 
+// Drop cached/inflight entries when the user switches destinations so we don't
+// serve stats from the previous destination scope.
+subscribeDestination(() => {
+  cached.clear();
+  inflight.clear();
+});
+
 function normalizeArgs(filtersOrRefresh: MemoryStatsFilters | boolean, refresh: boolean) {
   if (typeof filtersOrRefresh === "boolean") {
     return { filters: {}, refresh: filtersOrRefresh };
@@ -31,7 +39,8 @@ function statsQuery(filters: MemoryStatsFilters, refresh: boolean): { key: strin
   if (filters.kind) params.set("kind", filters.kind);
   if (filters.source) params.set("source", filters.source);
   if (refresh) params.set("refresh", "true");
-  const key = `kind=${filters.kind ?? ""}&source=${filters.source ?? ""}`;
+  const dest = getSelectedDestination() ?? "";
+  const key = `dest=${dest}&kind=${filters.kind ?? ""}&source=${filters.source ?? ""}`;
   const query = params.toString();
   return { key, query: query ? `?${query}` : "" };
 }

@@ -1,177 +1,48 @@
 # Configuration
 
-Config lives at `~/.bikky/config.json`, or `BIKKY_HOME/config.json` when `BIKKY_HOME` is set. Resolution order: **defaults → config file → env vars** (highest wins).
-
-## Qdrant (required)
-
-| Setting | Env var | Default | Description |
-|---------|---------|---------|-------------|
-| `qdrant_url` | `QDRANT_URL` | *none — must be set* | Qdrant REST URL, e.g. `http://localhost:6333` (local Docker) or `https://abc123.cloud.qdrant.io:6333` (Cloud) |
-| `qdrant_api_key` | `QDRANT_API_KEY` | *none (optional)* | Qdrant API key. Required for Qdrant Cloud and any self-hosted instance with `QDRANT__SERVICE__API_KEY` set; leave unset for plain local Docker. |
-| `collection` | `BIKKY_COLLECTION` | `bikky` | Collection name. Change only if running multiple instances |
-
-## Ontology scope fields
-
-Bikky's ontology includes optional scope payload fields such as `workspace_id`, `repo`, `branch`, `task_key`, `workstream_key`, and `episode_id`. These fields can be supplied through MCP calls or filled in by the daemon when it has enough context.
-
-## Embedding & LLM providers
-
-Both `embedding.provider` and `llm.provider` accept one of four built-in values:
-
-| Value | What it is | Auth needed | `base_url` used? |
-|-------|-----------|-------------|-----------------|
-| `ollama` | Local Ollama server | None | ✅ default `http://localhost:11434` |
-| `openai` | OpenAI-compatible API | `api_key` or `OPENAI_API_KEY` | ✅ default `https://api.openai.com` |
-| `bedrock` | AWS Bedrock | AWS credentials (env or IAM role) | ❌ uses AWS SDK |
-| `portkey` | [Portkey](https://portkey.ai) gateway (routes to OpenAI / Anthropic / Bedrock / etc.) | `api_key` (Portkey key) | ✅ default `https://api.portkey.ai` |
-
-> **⚠️ Only these four values are valid.** Any other value is rejected at boot — the MCP server starts up but `requireReady` returns `setup_required` with a `setup_error` message until you fix the config. To add a new provider, see [CONTRIBUTING.md](../CONTRIBUTING.md).
-
-### Embedding config
-
-| Setting | Env var | Default |
-|---------|---------|---------|
-| `embedding.provider` | `EMBEDDING_PROVIDER` | `ollama` |
-| `embedding.model` | `EMBEDDING_MODEL` | `qwen3-embedding:0.6b` |
-| `embedding.dimensions` | `EMBEDDING_DIMENSIONS` | `1024` |
-| `embedding.base_url` | `EMBEDDING_BASE_URL` | `http://localhost:11434` |
-| `embedding.api_key` | `OPENAI_API_KEY` | — |
-
-**Models by provider:**
-
-| Provider | Recommended models | Dimensions |
-|----------|-------------------|------------|
-| `ollama` | `qwen3-embedding:0.6b`, `nomic-embed-text` | `1024`, `768` |
-| `openai` | `text-embedding-3-small`, `text-embedding-3-large` | `1536`, `3072` |
-| `bedrock` | `amazon.titan-embed-text-v2:0` | `1024` |
-| `portkey` | `@openai/text-embedding-3-small`, `@openai/text-embedding-3-large` (namespaced via Portkey routing) | `1536`, `3072` |
-
-> **⚠️ `dimensions` must match your model's output.** Mismatched dimensions will cause Qdrant insert errors. If you change the model, update dimensions too.
-
-### LLM config (used by daemon for extraction & consolidation)
-
-| Setting | Env var | Default |
-|---------|---------|---------|
-| `llm.provider` | `LLM_PROVIDER` | `ollama` |
-| `llm.model` | `LLM_MODEL` | `qwen2.5:7b` |
-| `llm.base_url` | `LLM_BASE_URL` | `http://localhost:11434` |
-| `llm.api_key` | `OPENAI_API_KEY` | — |
-| `llm.extra.region` | `AWS_BEDROCK_REGION` / `AWS_REGION` | `us-east-1` |
-
-**Models by provider:**
-
-| Provider | Recommended models |
-|----------|-------------------|
-| `ollama` | `qwen2.5:7b`, `llama3.1:8b`, or any local model |
-| `openai` | `gpt-4.1-mini`, `gpt-4.1` |
-| `bedrock` | `us.anthropic.claude-sonnet-4-20250514`, `anthropic.claude-3-5-haiku-20241022-v1:0` |
-| `portkey` | `@openai/gpt-4o-mini`, `@anthropic/claude-3-5-haiku-latest`, or any model exposed by your Portkey workspace |
-
-> Bedrock reads `embedding.extra.region` and `llm.extra.region`. `AWS_BEDROCK_REGION`
-> populates both, falling back to `AWS_REGION`; `aws_profile` or `AWS_PROFILE`
-> selects the shared AWS profile when you are not using direct env credentials.
-
-**Portkey extras** (optional, set via `extra.*` or `BIKKY_LLM_EXTRA_<KEY>` / `BIKKY_EMBEDDING_EXTRA_<KEY>` env vars):
-
-| Extra | Sent as header | Purpose |
-|-------|----------------|---------|
-| `virtual_key` | `x-portkey-virtual-key` | Server-side credential alias for the underlying provider |
-| `config_id` | `x-portkey-config` | Saved Portkey config bundle (routing / fallback / guardrails) |
-
-### Provider auth quick-reference
-
-| Provider | What to set |
-|----------|------------|
-| `ollama` | Nothing — just have Ollama running locally (`ollama serve`) |
-| `openai` | `OPENAI_API_KEY` env var **or** `"api_key": "sk-..."` in the embedding/llm config block |
-| `bedrock` | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` env vars, or an IAM instance role |
-| `portkey` | `"api_key": "<portkey-key>"` in the embedding/llm config block (sent as `x-portkey-api-key`) |
-
-### Resilience knobs (timeouts & retries)
-
-Both `embedding` and `llm` accept three optional fields that control how HTTP
-calls to providers behave when things go wrong (network blips, 5xx, 429s).
-These also work for the OpenAI-compatible `portkey` provider.
-
-| Setting | Env var | Default |
-|---------|---------|---------|
-| `embedding.timeout_ms` | `BIKKY_EMBEDDING_TIMEOUT_MS` | `30000` |
-| `embedding.retries` | `BIKKY_EMBEDDING_RETRIES` | `2` |
-| `embedding.retry_base_delay_ms` | `BIKKY_EMBEDDING_RETRY_BASE_DELAY_MS` | `250` |
-| `llm.timeout_ms` | `BIKKY_LLM_TIMEOUT_MS` | `30000` |
-| `llm.retries` | `BIKKY_LLM_RETRIES` | `2` |
-| `llm.retry_base_delay_ms` | `BIKKY_LLM_RETRY_BASE_DELAY_MS` | `250` |
-
-Behaviour:
-
-- `timeout_ms` is per-attempt (each retry gets its own clock).
-- Retries use full-jitter exponential backoff capped at 5s, and honour
-  `Retry-After` response headers (capped at 60s).
-- Only `transient` (5xx, 408), `rate_limit` (429), and `timeout` errors are
-  retried. `auth` (401/403) and `bad_request` (400/404/422) fail fast — they
-  won't get better with retries.
-
-### Setup errors and `requireReady`
-
-If embedding init or Qdrant init fails at boot (bad provider name, missing
-collection, unreachable host, etc.), the MCP server still starts. Tools that
-need ready storage call `requireReady`, which returns a `setup_required`
-payload that now includes a human-readable `setup_error` field:
-
-```json
-{
-  "setup_required": true,
-  "missing": ["qdrant-url"],
-  "setup_error": "embedding init failed: [openai] (401): invalid api key"
-}
-```
-
-`get_setup_status` exposes the same info for MCP diagnostics. From the terminal,
-run `bikky status`.
-
-### `bikky status`
-
-`bikky status` is read-only. It does not create collections, add indexes, repair
-config, or send an LLM chat request. It reports:
-
-| Check | What it does |
-|-------|--------------|
-| Config | Parses `~/.bikky/config.json` (or `BIKKY_HOME/config.json`), validates common schema/type mistakes, and lists active env overrides |
-| Qdrant | Checks reachability, collection existence, vector size, and payload-index readiness against Bikky's canonical index list |
-| Embedding | Validates the provider config and runs a small live embedding request by default |
-| LLM | Validates provider and fallback provider names without a live inference call |
-| Daemon/UI | Reports daemon PID state, maintenance-worker summaries, and probes the local UI `/health` endpoint |
-
-Useful options:
+bikky is designed to keep setup small. The example below keeps Qdrant local and uses hosted models; the focused guides list the other common setup shapes.
 
 ```bash
-bikky status --json     # machine-readable report
-bikky status --no-live  # skip the live embedding request
-bikky status --no-ui    # skip the local UI health probe
-```
-
-`bikky status` exits non-zero when required setup is broken, such as invalid
-JSON, unknown provider names, missing Qdrant configuration, unreachable Qdrant,
-or embedding connectivity/dimension failures. Missing Qdrant payload indexes are
-reported as warnings because they affect query performance/readiness but can be
-repaired separately by normal startup readiness logic.
-
-After changing provider, Qdrant, or AWS settings, restart the long-running
-processes that already loaded the old config: run `bikky stop && bikky start`
-for the daemon, and restart your editor so its MCP server process re-reads the
-file and env vars.
-
-## Copy-paste examples
-
-**Ollama (default — zero config):**
-```json
+mkdir -p ~/.bikky
+cat > ~/.bikky/config.json <<'JSON'
 {
-  "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333",
-  "qdrant_api_key": "your-key"
+  "qdrant_url": "http://localhost:6333",
+  "qdrant_api_key": "",
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "api_key": "sk-..."
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "api_key": "sk-..."
+  }
 }
+JSON
+bikky status
 ```
 
-**OpenAI embeddings + LLM:**
+Config lives at `~/.bikky/config.json`, or at `BIKKY_HOME/config.json` when `BIKKY_HOME` is set. Environment variables override the config file.
+
+## Common setups
+
+If you know which path you want, start with the focused guide:
+
+| Setup                         | Best for                                                     | Guide                                                                    |
+| ----------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| Fully hosted                  | Best performance and teams; managed vector storage and models | [Fully hosted config](config/fully-hosted.md)                            |
+| Local Qdrant + hosted models  | Local vector storage with hosted extraction and embedding    | [Hosted models config](config/hosted-models.md)                          |
+| Local and free                | Local evaluation; quality depends on local models            | [Local config guide](config/local.md)                                    |
+| Hosted Qdrant + local models  | Shared vector storage while keeping model calls local        | [Hosted Qdrant + local models](config/hosted-qdrant-local-models.md)     |
+
+Privacy-conscious users should also read the [privacy-first quickstart](privacy-first.md), which combines local Qdrant, local Ollama models, and transcript-capture disable controls.
+
+### Fully hosted
+
+Best for performance and teams. Qdrant Cloud stores vectors, and hosted embeddings + LLM calls handle extraction, curation, and recall.
+
 ```json
 {
   "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333",
@@ -190,7 +61,163 @@ file and env vars.
 }
 ```
 
-**Portkey gateway (routes to OpenAI / Anthropic / Bedrock / …):**
+`qdrant_api_key` is optional only for unauthenticated self-hosted Qdrant. Qdrant Cloud usually requires it.
+
+### Local Qdrant + hosted models
+
+Best for local vector storage with hosted extraction and embedding quality.
+
+```json
+{
+  "qdrant_url": "http://localhost:6333",
+  "qdrant_api_key": "",
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536,
+    "api_key": "sk-..."
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "api_key": "sk-..."
+  }
+}
+```
+
+`qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant. Prefer env vars for hosted model auth? Omit `api_key` above and set `OPENAI_API_KEY` instead.
+
+### Local and free
+
+Use this for local, free, account-free evaluation. Qdrant runs locally and Ollama provides the default embedding + LLM models.
+
+This setup is usually not the best long-term choice for teams. Extraction, embedding, and curation performance depends on the local models and hardware you run.
+
+```json
+{
+  "qdrant_url": "http://localhost:6333",
+  "qdrant_api_key": ""
+}
+```
+
+`qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant.
+
+### Hosted Qdrant, local models
+
+Use this when you want the memory database shared across machines, but still want embeddings and LLM calls to stay local.
+
+```json
+{
+  "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333",
+  "qdrant_api_key": "your-key"
+}
+```
+
+`qdrant_api_key` is optional only for unauthenticated self-hosted Qdrant. Qdrant Cloud usually requires it.
+
+After changing Qdrant or provider settings, restart long-running processes:
+
+```bash
+bikky stop && bikky start
+```
+
+Then restart your editor so its MCP server process reloads the config.
+
+## Environment variables
+
+Use env vars when you do not want to write credentials to the config file:
+
+```bash
+export QDRANT_URL="http://localhost:6333"
+export QDRANT_API_KEY="..."  # only needed for Qdrant Cloud or authenticated self-hosted Qdrant
+```
+
+Useful basics:
+
+| Env var          | Config field     | Notes                                                                       |
+| ---------------- | ---------------- | --------------------------------------------------------------------------- |
+| `QDRANT_URL`     | `qdrant_url`     | Required unless set in config                                               |
+| `QDRANT_API_KEY` | `qdrant_api_key` | Optional for local/unauthenticated Qdrant; usually needed for Qdrant Cloud  |
+| `BIKKY_HOME`     | —                | Moves the config/log/state directory from `~/.bikky`                        |
+
+## Provider options
+
+Use these exact values in `embedding.provider` and `llm.provider`. Both fields accept the same provider values, and you can choose them independently.
+
+| Provider value | Works for embeddings | Works for LLM | Best for                             | Auth                              |
+| -------------- | -------------------- | ------------- | ------------------------------------ | --------------------------------- |
+| `ollama`       | Yes                  | Yes           | Local and free defaults              | None                              |
+| `openai`       | Yes                  | Yes           | Simple hosted models                 | `OPENAI_API_KEY` or `api_key`     |
+| `bedrock`      | Yes                  | Yes           | AWS-managed models                   | AWS credentials or IAM role       |
+| `portkey`      | Yes                  | Yes           | Gateway/routing over other providers | Portkey API key                   |
+
+## Advanced configuration
+
+These sections are optional references for custom providers, tuning, scoping, and daemon internals.
+
+### Full setting reference
+
+#### Qdrant
+
+| Setting          | Env var            | Default | Notes                          |
+| ---------------- | ------------------ | ------- | ------------------------------ |
+| `qdrant_url`     | `QDRANT_URL`       | none    | Qdrant REST URL                |
+| `qdrant_api_key` | `QDRANT_API_KEY`   | none    | API key for authenticated Qdrant |
+| `collection`     | `BIKKY_COLLECTION` | `bikky` | Collection name                |
+
+`qdrant_api_key` is optional for local or unauthenticated self-hosted Qdrant. Qdrant Cloud usually requires it.
+
+#### Embeddings
+
+| Setting                | Env var                | Default                  | Notes                                           |
+| ---------------------- | ---------------------- | ------------------------ | ----------------------------------------------- |
+| `embedding.provider`   | `EMBEDDING_PROVIDER`   | `ollama`                 | One of `ollama`, `openai`, `bedrock`, `portkey` |
+| `embedding.model`      | `EMBEDDING_MODEL`      | `qwen3-embedding:0.6b`   | Embedding model name                            |
+| `embedding.dimensions` | `EMBEDDING_DIMENSIONS` | `1024`                   | Must match the selected model output            |
+| `embedding.base_url`   | `EMBEDDING_BASE_URL`   | `http://localhost:11434` | Used by local or OpenAI-compatible providers    |
+| `embedding.api_key`    | `OPENAI_API_KEY`       | —                        | Provider API key; can also be set in config     |
+
+Common model dimensions:
+
+| Provider  | Model                            | Dimensions |
+| --------- | -------------------------------- | ---------- |
+| `ollama`  | `qwen3-embedding:0.6b`           | `1024`     |
+| `ollama`  | `nomic-embed-text`               | `768`      |
+| `openai`  | `text-embedding-3-small`         | `1536`     |
+| `openai`  | `text-embedding-3-large`         | `3072`     |
+| `bedrock` | `amazon.titan-embed-text-v2:0`   | `1024`     |
+
+If you change the embedding model, make sure `embedding.dimensions` matches the model output.
+
+#### LLM
+
+The LLM is used by background maintenance features. Ollama is the default.
+
+| Setting            | Env var                              | Default                  | Notes                                        |
+| ------------------ | ------------------------------------ | ------------------------ | -------------------------------------------- |
+| `llm.provider`     | `LLM_PROVIDER`                       | `ollama`                 | One of `ollama`, `openai`, `bedrock`, `portkey` |
+| `llm.model`        | `LLM_MODEL`                          | `qwen2.5:7b`             | LLM model name                               |
+| `llm.base_url`     | `LLM_BASE_URL`                       | `http://localhost:11434` | Used by local or OpenAI-compatible providers |
+| `llm.api_key`      | `OPENAI_API_KEY`                     | —                        | Provider API key; can also be set in config  |
+| `llm.extra.region` | `AWS_BEDROCK_REGION` / `AWS_REGION`  | `us-east-1`              | AWS Bedrock region                           |
+
+#### Timeouts and retries
+
+| Setting                         | Env var                                  | Default |
+| ------------------------------- | ---------------------------------------- | ------- |
+| `embedding.timeout_ms`          | `BIKKY_EMBEDDING_TIMEOUT_MS`             | `30000` |
+| `embedding.retries`             | `BIKKY_EMBEDDING_RETRIES`                | `2`     |
+| `embedding.retry_base_delay_ms` | `BIKKY_EMBEDDING_RETRY_BASE_DELAY_MS`    | `250`   |
+| `llm.timeout_ms`                | `BIKKY_LLM_TIMEOUT_MS`                   | `30000` |
+| `llm.retries`                   | `BIKKY_LLM_RETRIES`                      | `2`     |
+| `llm.retry_base_delay_ms`       | `BIKKY_LLM_RETRY_BASE_DELAY_MS`          | `250`   |
+
+Retries use jittered exponential backoff for transient errors, rate limits, and timeouts. Authentication and bad-request errors fail fast.
+
+### Portkey and Bedrock examples
+
+#### Portkey gateway
+
 ```json
 {
   "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333",
@@ -210,7 +237,8 @@ file and env vars.
 }
 ```
 
-**AWS Bedrock:**
+#### AWS Bedrock
+
 ```json
 {
   "qdrant_url": "https://your-cluster.cloud.qdrant.io:6333",
@@ -228,69 +256,148 @@ file and env vars.
 }
 ```
 
-## Daemon settings
+Bedrock reads `embedding.extra.region` and `llm.extra.region`. `AWS_BEDROCK_REGION` populates both, falling back to `AWS_REGION`; `aws_profile` or `AWS_PROFILE` selects the shared AWS profile when you are not using direct env credentials.
 
-The daemon owns memory lifecycle work: it extracts structured facts, writes lightweight session indexes, captures coherent episode summaries, and distills longer-lived patterns when consolidation is enabled. Cost-sensitive maintenance workers use wall-clock intervals plus a persistent cursor in `~/.bikky/state/maintenance-state.json`, so relation inference and entity typing process recently changed facts instead of rescanning all memory on every cycle.
+### Multi-destination routing
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `daemon.tick_interval_sec` | `5` | Seconds between daemon loop ticks |
-| `daemon.extract_every_sec` | `300` | Seconds between extraction runs |
-| `daemon.extract_min_events` | `10` | Minimum session events before triggering extraction |
-| `daemon.consolidation_enabled` | `true` | Auto-distill daemon-generated session summaries into patterns |
-| `daemon.relation_inference_enabled` | `true` | Infer entity relationships via LLM from recently changed facts |
-| `daemon.relation_inference_interval_sec` | `7200` | Minimum seconds between relation-inference maintenance runs |
-| `daemon.relation_inference_max_pairs_per_run` | `3` | Maximum entity pairs sent to the LLM in one relation-inference run |
-| `daemon.entity_typing_enabled` | `true` | Classify entities for UI/graph filtering |
-| `daemon.entity_typing_interval_sec` | `900` | Minimum seconds between entity-typing maintenance runs |
-| `daemon.entity_typing_max_entities_per_run` | `5` | Maximum entities classified in one entity-typing run |
-| `daemon.staleness_threshold_days` | `30` | Days before a fact is flagged as stale |
+Most users only need one Qdrant destination. Use `destinations[]` when you want one bikky install and one editor MCP connection to read or write separate memory stores for different teams, clients, or environments.
 
-Environment overrides are available for the high-cost maintenance controls:
+Each destination has its own Qdrant credentials and collection. Add `description` when you have more than one destination; MCP tools expose those descriptions so LLM clients can pick the right search scope.
 
-| Env var | Config field |
-|---------|--------------|
-| `BIKKY_DAEMON_RELATION_INFERENCE_ENABLED` | `daemon.relation_inference_enabled` |
-| `BIKKY_DAEMON_RELATION_INFERENCE_INTERVAL_SEC` | `daemon.relation_inference_interval_sec` |
-| `BIKKY_DAEMON_RELATION_INFERENCE_MAX_PAIRS_PER_RUN` | `daemon.relation_inference_max_pairs_per_run` |
-| `BIKKY_DAEMON_ENTITY_TYPING_ENABLED` | `daemon.entity_typing_enabled` |
-| `BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC` | `daemon.entity_typing_interval_sec` |
-| `BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN` | `daemon.entity_typing_max_entities_per_run` |
+Writes still target one destination. A destination can include a `match` block with JavaScript `RegExp` strings for `cwd`, `entity`, `content`, or `metadata`. Destinations are evaluated in array order; the first destination with any matching pattern wins. If no pattern matches, bikky uses the destination marked `default: true`, or the first destination.
 
-`bikky status` shows the latest maintenance summaries: candidates seen, LLM calls made, accepted records, deterministic entity classifications, skip reasons, and errors. For per-call token cost, inspect `~/.bikky/logs/llm.jsonl`; each daemon LLM call includes `prompt`, `subsystem`, estimated tokens, and provider-actual token fields when the provider returns usage metadata.
+Read tools (`memory_recall`, `memory_entity`, and `memory_relations`) can search one destination, the routed destination, or multiple destinations. Configure `default_search_scope` to control the default read behavior:
 
-## Logs
+- `"routed"` — search the single destination selected by routing rules. This is the default and preserves older behavior.
+- `"all"` — search every configured destination and merge/rerank the results.
+- `"client-a"` — search one destination by name.
+- `["client-a", "platform"]` — search a fixed list of destinations.
 
-Bikky writes logs to `~/.bikky/logs/` (the same directory as the config file).
+MCP clients can override this per call with `search_scope`. The value accepts `"routed"`, `"all"`, a destination name, a configured named scope, a comma-separated destination list, or an array of destination names. Do not combine `destination` and `search_scope`; keep `destination` for exact single-destination overrides, especially on write tools.
 
-| File | Written by |
-|------|-----------|
-| `mcp.log` | The MCP server (`bikky mcp`) |
-| `daemon.log` | The background daemon (`bikky daemon` / `bikky start`) |
-| `llm.jsonl` | LLM telemetry from daemon and MCP chat-completion calls |
+```jsonc
+{
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini"
+  },
+  "default_search_scope": "routed",
+  "destinations": [
+    {
+      "name": "client-a",
+      "description": "Client A project memory. Use for Client A code, tickets, and operating context.",
+      "qdrant_url": "https://client-a.cloud.qdrant.io:6333",
+      "qdrant_api_key": "...",
+      "collection": "bikky-client-a",
+      "match": {
+        "cwd": ["^/Users/me/code/client-a"],
+        "entity": ["^client-a-"],
+        "content": ["client-a", "CLIENTA-\\d+"],
+        "metadata": { "project": ["^client-a$"] }
+      }
+    },
+    {
+      "name": "research-cloud",
+      "description": "Research and experiment memory that may be useful across projects.",
+      "qdrant_url": "https://research.cloud.qdrant.io:6333",
+      "qdrant_api_key": "...",
+      "collection": "bikky-research",
+      "match": {
+        "content": ["[Rr]esearch[- ][Ll]ab"]
+      }
+    },
+    {
+      "name": "platform",
+      "description": "Default platform engineering memory.",
+      "qdrant_url": "http://localhost:6333",
+      "qdrant_api_key": "",
+      "collection": "bikky-platform",
+      "default": true
+    }
+  ],
+  "search_scopes": [
+    {
+      "name": "project-wide",
+      "description": "Search Client A and shared platform memory together when the answer may depend on both.",
+      "destinations": ["client-a", "platform"]
+    }
+  ]
+}
+```
 
-Logs are **structured JSON lines** produced by [pino](https://github.com/pinojs/pino). Each line has at minimum `{level, time, name, msg}`; provider failures, telemetry events, and Qdrant operations attach extra fields (e.g. `provider`, `kind`, `status`). Files rotate in-process at 2MB, keeping 3 generations (`mcp.log` + `mcp.log.1` + `mcp.log.2`).
+Matching details:
 
-Pretty-print with [`pino-pretty`](https://github.com/pinojs/pino-pretty) when tailing:
+- `match.cwd`, `match.entity`, and `match.content` are lists of JavaScript `RegExp` strings.
+- `match.metadata` maps metadata keys to lists of JavaScript `RegExp` strings matched against that key's value.
+- Matching uses OR logic across fields and within each list; any matching pattern selects the destination.
+- Put the most specific destinations first because first match wins.
+- JavaScript regex flags are not supported in config strings. Use character classes like `[Bb]ikky` for case-insensitive matching.
+- Tool calls can override routing with an explicit destination name, for example `memory_store({ ..., destination: "client-a" })`.
+- Read/search tools also accept `search_scope`; call `memory_search_scopes` or `get_setup_status` to see available scopes and descriptions.
+- All destinations share one embedding provider, so every destination collection must use the same vector dimensions.
+
+Migrating from `workspace_id` pre-v0.4:
+
+- Existing top-level `qdrant_url`, `qdrant_api_key`, and `collection` configs still work as a single synthesized destination.
+- The `workspace_id` argument on memory tools is a no-op for compatibility.
+- Replace `default_workspace` scoping with named destinations when you need isolation.
+
+### Daemon, watchers, and logs
+
+You normally do not need to tune these. `bikky setup` starts the daemon and registers supported MCP clients.
+
+#### Daemon settings
+
+| Setting                              | Default | Description                                      |
+| ------------------------------------ | ------- | ------------------------------------------------ |
+| `daemon.tick_interval_sec`           | `5`     | Seconds between daemon loop ticks                |
+| `daemon.extract_every_sec`           | `300`   | Seconds between extraction runs                  |
+| `daemon.extract_min_events`          | `10`    | Minimum events before extraction                 |
+| `daemon.consolidation_enabled`       | `true`  | Consolidate summaries into durable patterns      |
+| `daemon.relation_inference_enabled`  | `true`  | Infer entity relationships                       |
+| `daemon.entity_typing_enabled`       | `true`  | Classify entities for UI/graph filtering         |
+| `daemon.staleness_threshold_days`    | `30`    | Days before a fact is flagged as stale           |
+
+#### Watcher settings
+
+| Setting                    | Default                    | Description                       |
+| -------------------------- | -------------------------- | --------------------------------- |
+| `watchers.copilot.enabled` | `true`                     | Watch GitHub Copilot session logs |
+| `watchers.copilot.path`    | `~/.copilot/session-state` | Path to Copilot session directory |
+| `watchers.claude.enabled`  | `true`                     | Watch Claude Code project logs    |
+| `watchers.claude.path`     | `~/.claude/projects`       | Path to Claude Code projects      |
+
+Claude Code ingestion reads top-level `*.jsonl` transcripts inside each project directory under `watchers.claude.path`. It captures user/assistant text and skips tool calls, tool results, attachments, file snapshots, permission records, and thinking blocks.
+
+Set either watcher `enabled` field to `false` to disable that transcript source. Set `daemon.extract_every_sec` to `0` to disable background extraction entirely while keeping MCP recall/search tools available.
+
+#### Logs
+
+bikky writes logs to `~/.bikky/logs/`:
+
+| File         | Written by        |
+| ------------ | ----------------- |
+| `mcp.log`    | MCP server        |
+| `daemon.log` | Background daemon |
+| `llm.jsonl`  | LLM telemetry     |
+
+Pretty-print logs with:
 
 ```bash
 tail -f ~/.bikky/logs/daemon.log | npx pino-pretty
 ```
 
-Or grep structured fields with `jq`:
+## Troubleshooting
+
+Run:
 
 ```bash
-jq 'select(.level=="error")' ~/.bikky/logs/daemon.log
-jq 'select(.provider=="openai" and .kind=="auth")' ~/.bikky/logs/mcp.log
+bikky status
 ```
 
-Stdout/stderr are reserved for the MCP stdio transport — bikky never logs to the terminal from the MCP process.
-
-## Watcher settings
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `watchers.copilot.enabled` | `true` | Watch GitHub Copilot session logs |
-| `watchers.copilot.path` | `~/.copilot/session-state` | Path to Copilot session directory |
-| `watchers.claude.enabled` | `true` | Watch Claude Code project logs |
-| `watchers.claude.path` | `~/.claude/projects` | Path to Claude Code projects directory |
+`bikky status` is read-only. It checks the config, Qdrant connection, collection readiness, embedding connectivity, daemon state, and local UI health. If something is missing or misconfigured, it exits non-zero and prints the next fix to make.

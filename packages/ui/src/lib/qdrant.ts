@@ -3,7 +3,7 @@
  * Ported from agent00 portal worker — adapted to use bikky config.
  */
 
-import { loadConfig } from "./config.js";
+import { getDefaultDestination, getDestinationByName, getEffectiveDestinations, type UIDestination } from "./config.js";
 
 // --- Types ---
 
@@ -53,6 +53,12 @@ export interface FilterCondition {
   match?: { value?: string | number; any?: string[] };
   range?: { gte?: string; lte?: string };
   is_null?: { key: string };
+  is_empty?: { key: string };
+  // Nested sub-filter — Qdrant allows must/should/must_not entries to themselves
+  // be filter objects, which are AND/OR-combined like a parenthesised group.
+  must?: FilterCondition[];
+  should?: FilterCondition[];
+  must_not?: FilterCondition[];
 }
 
 export interface QdrantFilter {
@@ -249,21 +255,48 @@ export function buildFilter(opts: {
 // --- Factory ---
 
 export function isQdrantConfigured(): boolean {
-  const cfg = loadConfig();
-  return Boolean(cfg.qdrant_url);
+  return getEffectiveDestinations().length > 0;
 }
 
-export function createQdrantClient(): QdrantClient {
-  const cfg = loadConfig();
-  if (!cfg.qdrant_url) {
-    throw new QdrantNotConfiguredError();
+/**
+ * Create a Qdrant client for a specific destination.
+ *
+ * - Pass a destination name to target it explicitly.
+ * - Pass `undefined` to use the default destination.
+ * Throws QdrantNotConfiguredError if the requested destination doesn't exist
+ * (or no destinations are configured at all).
+ */
+export function createQdrantClient(destinationName?: string): QdrantClient {
+  const dest = destinationName
+    ? getDestinationByName(destinationName)
+    : getDefaultDestination();
+  if (!dest) {
+    throw new QdrantNotConfiguredError(destinationName);
   }
-  return new QdrantClient(cfg.qdrant_url, cfg.qdrant_api_key, cfg.collection);
+  return new QdrantClient(dest.qdrant_url, dest.qdrant_api_key, dest.collection);
+}
+
+/** Resolve the destinations targeted by a request. `"all"` → every destination. */
+export function resolveTargetDestinations(destinationName: string | undefined): UIDestination[] {
+  const all = getEffectiveDestinations();
+  if (all.length === 0) throw new QdrantNotConfiguredError();
+  if (!destinationName) {
+    const def = getDefaultDestination();
+    return def ? [def] : [];
+  }
+  if (destinationName === "all") return all;
+  const dest = getDestinationByName(destinationName);
+  if (!dest) throw new QdrantNotConfiguredError(destinationName);
+  return [dest];
 }
 
 export class QdrantNotConfiguredError extends Error {
-  constructor() {
-    super("Qdrant not configured. Run `bikky setup` first.");
+  constructor(destinationName?: string) {
+    super(
+      destinationName
+        ? `Qdrant destination '${destinationName}' is not configured.`
+        : "Qdrant not configured. Run `bikky setup` first.",
+    );
     this.name = "QdrantNotConfiguredError";
   }
 }
