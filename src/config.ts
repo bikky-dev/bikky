@@ -115,6 +115,8 @@ export interface DestinationMatch {
 export interface Destination {
   /** Stable, unique name. Used as the `destination` override on tool calls. */
   name: string;
+  /** Human-readable guidance for LLMs/users about when to use this destination. */
+  description?: string;
   qdrant_url: string;
   qdrant_api_key: string | null;
   collection: string;
@@ -122,6 +124,17 @@ export interface Destination {
   default?: boolean;
   /** Routing rules. Omit for a destination that is only reachable by override. */
   match?: DestinationMatch;
+}
+
+export type SearchScopeTarget = "routed" | "all" | string | string[];
+
+export interface SearchScopeDefinition {
+  /** Stable scope name that MCP clients can pass as `search_scope`. */
+  name: string;
+  /** Guidance for LLMs/users about when this scope should be used. */
+  description: string;
+  /** Destination selector: "routed", "all", a destination name, or destination names. */
+  destinations: SearchScopeTarget;
 }
 
 export interface BikkyConfig {
@@ -139,6 +152,14 @@ export interface BikkyConfig {
    * default flag → first entry.
    */
   destinations: Destination[];
+  /**
+   * Default read/search scope. "routed" preserves historical behavior
+   * (one destination via routing rules); "all" fans out to every destination;
+   * a destination name or list searches only those destinations.
+   */
+  default_search_scope: SearchScopeTarget;
+  /** Optional named search scopes exposed to MCP clients with descriptions. */
+  search_scopes: SearchScopeDefinition[];
   aws_profile: string | null;
   embedding: EmbeddingConfig;
   llm: LLMConfig;
@@ -172,6 +193,8 @@ const DEFAULTS: BikkyConfig = {
   qdrant_api_key: null,
   collection: "bikky",
   destinations: [],
+  default_search_scope: "routed",
+  search_scopes: [],
   aws_profile: null,
   embedding: {
     provider: "ollama",
@@ -340,6 +363,7 @@ const destinationMatchSchema = z.object({
 
 const destinationFileSchema = z.object({
   name: z.string().min(1),
+  description: z.string().optional(),
   qdrant_url: z.string().min(1),
   qdrant_api_key: z.string().nullable().optional(),
   collection: z.string().min(1),
@@ -347,11 +371,24 @@ const destinationFileSchema = z.object({
   match: destinationMatchSchema.optional(),
 }).passthrough();
 
+const searchScopeTargetSchema = z.union([
+  z.string().min(1),
+  z.array(z.string().min(1)).min(1),
+]);
+
+const searchScopeDefinitionFileSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().min(1),
+  destinations: searchScopeTargetSchema,
+}).passthrough();
+
 const configFileSchema = z.object({
   qdrant_url: z.string().nullable().optional(),
   qdrant_api_key: z.string().nullable().optional(),
   collection: z.string().optional(),
   destinations: z.array(destinationFileSchema).optional(),
+  default_search_scope: searchScopeTargetSchema.optional(),
+  search_scopes: z.array(searchScopeDefinitionFileSchema).optional(),
   aws_profile: z.string().nullable().optional(),
   embedding: embeddingConfigFileSchema.optional(),
   llm: llmConfigFileSchema.optional(),
@@ -521,6 +558,65 @@ export function validateConfigObject(raw: unknown): ConfigIssue[] {
     if (defaultCount > 1) {
       issues.push({ severity: "error", path: "destinations", message: `at most one destination may set 'default: true' (found ${defaultCount})` });
     }
+  }
+
+  const destinationNames = new Set<string>();
+  if (Array.isArray(raw.destinations)) {
+    for (const entry of raw.destinations) {
+      if (isObject(entry) && typeof entry.name === "string" && entry.name.trim() !== "") {
+        destinationNames.add(entry.name);
+      }
+    }
+  }
+
+  const searchScopeNames = new Set<string>();
+  if (Array.isArray(raw.search_scopes)) {
+    for (const entry of raw.search_scopes) {
+      if (isObject(entry) && typeof entry.name === "string" && entry.name.trim() !== "") {
+        searchScopeNames.add(entry.name);
+      }
+    }
+  }
+
+  const validateSearchScopeTarget = (target: unknown, pathName: string): void => {
+    const values = Array.isArray(target) ? target : [target];
+    for (const [idx, value] of values.entries()) {
+      const valuePath = Array.isArray(target) ? `${pathName}[${idx}]` : pathName;
+      if (typeof value !== "string" || value.trim() === "") continue;
+      const normalized = value.trim();
+      if (normalized === "all" || normalized === "routed" || destinationNames.size === 0) continue;
+      if (searchScopeNames.has(normalized)) continue;
+      if (!destinationNames.has(normalized)) {
+        issues.push({
+          severity: "warning",
+          path: valuePath,
+          message: `references unknown destination '${normalized}'`,
+        });
+      }
+    }
+  };
+
+  if (Object.prototype.hasOwnProperty.call(raw, "default_search_scope")) {
+    validateSearchScopeTarget(raw.default_search_scope, "default_search_scope");
+  }
+
+  if (Array.isArray(raw.search_scopes)) {
+    const seenScopeNames = new Set<string>();
+    raw.search_scopes.forEach((entry, idx) => {
+      const base = `search_scopes[${idx}]`;
+      if (!isObject(entry)) {
+        issues.push({ severity: "error", path: base, message: "must be an object" });
+        return;
+      }
+      const name = entry.name;
+      if (typeof name === "string" && name.trim() !== "") {
+        if (seenScopeNames.has(name)) {
+          issues.push({ severity: "error", path: `${base}.name`, message: `duplicate search scope name '${name}'` });
+        }
+        seenScopeNames.add(name);
+      }
+      validateSearchScopeTarget(entry.destinations, `${base}.destinations`);
+    });
   }
 
   const embedding = childObject(raw, "embedding");
@@ -731,6 +827,7 @@ export function getEffectiveDestinations(config: BikkyConfig = loadConfig()): De
   if (!config.qdrant_url) return [];
   return [{
     name: "default",
+    description: "Default Qdrant destination synthesized from the top-level qdrant_url, qdrant_api_key, and collection settings.",
     qdrant_url: config.qdrant_url,
     qdrant_api_key: config.qdrant_api_key,
     collection: config.collection,

@@ -1,9 +1,10 @@
 /**
  * External API helpers — Qdrant REST client pool, LLM chat, logging.
  *
- * Multi-destination model: each memory operation resolves to one Destination
- * (see ../routing.ts) and operates against that destination's QdrantClient
- * via the QdrantPool (see ../lib/qdrant-pool.ts).
+ * Multi-destination model: write operations resolve to one Destination
+ * (see ../routing.ts) and operate against that destination's QdrantClient
+ * via the QdrantPool (see ../lib/qdrant-pool.ts). Read/search operations may
+ * resolve a search scope and fan out across multiple destinations.
  *
  * The legacy single-Qdrant API is kept around for back-compat where call sites
  * have not yet been refactored — they all route to a "default" destination

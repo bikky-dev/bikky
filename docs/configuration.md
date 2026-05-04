@@ -260,7 +260,18 @@ Bedrock reads `embedding.extra.region` and `llm.extra.region`. `AWS_BEDROCK_REGI
 
 Most users only need one Qdrant destination. Use `destinations[]` when you want one bikky install and one editor MCP connection to read or write separate memory stores for different teams, clients, or environments.
 
-Each destination has its own Qdrant credentials and collection. A destination can also include a `match` block with JavaScript `RegExp` strings for `cwd`, `entity`, `content`, or `metadata`. Destinations are evaluated in array order; the first destination with any matching pattern wins. If no pattern matches, bikky uses the destination marked `default: true`, or the first destination.
+Each destination has its own Qdrant credentials and collection. Add `description` when you have more than one destination; MCP tools expose those descriptions so LLM clients can pick the right search scope.
+
+Writes still target one destination. A destination can include a `match` block with JavaScript `RegExp` strings for `cwd`, `entity`, `content`, or `metadata`. Destinations are evaluated in array order; the first destination with any matching pattern wins. If no pattern matches, bikky uses the destination marked `default: true`, or the first destination.
+
+Read tools (`memory_recall`, `memory_entity`, and `memory_relations`) can search one destination, the routed destination, or multiple destinations. Configure `default_search_scope` to control the default read behavior:
+
+- `"routed"` — search the single destination selected by routing rules. This is the default and preserves older behavior.
+- `"all"` — search every configured destination and merge/rerank the results.
+- `"client-a"` — search one destination by name.
+- `["client-a", "platform"]` — search a fixed list of destinations.
+
+MCP clients can override this per call with `search_scope`. The value accepts `"routed"`, `"all"`, a destination name, a configured named scope, a comma-separated destination list, or an array of destination names. Do not combine `destination` and `search_scope`; keep `destination` for exact single-destination overrides, especially on write tools.
 
 ```jsonc
 {
@@ -273,9 +284,11 @@ Each destination has its own Qdrant credentials and collection. A destination ca
     "provider": "openai",
     "model": "gpt-4.1-mini"
   },
+  "default_search_scope": "routed",
   "destinations": [
     {
       "name": "client-a",
+      "description": "Client A project memory. Use for Client A code, tickets, and operating context.",
       "qdrant_url": "https://client-a.cloud.qdrant.io:6333",
       "qdrant_api_key": "...",
       "collection": "bikky-client-a",
@@ -288,6 +301,7 @@ Each destination has its own Qdrant credentials and collection. A destination ca
     },
     {
       "name": "research-cloud",
+      "description": "Research and experiment memory that may be useful across projects.",
       "qdrant_url": "https://research.cloud.qdrant.io:6333",
       "qdrant_api_key": "...",
       "collection": "bikky-research",
@@ -297,10 +311,18 @@ Each destination has its own Qdrant credentials and collection. A destination ca
     },
     {
       "name": "platform",
+      "description": "Default platform engineering memory.",
       "qdrant_url": "http://localhost:6333",
       "qdrant_api_key": "",
       "collection": "bikky-platform",
       "default": true
+    }
+  ],
+  "search_scopes": [
+    {
+      "name": "project-wide",
+      "description": "Search Client A and shared platform memory together when the answer may depend on both.",
+      "destinations": ["client-a", "platform"]
     }
   ]
 }
@@ -314,6 +336,7 @@ Matching details:
 - Put the most specific destinations first because first match wins.
 - JavaScript regex flags are not supported in config strings. Use character classes like `[Bb]ikky` for case-insensitive matching.
 - Tool calls can override routing with an explicit destination name, for example `memory_store({ ..., destination: "client-a" })`.
+- Read/search tools also accept `search_scope`; call `memory_search_scopes` or `get_setup_status` to see available scopes and descriptions.
 - All destinations share one embedding provider, so every destination collection must use the same vector dimensions.
 
 Migrating from `workspace_id` pre-v0.4:

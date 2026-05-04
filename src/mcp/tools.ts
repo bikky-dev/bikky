@@ -65,6 +65,13 @@ import {
 import { DestinationNotFoundError, type RoutingInput } from "../routing.js";
 import type { Destination } from "../config.js";
 import { saveConfig, loadConfig, EXTRACTION_HEALTH_PATH } from "../config.js";
+import {
+  availableSearchScopes,
+  resolveSearchScope,
+  SearchScopeNotFoundError,
+  type ResolvedSearchScope,
+  type SearchScopeInput,
+} from "../search-scope.js";
 import { existsSync, readFileSync } from "node:fs";
 import { inspectWatcherPaths, formatIssue, repairSuspiciousWatcherPaths } from "../daemon/watcher-health.js";
 import { normalizeActorId, resolveActorIdentity, type ActorIdentity } from "../provenance/actor.js";
@@ -81,6 +88,7 @@ import {
 const NUDGE_INTERVAL_MS = 10 * 60 * 1000;
 const MEMORY_RECALL_DEFAULT_LIMIT = 10;
 const MEMORY_RECALL_MAX_LIMIT = 50;
+const searchScopeSchema = z.union([z.string(), z.array(z.string())]).optional();
 let lastStoreTime = Date.now();
 let heartbeatCount = 0;
 
@@ -134,6 +142,76 @@ function resolveDestOrError(input: RoutingInput): { dest: Destination; error?: n
     return {
       error: {
         content: [{ type: "text", text: JSON.stringify({ status: "error", message: msg }, null, 2) }],
+        isError: true,
+      },
+    };
+  }
+}
+
+type ScopedPoint = QdrantPoint & {
+  _destination: Destination;
+  _combinedScore?: number;
+};
+
+function withDestination(point: QdrantPoint, destination: Destination): ScopedPoint {
+  return { ...point, _destination: destination };
+}
+
+function structuredScopedFact(point: ScopedPoint): ReturnType<typeof structuredFact> & { destination: string } {
+  return {
+    ...structuredFact(point),
+    destination: point._destination.name,
+  };
+}
+
+function formatScopedFact(point: ScopedPoint, includeDestination: boolean): string {
+  const formatted = formatFact(point);
+  return includeDestination ? `[${point._destination.name}] ${formatted}` : formatted;
+}
+
+function resolveSearchScopeOrError(args: {
+  destination?: string;
+  search_scope?: SearchScopeInput;
+  input: RoutingInput;
+}): { scope: ResolvedSearchScope; error?: never } | { scope?: never; error: McpToolResult } {
+  if (args.destination && args.search_scope !== undefined) {
+    return {
+      error: {
+        content: [{ type: "text", text: JSON.stringify({
+          status: "ambiguous_search_scope",
+          message: "Use either destination for a single destination override or search_scope for routed/all/list search, not both.",
+        }, null, 2) }],
+        isError: true,
+      },
+    };
+  }
+
+  if (args.destination) {
+    const resolved = resolveDestOrError({ ...args.input, destination: args.destination });
+    if (resolved.error) return { error: resolved.error };
+    return {
+      scope: {
+        name: resolved.dest.name,
+        description: resolved.dest.description ?? `Search only the '${resolved.dest.name}' destination.`,
+        requested: resolved.dest.name,
+        destinations: [resolved.dest],
+      },
+    };
+  }
+
+  const cfg = loadConfig();
+  const dests = listDestinations();
+  try {
+    return { scope: resolveSearchScope(args.search_scope, cfg, dests, args.input) };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return {
+      error: {
+        content: [{ type: "text", text: JSON.stringify({
+          status: e instanceof SearchScopeNotFoundError ? "search_scope_not_found" : "search_scope_error",
+          message: msg,
+          available_search_scopes: availableSearchScopes(cfg, dests),
+        }, null, 2) }],
         isError: true,
       },
     };
@@ -309,6 +387,7 @@ export function registerTools(mcp: McpServer): void {
     ].join(" "),
     {},
     async (): Promise<McpToolResult> => {
+      const cfg = loadConfig();
       const dests = listDestinations();
       const status: Record<string, unknown> = {
         ready,
@@ -331,6 +410,7 @@ export function registerTools(mcp: McpServer): void {
           qdrant_url_host: (() => { try { return new URL(d.qdrant_url).host; } catch { return d.qdrant_url; } })(),
           collection: d.collection,
           default: d.default ?? false,
+          ...(d.description ? { description: d.description } : {}),
           connected: false,
           collection_exists: false,
         };
@@ -347,6 +427,10 @@ export function registerTools(mcp: McpServer): void {
         destStatus.push(block);
       }
       status["destinations"] = destStatus;
+      status["default_search_scope"] = cfg.default_search_scope;
+      status["search_scopes"] = availableSearchScopes(cfg, dests);
+      status["search_scope_hint"] =
+        "Read/search tools accept search_scope: 'routed', 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Use destination only when you want an exact single-destination override.";
 
       try {
         await embed("test");
@@ -356,7 +440,6 @@ export function registerTools(mcp: McpServer): void {
       // Watcher / extraction health (issue #58)
       const warnings: string[] = [];
       try {
-        const cfg = loadConfig();
         status["watcher_path"] = cfg.watchers.copilot.path;
         for (const issue of inspectWatcherPaths(cfg)) {
           warnings.push(formatIssue(issue));
@@ -405,6 +488,32 @@ export function registerTools(mcp: McpServer): void {
       }
 
       return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }] };
+    },
+  );
+
+  // ── memory_search_scopes ─────────────────────────────────────────────────
+
+  mcp.tool(
+    "memory_search_scopes",
+    [
+      "List the configured memory search scopes and destination descriptions.",
+      "Use this before memory_recall, memory_entity, or memory_relations when multiple destinations exist so you can choose the right search_scope.",
+      "Read-only — returns built-in scopes ('routed', 'all'), destination-name scopes, configured named scopes, and the default_search_scope.",
+    ].join(" "),
+    {},
+    async (): Promise<McpToolResult> => {
+      const cfg = loadConfig();
+      const dests = listDestinations();
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          default_search_scope: cfg.default_search_scope,
+          scopes: availableSearchScopes(cfg, dests),
+          usage: {
+            search_scope: "Pass one scope name, 'routed', 'all', a destination name, a comma-separated destination list, or an array of destination names.",
+            destination: "Use this older parameter only for an exact single-destination override. Do not combine it with search_scope.",
+          },
+        }, null, 2) }],
+      };
     },
   );
 
@@ -886,6 +995,7 @@ export function registerTools(mcp: McpServer): void {
       "  3. Conflict/replacement check — recall similar facts when you suspect new information may supersede an older fact. Deduplication during memory_store is automatic.",
       "Combine the natural-language query with structured filters (category, domain, entity, date range, metadata) for tighter results.",
       "If you have a known entity name and want everything about it, prefer memory_entity. For 'what does X own/use?' style questions, prefer memory_relations.",
+      "When multiple Qdrant destinations are configured, use search_scope to choose 'routed' (routing/default behavior), 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Call memory_search_scopes to inspect available scopes and descriptions.",
       `By default output is human-readable text. Use output_format=json for machine-parseable results with separate results and related arrays. Default limit is ${MEMORY_RECALL_DEFAULT_LIMIT}; maximum effective limit is ${MEMORY_RECALL_MAX_LIMIT}.`,
     ].join("\n"),
     {
@@ -906,7 +1016,10 @@ export function registerTools(mcp: McpServer): void {
       ),
       workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
       destination: z.string().optional().describe(
-        "Optional destination override. When set, queries that destination by name. Hard-errors if no such destination exists. Omit to let routing rules decide.",
+        "Optional legacy single-destination override. Do not combine with search_scope. Prefer search_scope for routed/all/list search.",
+      ),
+      search_scope: searchScopeSchema.describe(
+        "Optional read/search scope. Accepts 'routed', 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Omit to use config.default_search_scope.",
       ),
       actor_id: z.string().optional().describe(
         "Filter to facts captured by or associated with this stable actor identity. Optional.",
@@ -946,6 +1059,7 @@ export function registerTools(mcp: McpServer): void {
       memory_subtype,
       workspace_id: _workspace_id,
       destination,
+      search_scope,
       actor_id,
       include_legacy_workspace: _include_legacy_workspace,
       entity,
@@ -967,14 +1081,17 @@ export function registerTools(mcp: McpServer): void {
       const requestedLimit = limit ?? MEMORY_RECALL_DEFAULT_LIMIT;
       const effectiveLimit = clampRecallLimit(limit);
       const actorFilter = resolveActorIdentity({ actorId: actor_id, useGitFallback: false });
-      const resolved = resolveDestOrError(routingInput({
+      const scopeResolved = resolveSearchScopeOrError({
         destination,
-        content: query,
-        entities: entity ? [entity] : [],
-        metadata: metadata_filter,
-      }));
-      if (resolved.error) return resolved.error;
-      const dest = resolved.dest;
+        search_scope,
+        input: routingInput({
+          content: query,
+          entities: entity ? [entity] : [],
+          metadata: metadata_filter,
+        }),
+      });
+      if (scopeResolved.error) return scopeResolved.error;
+      const searchScope = scopeResolved.scope;
       const redactedQuery = redactStorageText(query);
       const vector = await embed(redactedQuery.text);
       const normalizedKind = kind ? normalizeKind(kind) : undefined;
@@ -1007,13 +1124,43 @@ export function registerTools(mcp: McpServer): void {
         metadata: metadata_filter,
         excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS,
       });
-      const results = await qdrantSearch(dest, vector, filter, effectiveLimit * 2);
+      const searchedDestinations = searchScope.destinations.map((dest) => dest.name);
+      const failedDestinations: Array<{ destination: string; error: string }> = [];
+      const scopedResults: ScopedPoint[] = [];
+      for (const dest of searchScope.destinations) {
+        try {
+          const results = await qdrantSearch(dest, vector, filter, effectiveLimit * 2);
+          scopedResults.push(...(results.result ?? []).map((point) => withDestination(point, dest)));
+        } catch (e) {
+          failedDestinations.push({
+            destination: dest.name,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
 
-      if (!results.result?.length) {
+      if (failedDestinations.length === searchScope.destinations.length && searchScope.destinations.length > 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "search_failed",
+            query: redactedQuery.text,
+            search_scope: searchScope.name,
+            searched_destinations: searchedDestinations,
+            failed_destinations: failedDestinations,
+          }, null, 2) }],
+          isError: true,
+        };
+      }
+
+      if (scopedResults.length === 0) {
         const nudge = buildMemoryNudge();
         if (output_format === "json") {
           return { content: [{ type: "text", text: JSON.stringify({
             query: redactedQuery.text,
+            search_scope: searchScope.name,
+            search_scope_description: searchScope.description,
+            searched_destinations: searchedDestinations,
+            failed_destinations: failedDestinations,
             requested_limit: requestedLimit,
             effective_limit: effectiveLimit,
             max_limit: MEMORY_RECALL_MAX_LIMIT,
@@ -1027,33 +1174,63 @@ export function registerTools(mcp: McpServer): void {
             ...(redactedQuery.redacted ? { query_redaction: redactedQuery } : {}),
           }, null, 2) }] };
         }
-        const text = nudge ? `No matching facts found.\n\n${nudge}` : "No matching facts found.";
+        const warning = failedDestinations.length > 0
+          ? `\n\nSearch warnings: ${failedDestinations.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")}`
+          : "";
+        const text = nudge
+          ? `No matching facts found.${warning}\n\n${nudge}`
+          : `No matching facts found.${warning}`;
         return { content: [{ type: "text", text }] };
       }
 
-      const ranked = results.result
+      const ranked = scopedResults
         .map((r) => ({ ...r, _combinedScore: computeCombinedScore(r) }))
         .sort((a, b) => b._combinedScore - a._combinedScore)
         .slice(0, effectiveLimit);
 
-      const lines = ranked.map((r) => formatFact(r));
-      let related: GraphTraversalResult = { points: [] };
+      const includeDestination = searchScope.destinations.length > 1 || searchScope.name === "all";
+      const lines = ranked.map((r) => formatScopedFact(r, includeDestination));
+      const related: { points: ScopedPoint[]; errors: Array<{ destination: string; error: string }> } = { points: [], errors: [] };
 
       if ((graph_depth ?? 0) >= 1) {
-        related = await graphTraversal(dest, ranked, effectiveLimit);
+        const byDestination = new Map<string, { dest: Destination; points: QdrantPoint[] }>();
+        for (const point of ranked) {
+          const existing = byDestination.get(point._destination.name);
+          if (existing) {
+            existing.points.push(point);
+          } else {
+            byDestination.set(point._destination.name, { dest: point._destination, points: [point] });
+          }
+        }
+        for (const entry of byDestination.values()) {
+          const traversal = await graphTraversal(entry.dest, entry.points, effectiveLimit);
+          related.points.push(...traversal.points.map((point) => withDestination(point, entry.dest)));
+          if (traversal.error) {
+            related.errors.push({ destination: entry.dest.name, error: traversal.error });
+          }
+        }
+        related.points = related.points.slice(0, Math.ceil(effectiveLimit / 2));
         if (related.points.length > 0) {
           lines.push("", "── Related (1-hop) ──");
-          lines.push(...related.points.map((r) => formatFact(r)));
-        } else if (related.error) {
-          lines.push("", `(graph traversal failed: ${related.error})`);
+          lines.push(...related.points.map((r) => formatScopedFact(r, includeDestination)));
+        }
+        if (related.errors.length > 0) {
+          lines.push("", `(graph traversal warnings: ${related.errors.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")})`);
         }
       }
 
+      if (failedDestinations.length > 0) {
+        lines.push("", `(search warnings: ${failedDestinations.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")})`);
+      }
       const nudge = buildMemoryNudge();
       if (nudge) lines.push("", nudge);
       if (output_format === "json") {
         return { content: [{ type: "text", text: JSON.stringify({
           query: redactedQuery.text,
+          search_scope: searchScope.name,
+          search_scope_description: searchScope.description,
+          searched_destinations: searchedDestinations,
+          failed_destinations: failedDestinations,
           requested_limit: requestedLimit,
           effective_limit: effectiveLimit,
           max_limit: MEMORY_RECALL_MAX_LIMIT,
@@ -1061,9 +1238,9 @@ export function registerTools(mcp: McpServer): void {
           graph_depth: graph_depth ?? 0,
           result_count: ranked.length,
           related_count: related.points.length,
-          results: ranked.map((r) => structuredFact(r)),
-          related: related.points.map((r) => structuredFact(r)),
-          ...(related.error ? { graph_error: related.error } : {}),
+          results: ranked.map((r) => structuredScopedFact(r)),
+          related: related.points.map((r) => structuredScopedFact(r)),
+          ...(related.errors.length > 0 ? { graph_errors: related.errors } : {}),
           ...(nudge ? { nudge } : {}),
           ...(redactedQuery.redacted ? { query_redaction: redactedQuery } : {}),
         }, null, 2) }] };
@@ -1087,70 +1264,104 @@ export function registerTools(mcp: McpServer): void {
       ),
       limit: z.number().optional().default(20).describe("Max facts to return (default 20). Relations are always returned in full, capped at 50 each direction."),
       workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
-      destination: z.string().optional().describe("Optional destination override. Omit to let routing rules decide."),
+      destination: z.string().optional().describe("Optional legacy single-destination override. Do not combine with search_scope."),
+      search_scope: searchScopeSchema.describe(
+        "Optional read/search scope. Accepts 'routed', 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Omit to use config.default_search_scope.",
+      ),
       include_legacy_workspace: z.boolean().optional().describe("[Removed in v0.4.0] No-op."),
     },
-    async ({ name, limit, workspace_id: _workspace_id, destination, include_legacy_workspace: _include_legacy_workspace }): Promise<McpToolResult> => {
+    async ({ name, limit, workspace_id: _workspace_id, destination, search_scope, include_legacy_workspace: _include_legacy_workspace }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const entityName = name.toLowerCase();
-      const resolved = resolveDestOrError(routingInput({ destination, entities: [entityName] }));
-      if (resolved.error) return resolved.error;
-      const dest = resolved.dest;
+      const scopeResolved = resolveSearchScopeOrError({
+        destination,
+        search_scope,
+        input: routingInput({ entities: [entityName] }),
+      });
+      if (scopeResolved.error) return scopeResolved.error;
+      const searchScope = scopeResolved.scope;
+      const effectiveLimit = Math.max(1, Math.trunc(limit ?? 20));
+      const entityTypes = new Map<string, string>();
+      const factPoints: ScopedPoint[] = [];
+      const relationPoints: ScopedPoint[] = [];
+      const failures: Array<{ destination: string; error: string }> = [];
 
-      // Look up the daemon-classified entity type, if any.
-      let entityType: string | null = null;
-      try {
-        const typeFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
-        typeFilter.must.push({ key: "kind", match: { value: "entity_type" } });
-        typeFilter.must.push({ key: "entity_name", match: { value: entityName } });
-        const typePoints = await qdrantScroll(dest, typeFilter, 1);
-        const typePoint = typePoints.result?.points?.[0];
-        const payload = typePoint?.payload as unknown as Record<string, unknown> | undefined;
-        if (payload?.entity_type) {
-          entityType = String(payload.entity_type);
+      for (const dest of searchScope.destinations) {
+        // Look up the daemon-classified entity type, if any.
+        try {
+          const typeFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
+          typeFilter.must.push({ key: "kind", match: { value: "entity_type" } });
+          typeFilter.must.push({ key: "entity_name", match: { value: entityName } });
+          const typePoints = await qdrantScroll(dest, typeFilter, 1);
+          const typePoint = typePoints.result?.points?.[0];
+          const payload = typePoint?.payload as unknown as Record<string, unknown> | undefined;
+          if (payload?.entity_type) {
+            entityTypes.set(dest.name, String(payload.entity_type));
+          }
+        } catch {
+          // Type lookup is best-effort — never fails the request.
         }
-      } catch {
-        // Type lookup is best-effort — never fails the request.
+
+        try {
+          const factsFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
+          factsFilter.must.push({ key: "entities", match: { value: entityName } });
+          const facts = await qdrantScroll(dest, factsFilter, effectiveLimit);
+          factPoints.push(...(facts.result?.points ?? []).map((point) => withDestination(point, dest)));
+
+          const fromFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
+          fromFilter.must.push({ key: "from_entity", match: { value: entityName } });
+          const relationsFrom = await qdrantScroll(dest, fromFilter, 50);
+
+          const toFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
+          toFilter.must.push({ key: "to_entity", match: { value: entityName } });
+          const relationsTo = await qdrantScroll(dest, toFilter, 50);
+          relationPoints.push(...[
+            ...(relationsFrom.result?.points ?? []),
+            ...(relationsTo.result?.points ?? []),
+          ].map((point) => withDestination(point, dest)));
+        } catch (e) {
+          failures.push({ destination: dest.name, error: e instanceof Error ? e.message : String(e) });
+        }
       }
 
-      const factsFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
-      factsFilter.must.push({ key: "entities", match: { value: entityName } });
-      const facts = await qdrantScroll(dest, factsFilter, limit ?? 20);
-
-      const fromFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
-      fromFilter.must.push({ key: "from_entity", match: { value: entityName } });
-      const relationsFrom = await qdrantScroll(dest, fromFilter, 50);
-
-      const toFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
-      toFilter.must.push({ key: "to_entity", match: { value: entityName } });
-      const relationsTo = await qdrantScroll(dest, toFilter, 50);
+      if (failures.length === searchScope.destinations.length && searchScope.destinations.length > 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "search_failed",
+            entity: entityName,
+            search_scope: searchScope.name,
+            searched_destinations: searchScope.destinations.map((dest) => dest.name),
+            failed_destinations: failures,
+          }, null, 2) }],
+          isError: true,
+        };
+      }
 
       const output: string[] = [];
+      const includeDestination = searchScope.destinations.length > 1 || searchScope.name === "all";
+      const entityTypeValues = [...new Set(entityTypes.values())];
+      const entityType = entityTypeValues.length === 1 ? entityTypeValues[0] : null;
 
-      const factPoints = facts.result?.points ?? [];
       if (factPoints.length > 0) {
         const header = entityType
-          ? `## Facts about ${name} [type: ${entityType}] (${factPoints.length})`
-          : `## Facts about ${name} (${factPoints.length})`;
+          ? `## Facts about ${name} [type: ${entityType}] (${Math.min(factPoints.length, effectiveLimit)})`
+          : `## Facts about ${name} (${Math.min(factPoints.length, effectiveLimit)})`;
         output.push(header);
-        for (const p of factPoints) {
+        for (const p of factPoints.slice(0, effectiveLimit)) {
           if (p.payload.category !== "relation") {
-            output.push(`- ${formatFact(p)}`);
+            output.push(`- ${formatScopedFact(p, includeDestination)}`);
           }
         }
       } else if (entityType) {
         output.push(`## ${name} [type: ${entityType}]`);
       }
 
-      const allRelations = [
-        ...(relationsFrom.result?.points ?? []),
-        ...(relationsTo.result?.points ?? []),
-      ];
       const seen = new Set<string>();
-      const uniqueRelations = allRelations.filter((r) => {
-        if (seen.has(r.id)) return false;
-        seen.add(r.id);
+      const uniqueRelations = relationPoints.filter((r) => {
+        const key = `${r._destination.name}:${r.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
         return true;
       });
 
@@ -1158,8 +1369,13 @@ export function registerTools(mcp: McpServer): void {
         output.push(`\n## Relations (${uniqueRelations.length})`);
         for (const r of uniqueRelations) {
           const p = r.payload;
-          output.push(`- ${p.from_entity} --[${p.relation_type}]--> ${p.to_entity}`);
+          const prefix = includeDestination ? `[${r._destination.name}] ` : "";
+          output.push(`- ${prefix}${p.from_entity} --[${p.relation_type}]--> ${p.to_entity}`);
         }
+      }
+
+      if (failures.length > 0) {
+        output.push(`\nSearch warnings: ${failures.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")}`);
       }
 
       if (output.length === 0) {
@@ -1188,53 +1404,89 @@ export function registerTools(mcp: McpServer): void {
         "Which side of the edge the entity is on. 'from' = entity is the source (X --[?]--> ?). 'to' = entity is the target (? --[?]--> X). 'both' = either (default).",
       ),
       workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
-      destination: z.string().optional().describe("Optional destination override. Omit to let routing rules decide."),
+      destination: z.string().optional().describe("Optional legacy single-destination override. Do not combine with search_scope."),
+      search_scope: searchScopeSchema.describe(
+        "Optional read/search scope. Accepts 'routed', 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Omit to use config.default_search_scope.",
+      ),
       include_legacy_workspace: z.boolean().optional().describe("[Removed in v0.4.0] No-op."),
     },
-    async ({ entity, relation_type, direction, workspace_id: _workspace_id, destination, include_legacy_workspace: _include_legacy_workspace }): Promise<McpToolResult> => {
+    async ({ entity, relation_type, direction, workspace_id: _workspace_id, destination, search_scope, include_legacy_workspace: _include_legacy_workspace }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const entityName = entity.toLowerCase();
-      const resolved = resolveDestOrError(routingInput({ destination, entities: [entityName] }));
-      if (resolved.error) return resolved.error;
-      const dest = resolved.dest;
-      const results: QdrantPoint[] = [];
+      const scopeResolved = resolveSearchScopeOrError({
+        destination,
+        search_scope,
+        input: routingInput({ entities: [entityName] }),
+      });
+      if (scopeResolved.error) return scopeResolved.error;
+      const searchScope = scopeResolved.scope;
+      const results: ScopedPoint[] = [];
+      const failures: Array<{ destination: string; error: string }> = [];
 
-      if (direction === "from" || direction === "both") {
-        const filter: QdrantFilter = buildFilter({}) ?? { must: [] };
-        filter.must.push({ key: "from_entity", match: { value: entityName } });
-        if (relation_type) {
-          filter.must.push({ key: "relation_type", match: { value: relation_type.toLowerCase() } });
+      for (const dest of searchScope.destinations) {
+        try {
+          if (direction === "from" || direction === "both") {
+            const filter: QdrantFilter = buildFilter({}) ?? { must: [] };
+            filter.must.push({ key: "from_entity", match: { value: entityName } });
+            if (relation_type) {
+              filter.must.push({ key: "relation_type", match: { value: relation_type.toLowerCase() } });
+            }
+            const r = await qdrantScroll(dest, filter, 50);
+            results.push(...(r.result?.points ?? []).map((point) => withDestination(point, dest)));
+          }
+
+          if (direction === "to" || direction === "both") {
+            const filter: QdrantFilter = buildFilter({}) ?? { must: [] };
+            filter.must.push({ key: "to_entity", match: { value: entityName } });
+            if (relation_type) {
+              filter.must.push({ key: "relation_type", match: { value: relation_type.toLowerCase() } });
+            }
+            const r = await qdrantScroll(dest, filter, 50);
+            results.push(...(r.result?.points ?? []).map((point) => withDestination(point, dest)));
+          }
+        } catch (e) {
+          failures.push({ destination: dest.name, error: e instanceof Error ? e.message : String(e) });
         }
-        const r = await qdrantScroll(dest, filter, 50);
-        results.push(...(r.result?.points ?? []));
       }
 
-      if (direction === "to" || direction === "both") {
-        const filter: QdrantFilter = buildFilter({}) ?? { must: [] };
-        filter.must.push({ key: "to_entity", match: { value: entityName } });
-        if (relation_type) {
-          filter.must.push({ key: "relation_type", match: { value: relation_type.toLowerCase() } });
-        }
-        const r = await qdrantScroll(dest, filter, 50);
-        results.push(...(r.result?.points ?? []));
+      if (failures.length === searchScope.destinations.length && searchScope.destinations.length > 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "search_failed",
+            entity: entityName,
+            search_scope: searchScope.name,
+            searched_destinations: searchScope.destinations.map((dest) => dest.name),
+            failed_destinations: failures,
+          }, null, 2) }],
+          isError: true,
+        };
       }
 
       const seen = new Set<string>();
       const unique = results.filter((r) => {
-        if (seen.has(r.id)) return false;
-        seen.add(r.id);
+        const key = `${r._destination.name}:${r.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
         return true;
       });
 
       if (unique.length === 0) {
-        return { content: [{ type: "text", text: `No relations found for '${entity}'.` }] };
+        const warning = failures.length > 0
+          ? ` Search warnings: ${failures.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")}`
+          : "";
+        return { content: [{ type: "text", text: `No relations found for '${entity}'.${warning}` }] };
       }
 
+      const includeDestination = searchScope.destinations.length > 1 || searchScope.name === "all";
       const lines = unique.map((r) => {
         const p = r.payload;
-        return `${p.from_entity} --[${p.relation_type}]--> ${p.to_entity} (confidence: ${p.confidence}, id: ${r.id})`;
+        const prefix = includeDestination ? `[${r._destination.name}] ` : "";
+        return `${prefix}${p.from_entity} --[${p.relation_type}]--> ${p.to_entity} (confidence: ${p.confidence}, id: ${r.id})`;
       });
+      if (failures.length > 0) {
+        lines.push("", `Search warnings: ${failures.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")}`);
+      }
       return { content: [{ type: "text", text: lines.join("\n") }] };
     },
   );

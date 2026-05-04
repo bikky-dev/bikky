@@ -141,6 +141,7 @@ Most installs use one Qdrant destination. If you need clean separation later, re
   "destinations": [
     {
       "name": "platform",
+      "description": "Shared platform engineering memory.",
       "qdrant_url": "https://platform.cloud.qdrant.io:6333",
       "qdrant_api_key": "...",
       "collection": "bikky-platform",
@@ -148,15 +149,17 @@ Most installs use one Qdrant destination. If you need clean separation later, re
     },
     {
       "name": "client-a",
+      "description": "Client A project memory.",
       "qdrant_url": "https://client-a.cloud.qdrant.io:6333",
       "qdrant_api_key": "...",
       "collection": "bikky-client-a"
     }
-  ]
+  ],
+  "default_search_scope": "routed"
 }
 ```
 
-That is enough for explicit selection in the UI and tools. Add routing rules only when you want automatic placement by cwd, entity, content, or metadata. Existing single-Qdrant configs continue to work.
+That is enough for explicit selection in the UI and tools. Add routing rules only when you want automatic placement by cwd, entity, content, or metadata. Search tools can also use `search_scope: "all"` or a named/listed scope when context may span stores. Existing single-Qdrant configs continue to work.
 
 > 📖 **Details:** [multi-destination configuration](docs/configuration.md#multi-destination-routing)
 
