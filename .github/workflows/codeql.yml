@@ -31,7 +31,7 @@ jobs:
 
       - name: Initialize CodeQL
         if: ${{ vars.BIKKY_CODEQL_ENABLED == 'true' }}
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           queries: security-and-quality
@@ -46,10 +46,10 @@ jobs:
 
       - name: Autobuild
         if: ${{ vars.BIKKY_CODEQL_ENABLED == 'true' }}
-        uses: github/codeql-action/autobuild@v3
+        uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
         if: ${{ vars.BIKKY_CODEQL_ENABLED == 'true' }}
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
