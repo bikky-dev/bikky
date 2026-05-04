@@ -433,23 +433,6 @@ describe("buildFilter", () => {
     assert.deepStrictEqual(kindFilter.match, { value: "summary" });
   });
 
-  it("adds workspace filter", () => {
-    const result = buildFilter({ workspace_id: "platform" });
-    assert.ok(result);
-    const workspaceFilter = result.must.find((c) => c.key === "workspace_id");
-    assert.ok(workspaceFilter);
-    assert.deepStrictEqual(workspaceFilter.match, { value: "platform" });
-  });
-
-  it("can include legacy unscoped workspace facts", () => {
-    const result = buildFilter({ workspace_id: "default", includeLegacyWorkspace: true });
-    assert.ok(result);
-    assert.deepStrictEqual(result.should, [
-      { key: "workspace_id", match: { value: "default" } },
-      { is_empty: { key: "workspace_id" } },
-    ]);
-  });
-
   it("can exclude telemetry from recall filters", () => {
     const result = buildFilter({ excludeKinds: ["telemetry"] });
     assert.ok(result);
@@ -522,14 +505,13 @@ describe("buildFilter", () => {
       category: "engineering",
       domain: "software_engineering",
       kind: "fact",
-      workspace_id: "platform",
       entity: "redis",
       since: "2025-01-01T00:00:00Z",
       metadata: { source: "test" },
     });
     assert.ok(result);
-    // superseded (default) + category + domain + kind + workspace + entity + since + metadata
-    assert.strictEqual(result.must.length, 8);
+    // superseded (default) + category + domain + kind + entity + since + metadata
+    assert.strictEqual(result.must.length, 7);
   });
 });
 
@@ -627,9 +609,8 @@ describe("formatFact", () => {
     assert.ok(formatted.includes("verified: 2x"));
   });
 
-  it("includes non-default workspace and redaction metadata", () => {
+  it("includes redaction metadata", () => {
     const point = makePoint({}, {
-      workspace_id: "platform",
       redaction: {
         redacted: true,
         summary: "email:1",
@@ -637,7 +618,6 @@ describe("formatFact", () => {
       },
     });
     const formatted = formatFact(point);
-    assert.ok(formatted.includes("workspace: platform"));
     assert.ok(formatted.includes("redacted: email:1"));
   });
 

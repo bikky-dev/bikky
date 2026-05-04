@@ -24,6 +24,7 @@ const log = createLogger("daemon", path.join(LOG_DIR, "daemon.log")) as unknown 
 let running = false;
 let tickCount = 0;
 let intervalHandle: ReturnType<typeof setInterval> | null = null;
+let collectionReady = false;
 
 export async function startDaemon(): Promise<void> {
   const cfg = loadConfig();
@@ -66,8 +67,9 @@ export async function startDaemon(): Promise<void> {
   } else {
     try {
       await qdrantClient.ensureCollection();
+      collectionReady = true;
     } catch (e) {
-      log("WARN", `Qdrant collection/index readiness check failed: ${(e as Error).message}`);
+      log("WARN", `Qdrant collection/index readiness check failed (will retry on tick): ${(e as Error).message}`);
     }
   }
 
@@ -77,6 +79,18 @@ export async function startDaemon(): Promise<void> {
   const tickFn = async (): Promise<void> => {
     if (!running) return;
     tickCount++;
+
+    // If collection isn't ready yet, retry ensureCollection before doing any work
+    if (!collectionReady) {
+      try {
+        await qdrantClient.ensureCollection();
+        collectionReady = true;
+        log("INFO", "Qdrant collection now ready — resuming normal ticks");
+      } catch (e) {
+        log("DEBUG", `Collection still not ready, skipping tick: ${(e as Error).message}`);
+        return;
+      }
+    }
 
     try {
       await extractionTick(cfg);

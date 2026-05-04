@@ -1,18 +1,17 @@
 /**
- * Events-based memory extraction — reads Copilot CLI events.jsonl transcripts,
+ * Events-based memory extraction — reads supported coding-agent transcripts,
  * extracts facts via LLM, and stores them in Qdrant with source: "system".
  *
  * Uses a JSON file for extraction state (high-water byte offsets) instead of SQLite.
- * Active session detection scans ~/.copilot/session-state/ for lock files.
+ * Copilot session detection uses lock files. Claude Code detection uses
+ * top-level JSONL transcripts under ~/.claude/projects.
  */
 
-import { readFile, stat } from "node:fs/promises";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { glob } from "node:fs/promises";
 
-import { loadConfig, STATE_DIR, EXTRACTION_HEALTH_PATH } from "../config.js";
+import { STATE_DIR, EXTRACTION_HEALTH_PATH } from "../config.js";
 import type { BikkyConfig } from "../config.js";
 import * as qdrant from "./qdrant.js";
 import { chatCompletion } from "../llm/index.js";
@@ -42,6 +41,16 @@ import { shouldSummarizeEvents, updateSessionSummary } from "./session-summary.j
 import { redactStorageText } from "../privacy/redaction.js";
 import { compareSubtype, hasTypedToken, verifyGrounding, verifyVolatilityCoherence } from "./extraction-rules.js";
 import { resolveActorIdentity } from "../provenance/actor.js";
+import {
+  discoverClaudeTranscriptMappings,
+  discoverCopilotTranscriptMappings,
+  extractionStateKey,
+  readNewTranscriptEvents,
+  transcriptLabel,
+  type ParsedEvent,
+  type TranscriptMapping,
+  type TranscriptSource,
+} from "./transcript-sources.js";
 
 // ── Module state ─────────────────────────────────────────────────────────────
 
@@ -53,12 +62,6 @@ export const setLogger = (fn: LogFn): void => {
 };
 
 // ── Constants ────────────────────────────────────────────────────────────────
-
-const EXTRACTABLE_TYPES = new Set([
-  "user.message",
-  "assistant.message",
-  "session.compaction_complete",
-]);
 
 export const DEFAULT_EXTRACTION_PROMPT = `You are Bikky's memory extraction agent for open-source coding agents. Extract durable, reusable facts that help a future agent continue work without rereading the whole transcript.
 
@@ -132,7 +135,9 @@ const EXTRACTION_STATE_PATH = join(STATE_DIR, "extraction-state.json");
 
 interface ExtractionState {
   session_id: string;
-  copilot_uuid: string;
+  source?: TranscriptSource;
+  copilot_uuid?: string;
+  claude_session_id?: string;
   events_path: string;
   byte_offset: number;
   last_extracted_at: string | null;
@@ -168,128 +173,8 @@ const upsertExtractionState = (state: ExtractionState): void => {
   saveExtractionStates(states);
 };
 
-// ── PID → Copilot UUID resolution ───────────────────────────────────────────
-
-interface LockMapping {
-  pid: number;
-  uuid: string;
-  eventsPath: string;
-}
-
-/**
- * Scan lock files to build PID → Copilot UUID mapping.
- * Copilot CLI writes `inuse.<pid>.lock` in each session directory.
- */
-const resolveLockFiles = async (): Promise<LockMapping[]> => {
-  const cfg = loadConfig();
-  const copilotStateDir = cfg.watchers.copilot.path;
-  const mappings: LockMapping[] = [];
-
-  try {
-    const pattern = join(copilotStateDir, "*/inuse.*.lock");
-    for await (const lockPath of glob(pattern)) {
-      const lockPathStr = String(lockPath);
-      const parts = lockPathStr.split("/");
-      const lockFile = parts.at(-1) ?? ""; // inuse.12345.lock
-      const uuid = parts.at(-2) ?? "";     // session UUID
-
-      const pidMatch = lockFile.match(/^inuse\.(\d+)\.lock$/);
-      if (!pidMatch || !uuid) continue;
-
-      const pid = parseInt(pidMatch[1]!, 10);
-      const eventsPath = join(copilotStateDir, uuid, "events.jsonl");
-
-      // Verify events.jsonl exists
-      try {
-        await stat(eventsPath);
-        mappings.push({ pid, uuid, eventsPath });
-      } catch {
-        // No events.jsonl — skip
-      }
-    }
-  } catch (e) {
-    logFn("WARN", `Lock file scan failed: ${(e as Error).message}`);
-  }
-
-  return mappings;
-};
-
-/**
- * Check if a process is still running.
- */
 const isProcessAlive = (pid: number): boolean => {
   try { process.kill(pid, 0); return true; } catch { return false; }
-};
-
-// ── Event reading ────────────────────────────────────────────────────────────
-
-interface ParsedEvent {
-  type: string;
-  content: string;
-  timestamp: string;
-}
-
-/**
- * Read new events from events.jsonl starting at the given byte offset.
- * Returns parsed extractable events and the new byte offset.
- */
-const readNewEvents = async (
-  eventsPath: string,
-  byteOffset: number,
-): Promise<{ events: ParsedEvent[]; newOffset: number; totalLines: number }> => {
-  const fileStat = await stat(eventsPath);
-  if (fileStat.size <= byteOffset) {
-    return { events: [], newOffset: byteOffset, totalLines: 0 };
-  }
-
-  // Read from byte offset to end of file
-  const buf = await readFile(eventsPath);
-  const newContent = buf.subarray(byteOffset).toString("utf-8");
-
-  const events: ParsedEvent[] = [];
-  let totalLines = 0;
-
-  for (const line of newContent.split("\n")) {
-    if (!line.trim()) continue;
-    totalLines++;
-
-    try {
-      const obj = JSON.parse(line) as {
-        type: string;
-        timestamp?: string;
-        data?: Record<string, unknown>;
-      };
-
-      if (!EXTRACTABLE_TYPES.has(obj.type)) continue;
-
-      const data = obj.data || {};
-      let content = "";
-
-      if (obj.type === "user.message") {
-        content = (data.content as string) || "";
-      } else if (obj.type === "assistant.message") {
-        const parts: string[] = [];
-        if (data.content) parts.push(data.content as string);
-        if (data.reasoningText) parts.push(data.reasoningText as string);
-        // Skip reasoningOpaque — encrypted noise
-        content = parts.join("\n");
-      } else if (obj.type === "session.compaction_complete") {
-        content = (data.summaryContent as string) || "";
-      }
-
-      if (content.length > 0) {
-        events.push({
-          type: obj.type,
-          content,
-          timestamp: obj.timestamp || new Date().toISOString(),
-        });
-      }
-    } catch {
-      // Malformed line — skip
-    }
-  }
-
-  return { events, newOffset: fileStat.size, totalLines };
 };
 
 /**
@@ -623,6 +508,7 @@ const storeFacts = async (
   facts: ExtractedFact[],
   sessionId: string,
   config?: BikkyConfig,
+  source?: TranscriptSource,
 ): Promise<number> => {
   if (!qdrant.isReady()) {
     logFn("WARN", "Extraction: Qdrant not ready, skipping store");
@@ -634,6 +520,7 @@ const storeFacts = async (
     capture_policy_version: CAPTURE_POLICY_VERSION,
     extracted_by_prompt: `${EXTRACTION_PROMPT_DESCRIPTOR.id}@${EXTRACTION_PROMPT_DESCRIPTOR.version}`,
   };
+  if (source) baseMeta.extraction_source = source;
   const actor = resolveActorIdentity({ config });
   if (actor.actor_label) baseMeta.actor_label = actor.actor_label;
   if (actor.source) baseMeta.actor_source = actor.source;
@@ -865,18 +752,40 @@ export const tick = async (config: BikkyConfig): Promise<void> => {
   const minEvents = config.daemon.extract_min_events || CAPTURE_TRIGGERS.factExtraction.minEvents;
 
   try {
-    // Extract from ALL active Copilot sessions with events.jsonl
-    const lockMappings = await resolveLockFiles();
-    const aliveMappings = lockMappings.filter(m => isProcessAlive(m.pid));
-    logFn("INFO", `Extraction tick: ${aliveMappings.length} active copilot session(s) with events.jsonl`);
+    const copilotMappings = await discoverCopilotMappings(config);
+    const claudeMappings = await discoverClaudeMappings(config);
+    const mappings = [...copilotMappings, ...claudeMappings];
 
-    writeExtractionHealth(aliveMappings.length, config);
+    logFn(
+      "INFO",
+      `Extraction tick: ${copilotMappings.length} active copilot session(s), ${claudeMappings.length} claude transcript(s)`,
+    );
 
-    for (const mapping of aliveMappings) {
-      await extractForUuid(mapping, minEvents, config);
+    writeExtractionHealth({ copilot: copilotMappings.length, claude: claudeMappings.length }, config);
+
+    for (const mapping of mappings) {
+      await extractForMapping(mapping, minEvents, config);
     }
   } catch (e) {
     logFn("ERROR", `Extraction tick failed: ${(e as Error).message}`);
+  }
+};
+
+const discoverCopilotMappings = async (config: BikkyConfig): Promise<TranscriptMapping[]> => {
+  try {
+    return await discoverCopilotTranscriptMappings(config, isProcessAlive);
+  } catch (e) {
+    logFn("WARN", `Copilot transcript scan failed: ${(e as Error).message}`);
+    return [];
+  }
+};
+
+const discoverClaudeMappings = async (config: BikkyConfig): Promise<TranscriptMapping[]> => {
+  try {
+    return await discoverClaudeTranscriptMappings(config);
+  } catch (e) {
+    logFn("WARN", `Claude transcript scan failed: ${(e as Error).message}`);
+    return [];
   }
 };
 
@@ -891,20 +800,51 @@ export interface ExtractionHealth {
   active_session_count: number;
   /** Configured copilot watcher path at the time of the tick. */
   watcher_path: string;
+  /** Per-source health, including non-Copilot watchers. */
+  sources?: Record<TranscriptSource, ExtractionSourceHealth>;
 }
 
-function writeExtractionHealth(activeCount: number, config: BikkyConfig): void {
+export interface ExtractionSourceHealth {
+  enabled: boolean;
+  watcher_path: string;
+  active_session_count: number;
+  last_active_session_at: string | null;
+}
+
+function writeExtractionHealth(activeCounts: Record<TranscriptSource, number>, config: BikkyConfig): void {
   try {
     let existing: Partial<ExtractionHealth> = {};
     if (existsSync(EXTRACTION_HEALTH_PATH)) {
       try { existing = JSON.parse(readFileSync(EXTRACTION_HEALTH_PATH, "utf-8")); } catch { /* ignore */ }
     }
     const now = new Date().toISOString();
+    const activeCount = activeCounts.copilot + activeCounts.claude;
+    const existingSources: Partial<Record<TranscriptSource, ExtractionSourceHealth>> = existing.sources ?? {};
+    const copilotLastActive = activeCounts.copilot > 0
+      ? now
+      : (existingSources.copilot?.last_active_session_at ?? existing.last_active_session_at ?? null);
+    const claudeLastActive = activeCounts.claude > 0
+      ? now
+      : (existingSources.claude?.last_active_session_at ?? null);
     const health: ExtractionHealth = {
       last_tick_at: now,
       last_active_session_at: activeCount > 0 ? now : (existing.last_active_session_at ?? null),
       active_session_count: activeCount,
       watcher_path: config.watchers.copilot.path,
+      sources: {
+        copilot: {
+          enabled: config.watchers.copilot.enabled,
+          watcher_path: config.watchers.copilot.path,
+          active_session_count: activeCounts.copilot,
+          last_active_session_at: copilotLastActive,
+        },
+        claude: {
+          enabled: config.watchers.claude.enabled,
+          watcher_path: config.watchers.claude.path,
+          active_session_count: activeCounts.claude,
+          last_active_session_at: claudeLastActive,
+        },
+      },
     };
     mkdirSync(STATE_DIR, { recursive: true });
     writeFileSync(EXTRACTION_HEALTH_PATH, JSON.stringify(health, null, 2) + "\n");
@@ -913,41 +853,44 @@ function writeExtractionHealth(activeCount: number, config: BikkyConfig): void {
   }
 }
 
-/**
- * Extract facts for a single Copilot session identified by UUID.
- * Uses UUID as the extraction_state key.
- * Automatically chunks large transcripts into multiple LLM calls.
- */
-const extractForUuid = async (
-  mapping: LockMapping,
+const extractForMapping = async (
+  mapping: TranscriptMapping,
   minEvents: number,
   config?: BikkyConfig,
 ): Promise<number> => {
-  const { uuid, eventsPath } = mapping;
-
-  // Use UUID as session_id in extraction_state (prefix with "uuid:" to avoid collisions)
-  const stateKey = `uuid:${uuid}`;
+  const { uuid, eventsPath, source } = mapping;
+  const stateKey = extractionStateKey(mapping);
+  const label = transcriptLabel(mapping);
 
   let state = getExtractionState(stateKey);
   if (!state) {
     state = {
       session_id: stateKey,
-      copilot_uuid: uuid,
+      source,
+      ...(source === "copilot" ? { copilot_uuid: uuid } : { claude_session_id: uuid }),
       events_path: eventsPath,
       byte_offset: 0,
       last_extracted_at: null,
       event_count: 0,
     };
   }
+  state.source = source;
+  if (source === "copilot") {
+    state.copilot_uuid = uuid;
+  } else {
+    state.claude_session_id = uuid;
+  }
+  state.events_path = eventsPath;
 
   // Read new events
-  const { events, newOffset, totalLines } = await readNewEvents(eventsPath, state.byte_offset);
+  const { events, newOffset, totalLines } = await readNewTranscriptEvents(eventsPath, state.byte_offset, source);
 
   const shouldSummarize = shouldSummarizeEvents(events, minEvents);
 
   if (events.length < minEvents && !shouldSummarize) {
-    // Still update offset to avoid re-scanning non-extractable events
-    if (newOffset > state.byte_offset) {
+    // Still advance past pure noise, but keep below-threshold conversation
+    // events buffered until enough context accumulates for extraction.
+    if (events.length === 0 && newOffset > state.byte_offset) {
       state.byte_offset = newOffset;
       state.event_count += totalLines;
       upsertExtractionState(state);
@@ -961,13 +904,13 @@ const extractForUuid = async (
 
   for (let i = 0; i < chunks.length; i++) {
     const transcript = buildTranscript(chunks[i]!);
-    logFn("DEBUG", `Extraction: UUID ${uuid.slice(0, 8)} — chunk ${i + 1}/${chunks.length}, ${chunks[i]!.length} events, ${transcript.length} chars`);
+    logFn("DEBUG", `Extraction: ${label} — chunk ${i + 1}/${chunks.length}, ${chunks[i]!.length} events, ${transcript.length} chars`);
 
     if (events.length >= minEvents) {
       const facts = await extractFacts(transcript, stateKey, config);
 
       if (facts.length > 0) {
-        const stored = await storeFacts(facts, stateKey, config);
+        const stored = await storeFacts(facts, stateKey, config, source);
         totalFacts += stored;
       }
     }
@@ -976,16 +919,21 @@ const extractForUuid = async (
   }
 
   if (totalFacts > 0) {
-    logFn("INFO", `Extraction: UUID ${uuid.slice(0, 8)} — ${totalFacts} facts stored (${events.length} events, ${chunks.length} chunk(s))`);
+    logFn("INFO", `Extraction: ${label} — ${totalFacts} facts stored (${events.length} events, ${chunks.length} chunk(s))`);
   } else {
-    logFn("DEBUG", `Extraction: UUID ${uuid.slice(0, 8)} — ${events.length} events but 0 facts extracted`);
+    logFn("DEBUG", `Extraction: ${label} — ${events.length} events but 0 facts extracted`);
   }
 
   // Update high-water mark
   state.byte_offset = newOffset;
   state.event_count += totalLines;
   state.last_extracted_at = new Date().toISOString();
-  state.copilot_uuid = uuid;
+  state.source = source;
+  if (source === "copilot") {
+    state.copilot_uuid = uuid;
+  } else {
+    state.claude_session_id = uuid;
+  }
   state.events_path = eventsPath;
   upsertExtractionState(state);
 

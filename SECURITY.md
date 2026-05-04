@@ -8,7 +8,7 @@ Security fixes land on the latest minor release of each package:
 
 | Package    | Supported versions       |
 | ---------- | ------------------------ |
-| `bikky`    | latest minor (`0.3.x`)   |
+| `bikky`    | latest minor (`0.4.x`)   |
 | `bikky-ui` | latest minor (`0.1.x`)   |
 
 Older versions are not patched. If you're on an old version, please upgrade before reporting a vulnerability that may already be fixed.

@@ -17,8 +17,8 @@
 
 ## Checklist
 
-- [ ] `npm run lint` passes
-- [ ] `npm run typecheck` passes
+- [ ] `npm run check` passes
 - [ ] `npm test` passes
+- [ ] `cd packages/ui && npm test` passes if UI code changed
 - [ ] Docs updated (README, CONTRIBUTING, or inline JSDoc) if behaviour changed
 - [ ] No secrets, tokens, or PII in the diff

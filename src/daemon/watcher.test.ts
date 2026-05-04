@@ -17,7 +17,7 @@ const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-home-watche
 process.env.BIKKY_HOME = TEST_BIKKY_HOME;
 
 const { resetConfig, saveConfig, CONFIG_DEFAULTS } = await import("../config.js");
-const { discoverSessions } = await import("./watcher.js");
+const { discoverClaudeSessions, discoverSessions } = await import("./watcher.js");
 
 // ---------------------------------------------------------------------------
 // Test directory setup
@@ -29,17 +29,17 @@ function createTestDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "bikky-test-sessions-"));
 }
 
+before(() => {
+  testDir = createTestDir();
+});
+
+after(() => {
+  fs.rmSync(testDir, { recursive: true, force: true });
+  fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
+  resetConfig();
+});
+
 describe("discoverSessions", () => {
-  before(() => {
-    testDir = createTestDir();
-  });
-
-  after(() => {
-    fs.rmSync(testDir, { recursive: true, force: true });
-    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
-    resetConfig();
-  });
-
   beforeEach(() => {
     resetConfig();
   });
@@ -242,5 +242,51 @@ describe("discoverSessions", () => {
     assert.strictEqual(typeof session.active, "boolean");
     assert.strictEqual(session.uuid, sessionUuid);
     assert.strictEqual(session.eventsPath, path.join(sessionDir, "events.jsonl"));
+  });
+});
+
+describe("discoverClaudeSessions", () => {
+  beforeEach(() => {
+    resetConfig();
+  });
+
+  it("discovers top-level Claude project transcripts", () => {
+    const claudeDir = path.join(testDir, "claude-projects");
+    const projectDir = path.join(claudeDir, "-Users-test-code-project");
+    const nestedDir = path.join(projectDir, "subagents");
+    fs.mkdirSync(nestedDir, { recursive: true });
+    fs.writeFileSync(path.join(projectDir, "claude-session-1.jsonl"), '{"type":"user"}\n');
+    fs.writeFileSync(path.join(nestedDir, "nested-session.jsonl"), '{"type":"assistant"}\n');
+
+    saveConfig({
+      ...CONFIG_DEFAULTS,
+      watchers: {
+        ...CONFIG_DEFAULTS.watchers,
+        claude: { enabled: true, path: claudeDir },
+      },
+    });
+
+    const sessions = discoverClaudeSessions();
+    assert.strictEqual(sessions.length, 1);
+    assert.strictEqual(sessions[0].source, "claude");
+    assert.strictEqual(sessions[0].uuid, "claude-session-1");
+    assert.strictEqual(sessions[0].active, true);
+    assert.strictEqual(sessions[0].eventsPath, path.join(projectDir, "claude-session-1.jsonl"));
+  });
+
+  it("returns empty array when the Claude watcher is disabled", () => {
+    const claudeDir = path.join(testDir, "claude-disabled");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    fs.writeFileSync(path.join(claudeDir, "session.jsonl"), '{"type":"user"}\n');
+
+    saveConfig({
+      ...CONFIG_DEFAULTS,
+      watchers: {
+        ...CONFIG_DEFAULTS.watchers,
+        claude: { enabled: false, path: claudeDir },
+      },
+    });
+
+    assert.deepStrictEqual(discoverClaudeSessions(), []);
   });
 });

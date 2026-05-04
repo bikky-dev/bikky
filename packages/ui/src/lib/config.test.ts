@@ -11,12 +11,13 @@ import os from "node:os";
 const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-ui-config-"));
 process.env.BIKKY_HOME = TEST_BIKKY_HOME;
 
-const { loadConfig, _resetConfig, CONFIG_PATH, BIKKY_DIR } = await import("./config.js");
+const { loadConfig, _resetConfig, CONFIG_PATH, BIKKY_DIR, getEffectiveDestinations, getDefaultDestination, getDestinationByName } = await import("./config.js");
 
 const ENV_KEYS = [
   "QDRANT_URL",
   "QDRANT_API_KEY",
   "BIKKY_COLLECTION",
+  "BIKKY_WORKSPACE",
   "EMBEDDING_PROVIDER",
   "EMBEDDING_MODEL",
   "EMBEDDING_BASE_URL",
@@ -138,5 +139,56 @@ describe("ui/lib/config", () => {
     const a = loadConfig();
     const b = loadConfig();
     assert.equal(a, b);
+  });
+
+  describe("destinations", () => {
+    it("synthesizes a single 'default' destination from legacy top-level fields", () => {
+      fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+        qdrant_url: "https://legacy.example",
+        qdrant_api_key: "k",
+        collection: "c1",
+      }));
+
+      const dests = getEffectiveDestinations();
+      assert.equal(dests.length, 1);
+      assert.equal(dests[0]!.name, "default");
+      assert.equal(dests[0]!.qdrant_url, "https://legacy.example");
+      assert.equal(getDefaultDestination()?.name, "default");
+    });
+
+    it("parses destinations[] and respects default flag", () => {
+      fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+        destinations: [
+          { name: "perso", qdrant_url: "https://perso.example", qdrant_api_key: "p", collection: "bikky" },
+          { name: "work", qdrant_url: "https://work.example/", qdrant_api_key: "w", collection: "bikky", default: true },
+        ],
+      }));
+
+      const dests = getEffectiveDestinations();
+      assert.equal(dests.length, 2);
+      assert.equal(dests[1]!.qdrant_url, "https://work.example", "trailing slash stripped");
+      assert.equal(getDefaultDestination()?.name, "work");
+      assert.equal(getDestinationByName("perso")?.name, "perso");
+      assert.equal(getDestinationByName("missing"), null);
+    });
+
+    it("falls back to first destination when no default flag is set", () => {
+      fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+        destinations: [
+          { name: "a", qdrant_url: "https://a.example", qdrant_api_key: null, collection: "bikky" },
+          { name: "b", qdrant_url: "https://b.example", qdrant_api_key: null, collection: "bikky" },
+        ],
+      }));
+
+      assert.equal(getDefaultDestination()?.name, "a");
+    });
+
+    it("returns no destinations when nothing is configured", () => {
+      assert.equal(getEffectiveDestinations().length, 0);
+      assert.equal(getDefaultDestination(), null);
+    });
   });
 });

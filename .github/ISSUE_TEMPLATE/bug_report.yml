@@ -11,8 +11,8 @@ body:
     id: package
     attributes:
       label: Package and version
-      description: e.g. `bikky@0.3.8` or `bikky-ui@0.1.10`
-      placeholder: bikky@0.3.8
+      description: e.g. `bikky@0.4.0` or `bikky-ui@0.1.14`
+      placeholder: bikky@0.4.0
     validations:
       required: true
 
@@ -31,7 +31,7 @@ body:
       description: Minimal steps that trigger the bug. A small code snippet or command sequence is ideal.
       placeholder: |
         1. Run `npx bikky-ui`
-        2. Open http://localhost:3001
+        2. Open http://localhost:1422
         3. ...
     validations:
       required: true
