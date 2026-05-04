@@ -1,22 +1,39 @@
 {
   "name": "bikky",
-  "version": "0.3.8",
+  "version": "0.4.0",
   "description": "Shared memory for AI coding sessions — MCP server + background daemon",
   "type": "module",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bikky-dev/bikky.git"
+    "url": "git+https://github.com/bikky-dev/bikky.git"
   },
+  "bugs": {
+    "url": "https://github.com/bikky-dev/bikky/issues"
+  },
+  "homepage": "https://github.com/bikky-dev/bikky#readme",
   "bin": {
-    "bikky": "./bin/bikky.js"
+    "bikky": "bin/bikky.js"
   },
   "exports": {
     ".": "./dist/mcp/index.js"
   },
   "files": [
-    "dist/",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md",
+    "SUPPORT.md",
+    "CHANGELOG.md",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.itest.js",
+    "!dist/**/*.itest.d.ts",
     "bin/",
+    "docs/configuration.md",
+    "docs/privacy-first.md",
+    "docs/config/",
     "docs/diagrams/",
     "docs/screenshots/"
   ],
@@ -29,8 +46,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "check": "tsc --noEmit && eslint src/",
-    "test": "node --test --test-concurrency=1 $(find dist -name '*.test.js')",
+    "test": "tsc && node --test --test-concurrency=1 $(find dist -name '*.test.js')",
     "test:integration": "tsc && BIKKY_INTEGRATION=${BIKKY_INTEGRATION:-1} node --test $(find dist -name '*.itest.js')",
+    "verify:package": "node scripts/verify-package.mjs",
     "build:diagrams": "node scripts/build-diagrams.mjs",
     "prepublishOnly": "npm run build"
   },
@@ -51,6 +69,9 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "keywords": [
     "mcp",

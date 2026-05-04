@@ -22,9 +22,15 @@ jobs:
       matrix:
         language: [javascript-typescript]
     steps:
+      - name: CodeQL disabled
+        if: ${{ vars.BIKKY_CODEQL_ENABLED != 'true' }}
+        run: echo "CodeQL upload requires GitHub code scanning/Advanced Security. Set repository variable BIKKY_CODEQL_ENABLED=true after enabling code scanning."
+
       - uses: actions/checkout@v4
+        if: ${{ vars.BIKKY_CODEQL_ENABLED == 'true' }}
 
       - name: Initialize CodeQL
+        if: ${{ vars.BIKKY_CODEQL_ENABLED == 'true' }}
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
@@ -39,9 +45,11 @@ jobs:
               - "**/*.test.tsx"
 
       - name: Autobuild
+        if: ${{ vars.BIKKY_CODEQL_ENABLED == 'true' }}
         uses: github/codeql-action/autobuild@v3
 
       - name: Perform CodeQL Analysis
+        if: ${{ vars.BIKKY_CODEQL_ENABLED == 'true' }}
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"

@@ -59,7 +59,7 @@ We aim for **focused, fast unit tests** that lock in behaviour without being a m
 
 We deliberately **do not** test:
 
-- LLM prompt quality or extraction accuracy. Those live in the separate [`bikky-evals`](https://github.com/bikky-dev/bikky-evals) repo, which uses DeepEval for prompt-level scoring.
+- LLM prompt quality or extraction accuracy. Prompt-level evals live outside the default unit-test suite so day-to-day contributor tests stay fast and deterministic.
 - Implementation details (private function internals, exact log strings) — these change often and tests that pin them slow contributors down.
 - The React frontend — the testable surface there is small; we rely on type-checking and manual smoke tests.
 

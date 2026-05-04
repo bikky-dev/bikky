@@ -3,12 +3,31 @@
  * Ported from agent00 portal worker — stripped of CF Worker bindings and auth.
  */
 
-import { Hono } from "hono";
-import { createQdrantClient, buildFilter, type QdrantPoint, type QdrantFilter, type FactPayload } from "../lib/qdrant.js";
+import { Hono, type Context } from "hono";
+import { createQdrantClient, buildFilter, resolveTargetDestinations, type QdrantPoint, type QdrantFilter, type FactPayload, QdrantClient } from "../lib/qdrant.js";
+import { getEffectiveDestinations, getDefaultDestination } from "../lib/config.js";
 import { embed, isEmbeddingAvailable } from "../lib/embed.js";
 import { addRedactionPayload, combineRedactions, redactStorageText } from "../lib/redaction.js";
 
 export const memoryRoutes = new Hono();
+
+// --- Destination resolution helpers ---
+
+/** Returns the targeted destinations for this request based on `?destination=`. */
+function targetsFor(c: Context) {
+  return resolveTargetDestinations(c.req.query("destination") || undefined);
+}
+
+/** Returns true when the request explicitly targets `?destination=all`. */
+function isAllDestinations(c: Context): boolean {
+  return c.req.query("destination") === "all";
+}
+
+/** Build a client for a single destination object. */
+function clientFor(dest: { qdrant_url: string; qdrant_api_key: string | null; collection: string }): QdrantClient {
+  return new QdrantClient(dest.qdrant_url, dest.qdrant_api_key, dest.collection);
+}
+
 
 const CATEGORY_VALUES = [
   "engineering",
@@ -48,8 +67,10 @@ const MEMORY_SUBTYPE_VALUES = [
   "aggregate_rollup",
 ] as const;
 
-function formatPoint(p: QdrantPoint) {
-  return { id: p.id, score: p.score ?? null, ...p.payload };
+function formatPoint(p: QdrantPoint, destination?: string): Record<string, unknown> & { id: string; score: number | null } {
+  const out: Record<string, unknown> = { id: p.id, score: p.score ?? null, ...p.payload };
+  if (destination) out._destination = destination;
+  return out as Record<string, unknown> & { id: string; score: number | null };
 }
 
 // --- Query helpers ---
@@ -138,10 +159,11 @@ const keywordMatches = (payload: FactPayload, terms: string[]): boolean => {
 };
 
 const keywordSearch = async (
-  qdrant: ReturnType<typeof createQdrantClient>,
+  qdrant: QdrantClient,
   query: string,
   filter: QdrantFilter,
   limit: number,
+  destinationTag?: string,
 ): Promise<{ results: ReturnType<typeof formatPoint>[]; count: number }> => {
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const matches: QdrantPoint[] = [];
@@ -160,17 +182,18 @@ const keywordSearch = async (
   } while (offset && scanned < KEYWORD_SEARCH_SCAN_LIMIT);
 
   return {
-    results: matches.slice(0, limit).map(formatPoint),
+    results: matches.slice(0, limit).map((p) => formatPoint(p, destinationTag)),
     count: matches.length,
   };
 };
 
-// GET /api/memory/search?q=...&category=...&entity=...&domain=...&kind=...&memory_subtype=...&limit=...
+// GET /api/memory/search?q=...&category=...&entity=...&domain=...&kind=...&memory_subtype=...&limit=...&destination=...
 memoryRoutes.get("/search", async (c) => {
   const q = c.req.query("q")?.trim();
   if (!q) return c.json({ error: "Missing query parameter 'q'" }, 400);
 
-  const qdrant = createQdrantClient();
+  const dests = targetsFor(c);
+  const all = isAllDestinations(c);
   const filter = buildFilter({
     ...ontologyFilters(c.req.query("category"), c.req.query("memory_subtype")),
     domain: c.req.query("domain"),
@@ -183,19 +206,42 @@ memoryRoutes.get("/search", async (c) => {
 
   const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 100);
   const hasFilter = filter.must.length > 0 || (filter.should?.length ?? 0) > 0 || (filter.must_not?.length ?? 0) > 0;
+
   if (!isEmbeddingAvailable()) {
-    return c.json(await keywordSearch(qdrant, q, filter, limit));
+    const perDest = await Promise.all(
+      dests.map((d) => keywordSearch(clientFor(d), q, filter, limit, all ? d.name : undefined)),
+    );
+    const results = perDest.flatMap((r) => r.results).slice(0, limit);
+    const count = perDest.reduce((sum, r) => sum + r.count, 0);
+    return c.json({ results, count });
   }
 
   const vector = await embed(q);
-  const points = await qdrant.search(vector, hasFilter ? filter : undefined, limit);
+  const perDest = await Promise.all(
+    dests.map(async (d) => {
+      const points = await clientFor(d).search(vector, hasFilter ? filter : undefined, limit);
+      return points.map((p) => formatPoint(p, all ? d.name : undefined));
+    }),
+  );
+  // Merge by score desc, dedupe by id, slice to limit
+  const seen = new Set<string>();
+  const merged = perDest
+    .flat()
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+    .filter((p) => {
+      if (seen.has(p.id)) return false;
+      seen.add(p.id);
+      return true;
+    })
+    .slice(0, limit);
 
-  return c.json({ results: points.map(formatPoint), count: points.length });
+  return c.json({ results: merged, count: merged.length });
 });
 
-// GET /api/memory/browse?category=...&entity=...&kind=...&memory_subtype=...&domain=...&source=...&since=...&until=...&sort=...&limit=...&offset=...
+// GET /api/memory/browse?...&destination=...
 memoryRoutes.get("/browse", async (c) => {
-  const qdrant = createQdrantClient();
+  const dests = targetsFor(c);
+  const all = isAllDestinations(c);
 
   const filter = buildFilter({
     ...ontologyFilters(c.req.query("category"), c.req.query("memory_subtype")),
@@ -219,28 +265,53 @@ memoryRoutes.get("/browse", async (c) => {
       ? { key: "created_at", direction: "desc" as const }
       : undefined;
 
-  const [{ points, nextOffset }, totalCount] = await Promise.all([
-    qdrant.scroll(filter, limit, offset, orderBy),
-    qdrant.count(filter),
-  ]);
+  // Pagination across destinations is hard. For "all", we fetch the first
+  // `limit` from each then concat — not perfectly ordered, but matches the
+  // documented behaviour ("concat lists with destination badge").
+  const perDest = await Promise.all(
+    dests.map(async (d) => {
+      const qdrant = clientFor(d);
+      const [{ points, nextOffset }, totalCount] = await Promise.all([
+        qdrant.scroll(filter, limit, all ? undefined : offset, orderBy),
+        qdrant.count(filter),
+      ]);
+      return { name: d.name, points, nextOffset, totalCount };
+    }),
+  );
 
-  return c.json({ results: points.map(formatPoint), count: totalCount, nextOffset });
+  if (!all) {
+    const r = perDest[0]!;
+    return c.json({ results: r.points.map((p) => formatPoint(p)), count: r.totalCount, nextOffset: r.nextOffset });
+  }
+
+  const results = perDest.flatMap((r) => r.points.map((p) => formatPoint(p, r.name)));
+  const count = perDest.reduce((sum, r) => sum + r.totalCount, 0);
+  // No cross-destination pagination yet — clients should request larger limits.
+  return c.json({ results, count, nextOffset: null });
 });
 
-// GET /api/memory/facts/:id
+// GET /api/memory/facts/:id?destination=...
 memoryRoutes.get("/facts/:id", async (c) => {
-  const qdrant = createQdrantClient();
-  const points = await qdrant.getPoints([c.req.param("id")]);
-  if (points.length === 0) return c.json({ error: "Not found" }, 404);
-  return c.json(formatPoint(points[0]!));
+  const id = c.req.param("id");
+  const dests = targetsFor(c);
+  const all = isAllDestinations(c);
+
+  for (const d of dests) {
+    const points = await clientFor(d).getPoints([id]);
+    if (points.length > 0) return c.json(formatPoint(points[0]!, all ? d.name : undefined));
+  }
+  return c.json({ error: "Not found" }, 404);
 });
 
-// PUT /api/memory/facts/:id
+// PUT /api/memory/facts/:id?destination=...
 memoryRoutes.put("/facts/:id", async (c) => {
   const id = c.req.param("id");
   const body = await c.req.json<Partial<Pick<FactPayload, "content" | "category" | "domain" | "entities" | "confidence" | "from_entity" | "relation_type" | "to_entity">>>();
 
-  const qdrant = createQdrantClient();
+  // Writes target a single destination; if "all", write to the default.
+  const all = isAllDestinations(c);
+  const destName = all ? undefined : (c.req.query("destination") || undefined);
+  const qdrant = createQdrantClient(destName);
   const existing = await qdrant.getPoints([id]);
   if (existing.length === 0) return c.json({ error: "Not found" }, 404);
 
@@ -289,7 +360,9 @@ memoryRoutes.put("/facts/:id", async (c) => {
 // DELETE /api/memory/facts/:id (soft delete)
 memoryRoutes.delete("/facts/:id", async (c) => {
   const id = c.req.param("id");
-  const qdrant = createQdrantClient();
+  const all = isAllDestinations(c);
+  const destName = all ? undefined : (c.req.query("destination") || undefined);
+  const qdrant = createQdrantClient(destName);
 
   const existing = await qdrant.getPoints([id]);
   if (existing.length === 0) return c.json({ error: "Not found" }, 404);
@@ -327,7 +400,10 @@ memoryRoutes.post("/facts", async (c) => {
     return c.json({ error: "Creating facts requires a browser-compatible embedding provider (ollama, openai, or portkey)." }, 501);
   }
 
-  const qdrant = createQdrantClient();
+  // Writes always go to a single destination; ignore "all".
+  const all = isAllDestinations(c);
+  const destName = all ? undefined : (c.req.query("destination") || undefined);
+  const qdrant = createQdrantClient(destName);
   const redactedContent = redactStorageText(body.content);
   const redactedEntities = body.entities.map((entity) => redactStorageText(entity));
   const redactedFromEntity = body.from_entity ? redactStorageText(body.from_entity) : null;
@@ -372,9 +448,7 @@ memoryRoutes.post("/facts", async (c) => {
   return c.json({ ok: true, id }, 201);
 });
 
-// GET /api/memory/entity-types?names=a,b,c
-// Returns a name → type map for the requested entities. Lightweight lookup
-// used by the UI to render typed chips in fact lists.
+// GET /api/memory/entity-types?names=a,b,c&destination=...
 memoryRoutes.get("/entity-types", async (c) => {
   const namesParam = c.req.query("names") || "";
   const names = namesParam
@@ -382,30 +456,31 @@ memoryRoutes.get("/entity-types", async (c) => {
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
   if (names.length === 0) return c.json({ types: {} });
-  const qdrant = createQdrantClient();
+  const dests = targetsFor(c);
   const filter: QdrantFilter = { must: [
     { key: "kind", match: { value: "entity_type" } },
     { key: "entity_name", match: { any: names } },
   ]};
-  try {
-    const scroll = await qdrant.scroll(filter, Math.min(names.length, 200));
-    const types: Record<string, string> = {};
-    for (const p of scroll.points) {
-      const payload = p.payload as unknown as { entity_name?: string; entity_type?: string };
-      if (payload.entity_name && payload.entity_type) {
-        types[payload.entity_name] = payload.entity_type;
+  const types: Record<string, string> = {};
+  await Promise.all(dests.map(async (d) => {
+    try {
+      const scroll = await clientFor(d).scroll(filter, Math.min(names.length, 200));
+      for (const p of scroll.points) {
+        const payload = p.payload as unknown as { entity_name?: string; entity_type?: string };
+        if (payload.entity_name && payload.entity_type && !(payload.entity_name in types)) {
+          types[payload.entity_name] = payload.entity_type;
+        }
       }
-    }
-    return c.json({ types });
-  } catch {
-    return c.json({ types: {} });
-  }
+    } catch { /* ignore per-destination errors */ }
+  }));
+  return c.json({ types });
 });
 
-// GET /api/memory/entities/:name?limit=&offset=&relationsLimit=
+// GET /api/memory/entities/:name?limit=&offset=&relationsLimit=&destination=...
 memoryRoutes.get("/entities/:name", async (c) => {
   const name = c.req.param("name").toLowerCase();
-  const qdrant = createQdrantClient();
+  const dests = targetsFor(c);
+  const all = isAllDestinations(c);
 
   const limit = parseLimit(c.req.query("limit"), 50, 200);
   const offset = c.req.query("offset") || undefined;
@@ -420,45 +495,79 @@ memoryRoutes.get("/entities/:name", async (c) => {
     { is_null: { key: "superseded_by" } },
     { key: "to_entity", match: { value: name } },
   ]};
-  // Phase 5a: lookup the daemon-classified entity_type point, if any.
   const typeFilter: QdrantFilter = { must: [
     { key: "kind", match: { value: "entity_type" } },
     { key: "entity_name", match: { value: name } },
   ]};
 
-  const safeCount = async (f: QdrantFilter) => {
-    try { return await qdrant.count(f); } catch { return null; }
-  };
+  const perDest = await Promise.all(dests.map(async (d) => {
+    const qdrant = clientFor(d);
+    const safeCount = async (f: QdrantFilter) => {
+      try { return await qdrant.count(f); } catch { return null; }
+    };
+    const [scroll, fromRels, toRels, typeScroll, factsTotal, fromTotal, toTotal] = await Promise.all([
+      qdrant.scroll(filter, limit, all ? undefined : offset),
+      qdrant.scroll(fromFilter, relationsLimit),
+      qdrant.scroll(toFilter, relationsLimit),
+      qdrant.scroll(typeFilter, 1),
+      safeCount(filter),
+      safeCount(fromFilter),
+      safeCount(toFilter),
+    ]);
+    return { name: d.name, scroll, fromRels, toRels, typeScroll, factsTotal, fromTotal, toTotal };
+  }));
 
-  const [scroll, fromRels, toRels, typeScroll, factsTotal, fromTotal, toTotal] = await Promise.all([
-    qdrant.scroll(filter, limit, offset),
-    qdrant.scroll(fromFilter, relationsLimit),
-    qdrant.scroll(toFilter, relationsLimit),
-    qdrant.scroll(typeFilter, 1),
-    safeCount(filter),
-    safeCount(fromFilter),
-    safeCount(toFilter),
+  // Single destination → unchanged response shape
+  if (!all) {
+    const r = perDest[0]!;
+    const { points, nextOffset } = r.scroll;
+    const relations = [
+      ...r.fromRels.points.map((p) => ({ id: p.id, from: p.payload.from_entity, type: p.payload.relation_type, to: p.payload.to_entity, content: p.payload.content })),
+      ...r.toRels.points.map((p) => ({ id: p.id, from: p.payload.from_entity, type: p.payload.relation_type, to: p.payload.to_entity, content: p.payload.content })),
+    ];
+    const fromTrunc = r.fromRels.nextOffset !== null;
+    const toTrunc = r.toRels.nextOffset !== null;
+    const relationsTotal = r.fromTotal !== null && r.toTotal !== null ? r.fromTotal + r.toTotal : null;
+    const typePayload = r.typeScroll.points[0]?.payload as unknown as
+      | { entity_type?: string; entity_type_confidence?: number; entity_type_reasoning?: string; classified_at?: string }
+      | undefined;
+    return c.json({
+      entity: name,
+      entityType: typePayload?.entity_type ?? null,
+      entityTypeConfidence: typePayload?.entity_type_confidence ?? null,
+      entityTypeReasoning: typePayload?.entity_type_reasoning ?? null,
+      entityTypeClassifiedAt: typePayload?.classified_at ?? null,
+      facts: points.map((p) => formatPoint(p)),
+      relations,
+      factCount: points.length,
+      relationCount: relations.length,
+      factsTotal: r.factsTotal,
+      relationsTotal,
+      factsTruncated: nextOffset !== null,
+      factsNextOffset: nextOffset,
+      relationsTruncated: fromTrunc || toTrunc,
+      limit,
+      relationsLimit,
+    });
+  }
+
+  // "all" → concat facts (with destination tag), concat relations, sum totals,
+  // pick first non-null entity-type classification.
+  const facts = perDest.flatMap((r) => r.scroll.points.map((p) => formatPoint(p, r.name)));
+  const relations = perDest.flatMap((r) => [
+    ...r.fromRels.points.map((p) => ({ id: p.id, from: p.payload.from_entity, type: p.payload.relation_type, to: p.payload.to_entity, content: p.payload.content, _destination: r.name })),
+    ...r.toRels.points.map((p) => ({ id: p.id, from: p.payload.from_entity, type: p.payload.relation_type, to: p.payload.to_entity, content: p.payload.content, _destination: r.name })),
   ]);
-
-  const { points, nextOffset } = scroll;
-
-  const relations = [
-    ...fromRels.points.map((p) => ({
-      id: p.id, from: p.payload.from_entity, type: p.payload.relation_type, to: p.payload.to_entity, content: p.payload.content,
-    })),
-    ...toRels.points.map((p) => ({
-      id: p.id, from: p.payload.from_entity, type: p.payload.relation_type, to: p.payload.to_entity, content: p.payload.content,
-    })),
-  ];
-
-  const fromTrunc = fromRels.nextOffset !== null;
-  const toTrunc = toRels.nextOffset !== null;
-  const relationsTotal =
-    fromTotal !== null && toTotal !== null ? fromTotal + toTotal : null;
-
-  const typePayload = typeScroll.points[0]?.payload as unknown as
-    | { entity_type?: string; entity_type_confidence?: number; entity_type_reasoning?: string; classified_at?: string }
-    | undefined;
+  // Dedupe relations by id across destinations
+  const seenRel = new Set<string>();
+  const uniqueRelations = relations.filter((r) => { if (seenRel.has(r.id)) return false; seenRel.add(r.id); return true; });
+  const factsTotal = perDest.reduce((s, r) => r.factsTotal !== null ? s + r.factsTotal : s, 0);
+  const relationsTotal = perDest.reduce((s, r) => (r.fromTotal !== null && r.toTotal !== null) ? s + r.fromTotal + r.toTotal : s, 0);
+  const factsTruncated = perDest.some((r) => r.scroll.nextOffset !== null);
+  const relationsTruncated = perDest.some((r) => r.fromRels.nextOffset !== null || r.toRels.nextOffset !== null);
+  const typePayload = perDest
+    .map((r) => r.typeScroll.points[0]?.payload as unknown as { entity_type?: string; entity_type_confidence?: number; entity_type_reasoning?: string; classified_at?: string } | undefined)
+    .find((p) => p?.entity_type);
 
   return c.json({
     entity: name,
@@ -466,27 +575,28 @@ memoryRoutes.get("/entities/:name", async (c) => {
     entityTypeConfidence: typePayload?.entity_type_confidence ?? null,
     entityTypeReasoning: typePayload?.entity_type_reasoning ?? null,
     entityTypeClassifiedAt: typePayload?.classified_at ?? null,
-    facts: points.map(formatPoint),
-    relations,
-    factCount: points.length,
-    relationCount: relations.length,
+    facts,
+    relations: uniqueRelations,
+    factCount: facts.length,
+    relationCount: uniqueRelations.length,
     factsTotal,
     relationsTotal,
-    factsTruncated: nextOffset !== null,
-    factsNextOffset: nextOffset,
-    relationsTruncated: fromTrunc || toTrunc,
+    factsTruncated,
+    factsNextOffset: null,
+    relationsTruncated,
     limit,
     relationsLimit,
   });
 });
 
-// GET /api/memory/shared?a=...&b=...&limit=&offset=
+// GET /api/memory/shared?a=...&b=...&limit=&offset=&destination=...
 memoryRoutes.get("/shared", async (c) => {
   const a = c.req.query("a")?.toLowerCase();
   const b = c.req.query("b")?.toLowerCase();
   if (!a || !b) return c.json({ error: "Missing 'a' and 'b' entity parameters" }, 400);
 
-  const qdrant = createQdrantClient();
+  const dests = targetsFor(c);
+  const all = isAllDestinations(c);
   const limit = parseLimit(c.req.query("limit"), 50, 200);
   const offset = c.req.query("offset") || undefined;
 
@@ -498,24 +608,45 @@ memoryRoutes.get("/shared", async (c) => {
     ],
   };
 
-  const [scroll, total] = await Promise.all([
-    qdrant.scroll(filter, limit, offset),
-    qdrant.count(filter).catch(() => null as number | null),
-  ]);
+  const perDest = await Promise.all(dests.map(async (d) => {
+    const qdrant = clientFor(d);
+    const [scroll, total] = await Promise.all([
+      qdrant.scroll(filter, limit, all ? undefined : offset),
+      qdrant.count(filter).catch(() => null as number | null),
+    ]);
+    return { name: d.name, scroll, total };
+  }));
 
+  if (!all) {
+    const r = perDest[0]!;
+    return c.json({
+      entityA: a,
+      entityB: b,
+      facts: r.scroll.points.map((p) => formatPoint(p)),
+      count: r.scroll.points.length,
+      total: r.total,
+      truncated: r.scroll.nextOffset !== null,
+      nextOffset: r.scroll.nextOffset,
+      limit,
+    });
+  }
+
+  const facts = perDest.flatMap((r) => r.scroll.points.map((p) => formatPoint(p, r.name)));
+  const total = perDest.reduce((s, r) => r.total !== null ? s + r.total : s, 0);
+  const truncated = perDest.some((r) => r.scroll.nextOffset !== null);
   return c.json({
     entityA: a,
     entityB: b,
-    facts: scroll.points.map(formatPoint),
-    count: scroll.points.length,
+    facts,
+    count: facts.length,
     total,
-    truncated: scroll.nextOffset !== null,
-    nextOffset: scroll.nextOffset,
+    truncated,
+    nextOffset: null,
     limit,
   });
 });
 
-// GET /api/memory/relations?entity=...&type=...&direction=...&limit=
+// GET /api/memory/relations?entity=...&type=...&direction=...&limit=&destination=...
 memoryRoutes.get("/relations", async (c) => {
   const entity = c.req.query("entity")?.toLowerCase();
   const relationType = c.req.query("type");
@@ -524,42 +655,48 @@ memoryRoutes.get("/relations", async (c) => {
 
   if (!entity) return c.json({ error: "Missing 'entity' parameter" }, 400);
 
-  const qdrant = createQdrantClient();
-  const results: QdrantPoint[] = [];
-  let truncated = false;
+  const dests = targetsFor(c);
+  const all = isAllDestinations(c);
+  const buildScrolls = async (qdrant: QdrantClient): Promise<{ points: QdrantPoint[]; truncated: boolean }> => {
+    const out: QdrantPoint[] = [];
+    let truncated = false;
+    if (direction === "from" || direction === "both") {
+      const must: Array<Record<string, unknown>> = [
+        { is_null: { key: "superseded_by" } },
+        { key: "from_entity", match: { value: entity } },
+      ];
+      if (relationType) must.push({ key: "relation_type", match: { value: relationType } });
+      const { points, nextOffset } = await qdrant.scroll({ must } as QdrantFilter, limit);
+      out.push(...points);
+      if (nextOffset !== null) truncated = true;
+    }
+    if (direction === "to" || direction === "both") {
+      const must: Array<Record<string, unknown>> = [
+        { is_null: { key: "superseded_by" } },
+        { key: "to_entity", match: { value: entity } },
+      ];
+      if (relationType) must.push({ key: "relation_type", match: { value: relationType } });
+      const { points, nextOffset } = await qdrant.scroll({ must } as QdrantFilter, limit);
+      out.push(...points);
+      if (nextOffset !== null) truncated = true;
+    }
+    return { points: out, truncated };
+  };
 
-  if (direction === "from" || direction === "both") {
-    const must: Array<Record<string, unknown>> = [
-      { is_null: { key: "superseded_by" } },
-      { key: "from_entity", match: { value: entity } },
-    ];
-    if (relationType) must.push({ key: "relation_type", match: { value: relationType } });
-    const { points, nextOffset } = await qdrant.scroll({ must } as QdrantFilter, limit);
-    results.push(...points);
-    if (nextOffset !== null) truncated = true;
-  }
-
-  if (direction === "to" || direction === "both") {
-    const must: Array<Record<string, unknown>> = [
-      { is_null: { key: "superseded_by" } },
-      { key: "to_entity", match: { value: entity } },
-    ];
-    if (relationType) must.push({ key: "relation_type", match: { value: relationType } });
-    const { points, nextOffset } = await qdrant.scroll({ must } as QdrantFilter, limit);
-    results.push(...points);
-    if (nextOffset !== null) truncated = true;
-  }
+  const perDest = await Promise.all(dests.map(async (d) => {
+    const r = await buildScrolls(clientFor(d));
+    return { name: d.name, ...r };
+  }));
 
   const seen = new Set<string>();
-  const unique = results.filter((p) => {
-    if (seen.has(p.id)) return false;
-    seen.add(p.id);
-    return true;
-  });
+  const unique = perDest.flatMap((r) => r.points.map((p) => ({ point: p, dest: r.name })))
+    .filter(({ point }) => { if (seen.has(point.id)) return false; seen.add(point.id); return true; });
+  const truncated = perDest.some((r) => r.truncated);
 
   return c.json({
-    relations: unique.map((p) => ({
+    relations: unique.map(({ point: p, dest }) => ({
       id: p.id, from: p.payload.from_entity, type: p.payload.relation_type, to: p.payload.to_entity, content: p.payload.content,
+      ...(all ? { _destination: dest } : {}),
     })),
     count: unique.length,
     truncated,
@@ -567,31 +704,37 @@ memoryRoutes.get("/relations", async (c) => {
   });
 });
 
-// GET /api/memory/graph?limit=&maxNodes=&maxEdges=&minWeight=&refresh=
+// GET /api/memory/graph?limit=&maxNodes=&maxEdges=&minWeight=&refresh=&destination=...
 memoryRoutes.get("/graph", async (c) => {
   const limit = parseLimit(c.req.query("limit"), 2000, 5000);
   const maxNodes = parseLimit(c.req.query("maxNodes") ?? c.req.query("topN"), GRAPH_DEFAULT_MAX_NODES, GRAPH_MAX_NODES_LIMIT);
   const maxEdges = parseLimit(c.req.query("maxEdges"), GRAPH_DEFAULT_MAX_EDGES, GRAPH_MAX_EDGES_LIMIT);
   const minWeight = parseLimit(c.req.query("minWeight"), GRAPH_DEFAULT_MIN_WEIGHT, GRAPH_MAX_MIN_WEIGHT);
   const refresh = c.req.query("refresh") === "true";
+  const destQuery = c.req.query("destination") || "_default";
 
-  const cacheKey = `graph:limit=${limit}:maxNodes=${maxNodes}:maxEdges=${maxEdges}:minWeight=${minWeight}`;
+  const cacheKey = `graph:dest=${destQuery}:limit=${limit}:maxNodes=${maxNodes}:maxEdges=${maxEdges}:minWeight=${minWeight}`;
   if (!refresh) {
     const hit = cacheGet<unknown>(cacheKey);
     if (hit) return c.json(hit);
   }
 
-  const qdrant = createQdrantClient();
-  const allFacts: QdrantPoint[] = [];
-  let offset: string | null = null;
+  const dests = targetsFor(c);
   const filter = buildFilter({});
-  do {
-    const { points, nextOffset } = await qdrant.scroll(filter, 100, offset);
-    allFacts.push(...points);
-    offset = nextOffset;
-  } while (offset && allFacts.length < limit);
+  const allFacts: QdrantPoint[] = [];
+  let truncated = false;
+  for (const d of dests) {
+    const qdrant = clientFor(d);
+    let offset: string | null = null;
+    const startLen = allFacts.length;
+    do {
+      const { points, nextOffset } = await qdrant.scroll(filter, 100, offset);
+      allFacts.push(...points);
+      offset = nextOffset;
+    } while (offset && (allFacts.length - startLen) < limit);
+    if (offset !== null) truncated = true;
+  }
 
-  const truncated = offset !== null;
   const factsScanned = allFacts.length;
 
   const entityStats = new Map<string, { factCount: number; categories: Set<string> }>();
@@ -695,41 +838,51 @@ memoryRoutes.get("/graph", async (c) => {
   return c.json(payload);
 });
 
-// GET /api/memory/stats?kind=...&source=...&refresh=
+// GET /api/memory/stats?kind=...&source=...&refresh=&destination=...
 memoryRoutes.get("/stats", async (c) => {
   const refresh = c.req.query("refresh") === "true";
   const kind = c.req.query("kind") || undefined;
   const source = c.req.query("source") || undefined;
   const statsFilter = { kind, source };
-  const cacheKey = `stats:kind=${kind ?? ""}:source=${source ?? ""}`;
+  const destQuery = c.req.query("destination") || "_default";
+  const cacheKey = `stats:dest=${destQuery}:kind=${kind ?? ""}:source=${source ?? ""}`;
   if (!refresh) {
     const hit = cacheGet<unknown>(cacheKey);
     if (hit) return c.json(hit);
   }
 
-  const qdrant = createQdrantClient();
+  const dests = targetsFor(c);
 
-  // Safe count — returns 0 if filter field lacks a payload index
-  const safeCount = async (filter?: QdrantFilter) => {
-    try { return await qdrant.count(filter); } catch { return 0; }
+  const perDest = await Promise.all(dests.map(async (d) => {
+    const qdrant = clientFor(d);
+    const safeCount = async (filter?: QdrantFilter) => {
+      try { return await qdrant.count(filter); } catch { return 0; }
+    };
+    const [info, catCounts, kindCounts, subtypeCounts, allCount] = await Promise.all([
+      qdrant.collectionInfo(),
+      Promise.all(CATEGORY_VALUES.map(async (cat) => [cat, await safeCount(buildFilter({ ...statsFilter, category: cat }))] as const)),
+      Promise.all(KIND_VALUES.map(async (k) => [k, await safeCount(buildFilter({ source, kind: k }))] as const)),
+      Promise.all(MEMORY_SUBTYPE_VALUES.map(async (subtype) => [subtype, await safeCount(buildFilter({ ...statsFilter, memorySubtype: subtype }))] as const)),
+      safeCount(buildFilter(statsFilter)),
+    ]);
+    return { info, catCounts, kindCounts, subtypeCounts, allCount };
+  }));
+
+  // Sum across destinations
+  const sumPairs = (lists: ReadonlyArray<readonly (readonly [string, number])[]>): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const list of lists) for (const [k, v] of list) out[k] = (out[k] ?? 0) + v;
+    return out;
   };
-
-  // All counts in one Promise.all instead of several sequential awaits.
-  const [info, catCounts, kindCounts, subtypeCounts, allCount] = await Promise.all([
-    qdrant.collectionInfo(),
-    Promise.all(CATEGORY_VALUES.map(async (cat) => [cat, await safeCount(buildFilter({ ...statsFilter, category: cat }))] as const)),
-    Promise.all(KIND_VALUES.map(async (k) => [k, await safeCount(buildFilter({ source, kind: k }))] as const)),
-    Promise.all(MEMORY_SUBTYPE_VALUES.map(async (subtype) => [subtype, await safeCount(buildFilter({ ...statsFilter, memorySubtype: subtype }))] as const)),
-    safeCount(buildFilter(statsFilter)),
-  ]);
-
+  const total = perDest.reduce((s, r) => s + r.info.points_count, 0);
+  const active = perDest.reduce((s, r) => s + r.allCount, 0);
   const payload = {
-    total: info.points_count,
-    active: allCount,
-    superseded: info.points_count - allCount,
-    byCategory: Object.fromEntries(catCounts),
-    byKind: Object.fromEntries(kindCounts),
-    bySubtype: Object.fromEntries(subtypeCounts),
+    total,
+    active,
+    superseded: total - active,
+    byCategory: sumPairs(perDest.map((r) => r.catCounts)),
+    byKind: sumPairs(perDest.map((r) => r.kindCounts)),
+    bySubtype: sumPairs(perDest.map((r) => r.subtypeCounts)),
   };
   cacheSet(cacheKey, payload, STATS_TTL_MS);
   return c.json(payload);

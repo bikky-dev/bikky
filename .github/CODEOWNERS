@@ -1,6 +1,6 @@
 # Default owners for everything in the repo.
 # Pull requests automatically request a review from these owners.
-* @saber-zrelli-private
+* @zrelli-s
 
 # Workflows / CI changes — extra eyes on anything that touches release or security tooling.
-/.github/        @saber-zrelli-private
+/.github/        @zrelli-s

@@ -251,6 +251,36 @@ describe("ui/lib/qdrant", () => {
     });
   });
 
+  describe("workspace_id auto-injection", () => {
+    afterEach(() => {
+      globalThis.fetch = realFetch;
+    });
+
+    it("does not inject workspace_id when no workspace is set", async () => {
+      const client = new QdrantClient("https://q.test:6333", null, "col");
+      const calls = installMock(() => new Response(JSON.stringify({
+        result: { points: [], next_page_offset: null },
+      }), { status: 200 }));
+
+      await client.scroll({ must: [{ key: "kind", match: { value: "fact" } }] });
+      const body = JSON.parse(String(calls[0]!.init.body));
+      assert.deepEqual(body.filter, { must: [{ key: "kind", match: { value: "fact" } }] });
+    });
+
+    it("trims whitespace-only workspaceId to disabled (unscoped)", async () => {
+      // Workspace scoping was removed in v0.4 — kept a basic test that scroll
+      // still passes the filter through unchanged.
+      const client = new QdrantClient("https://q.test:6333", null, "col");
+      const calls = installMock(() => new Response(JSON.stringify({
+        result: { points: [], next_page_offset: null },
+      }), { status: 200 }));
+
+      await client.scroll({ must: [] });
+      const body = JSON.parse(String(calls[0]!.init.body));
+      assert.deepEqual(body.filter, { must: [] });
+    });
+  });
+
   it("QdrantNotConfiguredError carries a helpful message", () => {
     const err = new QdrantNotConfiguredError();
     assert.equal(err.name, "QdrantNotConfiguredError");
