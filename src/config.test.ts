@@ -244,6 +244,13 @@ describe("config", () => {
       assert.strictEqual(cfg.identity.actor_id, null);
       assert.strictEqual(cfg.identity.actor_label, null);
     });
+
+    it("search scope defaults preserve routed single-destination behavior", () => {
+      if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
+      const cfg = loadConfig();
+      assert.deepStrictEqual(cfg.default_search_scope, "routed");
+      assert.deepStrictEqual(cfg.search_scopes, []);
+    });
   });
 
   // ── CONFIG_DEFAULTS export ────────────────────────────────────────────────
@@ -520,6 +527,43 @@ describe("config", () => {
       assert.strictEqual(cfg.identity.actor_label, "Configured Actor");
     });
 
+    it("loads default_search_scope, search_scopes, and destination descriptions", () => {
+      fs.mkdirSync(BIKKY_DIR, { recursive: true });
+      fs.writeFileSync(
+        CONFIG_PATH,
+        JSON.stringify({
+          default_search_scope: ["work", "personal"],
+          destinations: [
+            {
+              name: "work",
+              description: "Engineering memory.",
+              qdrant_url: "https://work.example",
+              collection: "bikky-work",
+            },
+            {
+              name: "personal",
+              description: "Personal memory.",
+              qdrant_url: "https://personal.example",
+              collection: "bikky-personal",
+            },
+          ],
+          search_scopes: [
+            {
+              name: "broad",
+              description: "Search both configured stores.",
+              destinations: ["work", "personal"],
+            },
+          ],
+        }),
+      );
+
+      const cfg = loadConfig();
+
+      assert.deepStrictEqual(cfg.default_search_scope, ["work", "personal"]);
+      assert.strictEqual(cfg.destinations[0]?.description, "Engineering memory.");
+      assert.strictEqual(cfg.search_scopes[0]?.name, "broad");
+    });
+
     it("env vars override file config", () => {
       fs.mkdirSync(BIKKY_DIR, { recursive: true });
       fs.writeFileSync(
@@ -586,6 +630,24 @@ describe("config", () => {
       assert.ok(issues.some((issue) => issue.path === "daemon.consolidation_enabled"));
       assert.ok(issues.some((issue) => issue.path === "daemon.relation_inference_interval_sec"));
       assert.ok(issues.some((issue) => issue.path === "daemon.entity_typing_enabled"));
+    });
+
+    it("accepts named search scopes as default_search_scope targets", () => {
+      const issues = validateConfigObject({
+        destinations: [{
+          name: "work",
+          qdrant_url: "https://work.example",
+          collection: "bikky-work",
+        }],
+        default_search_scope: "broad",
+        search_scopes: [{
+          name: "broad",
+          description: "Search work memory.",
+          destinations: ["work"],
+        }],
+      });
+
+      assert.ok(!issues.some((issue) => issue.path === "default_search_scope"));
     });
 
     it("lists active exact and provider-extra env overrides", () => {

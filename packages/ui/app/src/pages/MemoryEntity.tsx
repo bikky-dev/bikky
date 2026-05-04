@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate, Link } from "react-router";
 import { ArrowLeft, Loader2, Database, ArrowRight } from "lucide-react";
 import { apiFetch, ApiError } from "../lib/api";
+import { useDestination } from "../lib/useDestination";
 import FactCard, { type Fact } from "../components/FactCard";
 
 interface Relation {
@@ -38,6 +39,7 @@ export default function MemoryEntity() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const destination = useDestination();
 
   useEffect(() => {
     if (!name) return;
@@ -49,7 +51,7 @@ export default function MemoryEntity() {
       .then(setData)
       .catch((e) => setError(e instanceof ApiError ? e.message : "Failed to load entity"))
       .finally(() => setLoading(false));
-  }, [name]);
+  }, [name, destination]);
 
   const loadMoreFacts = async () => {
     if (!data || !data.factsNextOffset || !name) return;

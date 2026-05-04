@@ -17,29 +17,20 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { QDRANT_INDEXES } from "./taxonomy.js";
 import {
   log,
-  setQdrantUrl,
-  setQdrantApiKey,
+  rebuildPool,
+  hasPool,
   setReady,
-  setCollection,
   setSetupError,
-  ensureCollection,
+  ensureCollectionsAll,
   initEmbedding,
 } from "./api.js";
 import { registerTools } from "./tools.js";
-import { loadConfig } from "../config.js";
+import { loadConfig, getEffectiveDestinations } from "../config.js";
 
 export async function startMcpServer(): Promise<void> {
   log("INFO", `Starting bikky MCP server (PID ${process.pid})`);
 
   const cfg = loadConfig();
-
-  // Resolve credentials from config (which already merges env vars)
-  const qUrl = cfg.qdrant_url?.replace(/\/+$/, "") || null;
-  const qKey = cfg.qdrant_api_key || null;
-
-  setQdrantUrl(qUrl);
-  setQdrantApiKey(qKey);
-  setCollection(cfg.collection);
 
   // Initialize embedding provider — wrapped so an unknown provider name or
   // misconfiguration produces a setup_required status instead of crashing the
@@ -65,18 +56,39 @@ export async function startMcpServer(): Promise<void> {
     // Continue — server will report setup_required for memory tools.
   }
 
-  if (qUrl) {
+  // Build the destination pool from config. Each destination is its own
+  // QdrantClient; missing destinations leave the server in setup_required.
+  try {
+    rebuildPool();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    setSetupError(`Destination pool init failed: ${msg}`);
+    log("ERROR", `Destination pool init failed: ${msg}`);
+  }
+
+  if (hasPool()) {
     try {
-      await ensureCollection(QDRANT_INDEXES);
-      setReady(true);
-      log("INFO", `Memory system ready ✓ (Qdrant ${qKey ? "with" : "without"} api-key auth)`);
+      const results = await ensureCollectionsAll(QDRANT_INDEXES);
+      const ok = results.filter((r) => r.ok);
+      const failed = results.filter((r) => !r.ok);
+      for (const r of ok) {
+        log("INFO", `Destination '${r.destination.name}' ready ✓ (${r.destination.collection})`);
+      }
+      for (const r of failed) {
+        log("ERROR", `Destination '${r.destination.name}' failed: ${r.error}`);
+      }
+      setReady(ok.length > 0);
+      if (failed.length > 0 && ok.length === 0) {
+        setSetupError(`All destinations failed to initialize. First error: ${failed[0]?.error ?? "(none)"}`);
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setSetupError(`Qdrant initialization failed: ${msg}`);
-      log("ERROR", `Failed to initialize collection: ${msg}`);
+      log("ERROR", `Failed to initialize collections: ${msg}`);
     }
   } else {
-    log("INFO", "Memory not configured — missing: qdrant-url. Use get_setup_status + configure_credentials.");
+    const dests = getEffectiveDestinations(cfg);
+    log("INFO", `Memory not configured — no destinations (got ${dests.length}). Use get_setup_status + configure_credentials.`);
   }
 
   const mcp = new McpServer({

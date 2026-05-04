@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Search, Loader2, Database, ArrowUpDown } from "lucide-react";
 import { apiFetch } from "../lib/api";
+import { useDestination } from "../lib/useDestination";
 import { getStats, type MemoryStats as Stats } from "../lib/statsCache";
 import FactCard, { type Fact } from "../components/FactCard";
 import {
@@ -96,6 +97,7 @@ export default function Memory() {
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState("");
+  const destination = useDestination();
 
   useEffect(() => {
     let cancelled = false;
@@ -105,7 +107,7 @@ export default function Memory() {
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, []);
+  }, [destination]);
 
   const buildParams = useCallback(() => {
     const p: Record<string, string> = {};
@@ -169,7 +171,7 @@ export default function Memory() {
     fetchResults();
     setSearchParams(buildParams(), { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categories, memorySubtypes, entity, sort, since, until, browseRevision]);
+  }, [categories, memorySubtypes, entity, sort, since, until, browseRevision, destination]);
 
   const handleSearch = () => {
     setSearchParams(buildParams(), { replace: true });

@@ -11,11 +11,20 @@ import os from "node:os";
 export const BIKKY_DIR = process.env.BIKKY_HOME ?? path.join(os.homedir(), ".bikky");
 export const CONFIG_PATH = path.join(BIKKY_DIR, "config.json");
 
+export interface UIDestination {
+  name: string;
+  qdrant_url: string;
+  qdrant_api_key: string | null;
+  collection: string;
+  isDefault: boolean;
+}
+
 export interface BikkyUIConfig {
   qdrant_url: string | null;
   qdrant_api_key: string | null;
   collection: string;
-  default_workspace: string | null;
+  /** Parsed `destinations[]` from config (excluding match rules — UI doesn't route, it queries). */
+  destinations: UIDestination[];
   embedding: {
     provider: string;
     model: string;
@@ -30,7 +39,7 @@ const DEFAULTS: BikkyUIConfig = {
   qdrant_url: null,
   qdrant_api_key: null,
   collection: "bikky",
-  default_workspace: null,
+  destinations: [],
   embedding: {
     provider: "ollama",
     model: "qwen3-embedding:0.6b",
@@ -54,7 +63,17 @@ export function loadConfig(): BikkyUIConfig {
       if (raw.qdrant_url) config.qdrant_url = raw.qdrant_url as string;
       if (raw.qdrant_api_key) config.qdrant_api_key = raw.qdrant_api_key as string;
       if (raw.collection) config.collection = raw.collection as string;
-      if (typeof raw.default_workspace === "string") config.default_workspace = raw.default_workspace;
+      if (Array.isArray(raw.destinations)) {
+        config.destinations = (raw.destinations as Array<Record<string, unknown>>)
+          .filter((d) => typeof d.name === "string" && typeof d.qdrant_url === "string")
+          .map((d) => ({
+            name: d.name as string,
+            qdrant_url: (d.qdrant_url as string).replace(/\/+$/, ""),
+            qdrant_api_key: typeof d.qdrant_api_key === "string" ? (d.qdrant_api_key as string) : null,
+            collection: typeof d.collection === "string" ? (d.collection as string) : config.collection,
+            isDefault: d.default === true,
+          }));
+      }
       if (raw.embedding && typeof raw.embedding === "object") {
         const emb = raw.embedding as Record<string, unknown>;
         if (emb.provider) config.embedding.provider = emb.provider as string;
@@ -69,15 +88,10 @@ export function loadConfig(): BikkyUIConfig {
     }
   }
 
-  // Env overrides
+  // Env overrides for legacy single-Qdrant config
   if (process.env.QDRANT_URL) config.qdrant_url = process.env.QDRANT_URL;
   if (process.env.QDRANT_API_KEY) config.qdrant_api_key = process.env.QDRANT_API_KEY;
   if (process.env.BIKKY_COLLECTION) config.collection = process.env.BIKKY_COLLECTION;
-  // BIKKY_WORKSPACE overrides the configured default_workspace (mirrors MCP server).
-  if (process.env.BIKKY_WORKSPACE !== undefined) {
-    const ws = process.env.BIKKY_WORKSPACE.trim();
-    config.default_workspace = ws.length > 0 ? ws : null;
-  }
   if (process.env.EMBEDDING_PROVIDER) config.embedding.provider = process.env.EMBEDDING_PROVIDER;
   if (process.env.EMBEDDING_MODEL) config.embedding.model = process.env.EMBEDDING_MODEL;
   if (process.env.EMBEDDING_BASE_URL) config.embedding.base_url = process.env.EMBEDDING_BASE_URL;
@@ -96,17 +110,33 @@ export function loadConfig(): BikkyUIConfig {
 }
 
 /**
- * Returns the active workspace_id used to scope Qdrant queries, or undefined
- * if no workspace is configured (in which case queries see all workspaces).
- *
- * Resolution priority:
- *   1. BIKKY_WORKSPACE env var (already folded into config by loadConfig)
- *   2. config.default_workspace from ~/.bikky/config.json
- *   3. undefined (unscoped)
+ * Effective destinations list. If `destinations[]` is populated, return it.
+ * Otherwise synthesize a single fallback destination from the legacy top-level
+ * fields so single-Qdrant configs keep working.
  */
-export function getActiveWorkspace(): string | undefined {
-  const ws = loadConfig().default_workspace?.trim();
-  return ws ? ws : undefined;
+export function getEffectiveDestinations(): UIDestination[] {
+  const cfg = loadConfig();
+  if (cfg.destinations.length > 0) return cfg.destinations;
+  if (!cfg.qdrant_url) return [];
+  return [{
+    name: "default",
+    qdrant_url: cfg.qdrant_url,
+    qdrant_api_key: cfg.qdrant_api_key,
+    collection: cfg.collection,
+    isDefault: true,
+  }];
+}
+
+/** The destination used when no explicit `?destination=` is supplied. */
+export function getDefaultDestination(): UIDestination | null {
+  const dests = getEffectiveDestinations();
+  if (dests.length === 0) return null;
+  return dests.find((d) => d.isDefault) ?? dests[0]!;
+}
+
+/** Look up a destination by name. */
+export function getDestinationByName(name: string): UIDestination | null {
+  return getEffectiveDestinations().find((d) => d.name === name) ?? null;
 }
 
 /**

@@ -26,6 +26,7 @@ export interface Fact {
   episode_id?: string;
   repo?: string;
   branch?: string;
+  _destination?: string;
 }
 
 interface FactCardProps {
@@ -46,6 +47,9 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <Badge label={`Category: ${ontologyLabel(fact.category)}`} color={CATEGORY_COLORS[fact.category]} />
+        {fact._destination && (
+          <Badge label={`📍 ${fact._destination}`} color="indigo" />
+        )}
         {fact.kind && fact.kind !== "fact" && (
           <Badge label={`Kind: ${ontologyLabel(fact.kind)}`} color={KIND_COLORS[fact.kind]} />
         )}

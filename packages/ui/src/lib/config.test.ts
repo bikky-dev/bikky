@@ -11,7 +11,7 @@ import os from "node:os";
 const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-ui-config-"));
 process.env.BIKKY_HOME = TEST_BIKKY_HOME;
 
-const { loadConfig, _resetConfig, CONFIG_PATH, BIKKY_DIR, getActiveWorkspace } = await import("./config.js");
+const { loadConfig, _resetConfig, CONFIG_PATH, BIKKY_DIR, getEffectiveDestinations, getDefaultDestination, getDestinationByName } = await import("./config.js");
 
 const ENV_KEYS = [
   "QDRANT_URL",
@@ -141,40 +141,54 @@ describe("ui/lib/config", () => {
     assert.equal(a, b);
   });
 
-  describe("default_workspace", () => {
-    it("defaults to null when nothing is configured", () => {
-      const cfg = loadConfig();
-      assert.equal(cfg.default_workspace, null);
-      assert.equal(getActiveWorkspace(), undefined);
+  describe("destinations", () => {
+    it("synthesizes a single 'default' destination from legacy top-level fields", () => {
+      fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+        qdrant_url: "https://legacy.example",
+        qdrant_api_key: "k",
+        collection: "c1",
+      }));
+
+      const dests = getEffectiveDestinations();
+      assert.equal(dests.length, 1);
+      assert.equal(dests[0]!.name, "default");
+      assert.equal(dests[0]!.qdrant_url, "https://legacy.example");
+      assert.equal(getDefaultDestination()?.name, "default");
     });
 
-    it("loads default_workspace from the config file", () => {
+    it("parses destinations[] and respects default flag", () => {
       fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify({ default_workspace: "agent00" }));
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+        destinations: [
+          { name: "perso", qdrant_url: "https://perso.example", qdrant_api_key: "p", collection: "bikky" },
+          { name: "work", qdrant_url: "https://work.example/", qdrant_api_key: "w", collection: "bikky", default: true },
+        ],
+      }));
 
-      const cfg = loadConfig();
-      assert.equal(cfg.default_workspace, "agent00");
-      assert.equal(getActiveWorkspace(), "agent00");
+      const dests = getEffectiveDestinations();
+      assert.equal(dests.length, 2);
+      assert.equal(dests[1]!.qdrant_url, "https://work.example", "trailing slash stripped");
+      assert.equal(getDefaultDestination()?.name, "work");
+      assert.equal(getDestinationByName("perso")?.name, "perso");
+      assert.equal(getDestinationByName("missing"), null);
     });
 
-    it("BIKKY_WORKSPACE env overrides the config file", () => {
+    it("falls back to first destination when no default flag is set", () => {
       fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify({ default_workspace: "agent00" }));
-      process.env.BIKKY_WORKSPACE = "apate";
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+        destinations: [
+          { name: "a", qdrant_url: "https://a.example", qdrant_api_key: null, collection: "bikky" },
+          { name: "b", qdrant_url: "https://b.example", qdrant_api_key: null, collection: "bikky" },
+        ],
+      }));
 
-      const cfg = loadConfig();
-      assert.equal(cfg.default_workspace, "apate");
-      assert.equal(getActiveWorkspace(), "apate");
+      assert.equal(getDefaultDestination()?.name, "a");
     });
 
-    it("BIKKY_WORKSPACE='' clears the configured workspace (unscoped)", () => {
-      fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-      fs.writeFileSync(CONFIG_PATH, JSON.stringify({ default_workspace: "agent00" }));
-      process.env.BIKKY_WORKSPACE = "";
-
-      const cfg = loadConfig();
-      assert.equal(cfg.default_workspace, null);
-      assert.equal(getActiveWorkspace(), undefined);
+    it("returns no destinations when nothing is configured", () => {
+      assert.equal(getEffectiveDestinations().length, 0);
+      assert.equal(getDefaultDestination(), null);
     });
   });
 });

@@ -3,7 +3,7 @@
  * Ported from agent00 portal worker — adapted to use bikky config.
  */
 
-import { loadConfig, getActiveWorkspace } from "./config.js";
+import { getDefaultDestination, getDestinationByName, getEffectiveDestinations, type UIDestination } from "./config.js";
 
 // --- Types ---
 
@@ -128,42 +128,14 @@ const memorySubtypeFilterConditions = (subtypes: string[]): FilterCondition[] =>
 
 export class QdrantClient {
   private readonly apiKey: string | null;
-  private readonly workspaceId: string | null;
 
   constructor(
     private url: string,
     apiKey: string | null | undefined,
     private collection: string,
-    workspaceId?: string | null,
   ) {
     this.url = url.replace(/\/+$/, "");
     this.apiKey = apiKey || null;
-    this.workspaceId = workspaceId?.trim() || null;
-  }
-
-  /**
-   * If a workspace is active, append a workspace filter to the query's `must`
-   * clauses so every query is scoped to that workspace.
-   *
-   * Special case: when the active workspace is the literal name `"default"`,
-   * we also include legacy facts that have no `workspace_id` payload (i.e.
-   * pre-migration data captured before workspaces existed). Implemented as a
-   * nested OR sub-filter so it ANDs cleanly with any existing `should` clauses
-   * (e.g. category alias OR groups) on the parent filter.
-   */
-  private scoped(filter?: QdrantFilter): QdrantFilter | undefined {
-    if (!this.workspaceId) return filter;
-    const isDefault = this.workspaceId === "default";
-    const cond: FilterCondition = isDefault
-      ? {
-          should: [
-            { key: "workspace_id", match: { value: "default" } },
-            { is_empty: { key: "workspace_id" } },
-          ],
-        }
-      : { key: "workspace_id", match: { value: this.workspaceId } };
-    if (!filter) return { must: [cond] };
-    return { ...filter, must: [...filter.must, cond] };
   }
 
   private headers(): Record<string, string> {
@@ -185,13 +157,13 @@ export class QdrantClient {
 
   async search(vector: number[], filter?: QdrantFilter, limit = 10): Promise<QdrantPoint[]> {
     const res = await this.req<SearchResult>("POST", `/collections/${this.collection}/points/search`, {
-      vector, filter: this.scoped(filter), limit, with_payload: true,
+      vector, filter, limit, with_payload: true,
     });
     return res.result;
   }
 
   async scroll(filter: QdrantFilter, limit = 20, offset?: string | null, orderBy?: { key: string; direction: "asc" | "desc" }): Promise<{ points: QdrantPoint[]; nextOffset: string | null }> {
-    const body: Record<string, unknown> = { filter: this.scoped(filter), limit, with_payload: true };
+    const body: Record<string, unknown> = { filter, limit, with_payload: true };
     if (offset) body.offset = offset;
     if (orderBy) body.order_by = orderBy;
     const res = await this.req<ScrollResult>("POST", `/collections/${this.collection}/points/scroll`, body);
@@ -202,14 +174,7 @@ export class QdrantClient {
     const res = await this.req<{ result: QdrantPoint[] }>("POST", `/collections/${this.collection}/points`, {
       ids, with_payload: true,
     });
-    if (!this.workspaceId) return res.result;
-    const isDefault = this.workspaceId === "default";
-    // Filter by workspace post-fetch since /points doesn't accept a filter.
-    return res.result.filter((p) => {
-      const ws = (p.payload as unknown as { workspace_id?: string | null }).workspace_id;
-      if (isDefault) return ws === "default" || ws == null || ws === "";
-      return ws === this.workspaceId;
-    });
+    return res.result;
   }
 
   async upsert(id: string, vector: number[], payload: Record<string, unknown>): Promise<void> {
@@ -226,8 +191,7 @@ export class QdrantClient {
 
   async count(filter?: QdrantFilter): Promise<number> {
     const body: Record<string, unknown> = { exact: true };
-    const scoped = this.scoped(filter);
-    if (scoped) body.filter = scoped;
+    if (filter) body.filter = filter;
     const res = await this.req<CountResult>("POST", `/collections/${this.collection}/points/count`, body);
     return res.result.count;
   }
@@ -291,21 +255,48 @@ export function buildFilter(opts: {
 // --- Factory ---
 
 export function isQdrantConfigured(): boolean {
-  const cfg = loadConfig();
-  return Boolean(cfg.qdrant_url);
+  return getEffectiveDestinations().length > 0;
 }
 
-export function createQdrantClient(): QdrantClient {
-  const cfg = loadConfig();
-  if (!cfg.qdrant_url) {
-    throw new QdrantNotConfiguredError();
+/**
+ * Create a Qdrant client for a specific destination.
+ *
+ * - Pass a destination name to target it explicitly.
+ * - Pass `undefined` to use the default destination.
+ * Throws QdrantNotConfiguredError if the requested destination doesn't exist
+ * (or no destinations are configured at all).
+ */
+export function createQdrantClient(destinationName?: string): QdrantClient {
+  const dest = destinationName
+    ? getDestinationByName(destinationName)
+    : getDefaultDestination();
+  if (!dest) {
+    throw new QdrantNotConfiguredError(destinationName);
   }
-  return new QdrantClient(cfg.qdrant_url, cfg.qdrant_api_key, cfg.collection, getActiveWorkspace());
+  return new QdrantClient(dest.qdrant_url, dest.qdrant_api_key, dest.collection);
+}
+
+/** Resolve the destinations targeted by a request. `"all"` → every destination. */
+export function resolveTargetDestinations(destinationName: string | undefined): UIDestination[] {
+  const all = getEffectiveDestinations();
+  if (all.length === 0) throw new QdrantNotConfiguredError();
+  if (!destinationName) {
+    const def = getDefaultDestination();
+    return def ? [def] : [];
+  }
+  if (destinationName === "all") return all;
+  const dest = getDestinationByName(destinationName);
+  if (!dest) throw new QdrantNotConfiguredError(destinationName);
+  return [dest];
 }
 
 export class QdrantNotConfiguredError extends Error {
-  constructor() {
-    super("Qdrant not configured. Run `bikky setup` first.");
+  constructor(destinationName?: string) {
+    super(
+      destinationName
+        ? `Qdrant destination '${destinationName}' is not configured.`
+        : "Qdrant not configured. Run `bikky setup` first.",
+    );
     this.name = "QdrantNotConfiguredError";
   }
 }

@@ -5,7 +5,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import crypto from "node:crypto";
 import { z } from "zod";
-import type { McpToolResult, QdrantFilter, QdrantPoint } from "./types.js";
+import type { FactPayload, McpToolResult, QdrantFilter, QdrantPoint } from "./types.js";
 import {
   STALENESS_DAYS,
   THRESHOLD_DUPLICATE,
@@ -44,25 +44,34 @@ import {
 } from "./helpers.js";
 import {
   ready,
-  qdrantUrl,
-  qdrantApiKey,
   setupError,
-  setQdrantUrl,
-  setQdrantApiKey,
   setReady,
-  getCollection,
   log,
   embed,
   getEmbeddingConfig,
   qdrantReq,
-  ensureCollection,
+  ensureCollectionsAll,
   qdrantUpsert,
   qdrantSearch,
   qdrantScroll,
   qdrantSetPayload,
   qdrantGetPoints,
+  rebuildPool,
+  hasPool,
+  listDestinations,
+  resolveDest,
+  findPointById,
 } from "./api.js";
+import { DestinationNotFoundError, type RoutingInput } from "../routing.js";
+import type { Destination } from "../config.js";
 import { saveConfig, loadConfig, EXTRACTION_HEALTH_PATH } from "../config.js";
+import {
+  availableSearchScopes,
+  resolveSearchScope,
+  SearchScopeNotFoundError,
+  type ResolvedSearchScope,
+  type SearchScopeInput,
+} from "../search-scope.js";
 import { existsSync, readFileSync } from "node:fs";
 import { inspectWatcherPaths, formatIssue, repairSuspiciousWatcherPaths } from "../daemon/watcher-health.js";
 import { normalizeActorId, resolveActorIdentity, type ActorIdentity } from "../provenance/actor.js";
@@ -79,6 +88,7 @@ import {
 const NUDGE_INTERVAL_MS = 10 * 60 * 1000;
 const MEMORY_RECALL_DEFAULT_LIMIT = 10;
 const MEMORY_RECALL_MAX_LIMIT = 50;
+const searchScopeSchema = z.union([z.string(), z.array(z.string())]).optional();
 let lastStoreTime = Date.now();
 let heartbeatCount = 0;
 
@@ -94,39 +104,124 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
-interface WorkspaceScope {
-  workspaceId?: string;
-  actorId?: string;
-  includeLegacy: boolean;
-}
-
-export function resolveScope(workspaceId?: string, includeLegacyWorkspace = false, actorId?: string): WorkspaceScope {
-  const resolved = workspaceId?.trim()
-    || process.env.BIKKY_WORKSPACE?.trim()
-    || loadConfig().default_workspace?.trim()
-    || undefined;
-  // The literal "default" workspace also includes legacy facts that have no
-  // workspace_id payload (pre-migration data). Any other named workspace stays
-  // strict. An explicit includeLegacyWorkspace=true from the caller still wins.
-  const isDefault = resolved === "default";
+// Build a RoutingInput from the standard memory-tool fields.
+function routingInput(args: {
+  destination?: string;
+  content?: string;
+  entities?: string[];
+  metadata?: Record<string, string>;
+}): RoutingInput {
   return {
-    workspaceId: resolved,
-    actorId: normalizeActorId(actorId),
-    includeLegacy: includeLegacyWorkspace || isDefault,
+    destination: args.destination,
+    cwd: process.cwd(),
+    content: args.content,
+    entities: args.entities,
+    metadata: args.metadata,
   };
 }
 
-function scopedFilter(scope: WorkspaceScope, extra: Parameters<typeof buildFilter>[0] = {}): QdrantFilter | undefined {
-  return buildFilter({
-    ...extra,
-    workspace_id: scope.workspaceId,
-    includeLegacyWorkspace: scope.includeLegacy,
-  });
+// Resolve a destination from a routing input, returning either the destination
+// or an MCP error result if the override is invalid / no destinations exist.
+function resolveDestOrError(input: RoutingInput): { dest: Destination; error?: never } | { dest?: never; error: McpToolResult } {
+  try {
+    return { dest: resolveDest(input) };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (e instanceof DestinationNotFoundError) {
+      return {
+        error: {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "destination_not_found",
+            message: msg,
+            available_destinations: listDestinations().map((d) => d.name),
+          }, null, 2) }],
+          isError: true,
+        },
+      };
+    }
+    return {
+      error: {
+        content: [{ type: "text", text: JSON.stringify({ status: "error", message: msg }, null, 2) }],
+        isError: true,
+      },
+    };
+  }
 }
 
-function addWorkspacePayload(payload: Record<string, unknown>, scope: WorkspaceScope, actor?: ActorIdentity): void {
-  if (scope.workspaceId) payload["workspace_id"] = scope.workspaceId;
-  const actorId = actor?.actor_id ?? scope.actorId;
+type ScopedPoint = QdrantPoint & {
+  _destination: Destination;
+  _combinedScore?: number;
+};
+
+function withDestination(point: QdrantPoint, destination: Destination): ScopedPoint {
+  return { ...point, _destination: destination };
+}
+
+function structuredScopedFact(point: ScopedPoint): ReturnType<typeof structuredFact> & { destination: string } {
+  return {
+    ...structuredFact(point),
+    destination: point._destination.name,
+  };
+}
+
+function formatScopedFact(point: ScopedPoint, includeDestination: boolean): string {
+  const formatted = formatFact(point);
+  return includeDestination ? `[${point._destination.name}] ${formatted}` : formatted;
+}
+
+function resolveSearchScopeOrError(args: {
+  destination?: string;
+  search_scope?: SearchScopeInput;
+  input: RoutingInput;
+}): { scope: ResolvedSearchScope; error?: never } | { scope?: never; error: McpToolResult } {
+  if (args.destination && args.search_scope !== undefined) {
+    return {
+      error: {
+        content: [{ type: "text", text: JSON.stringify({
+          status: "ambiguous_search_scope",
+          message: "Use either destination for a single destination override or search_scope for routed/all/list search, not both.",
+        }, null, 2) }],
+        isError: true,
+      },
+    };
+  }
+
+  if (args.destination) {
+    const resolved = resolveDestOrError({ ...args.input, destination: args.destination });
+    if (resolved.error) return { error: resolved.error };
+    return {
+      scope: {
+        name: resolved.dest.name,
+        description: resolved.dest.description ?? `Search only the '${resolved.dest.name}' destination.`,
+        requested: resolved.dest.name,
+        destinations: [resolved.dest],
+      },
+    };
+  }
+
+  const cfg = loadConfig();
+  const dests = listDestinations();
+  try {
+    return { scope: resolveSearchScope(args.search_scope, cfg, dests, args.input) };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return {
+      error: {
+        content: [{ type: "text", text: JSON.stringify({
+          status: e instanceof SearchScopeNotFoundError ? "search_scope_not_found" : "search_scope_error",
+          message: msg,
+          available_search_scopes: availableSearchScopes(cfg, dests),
+        }, null, 2) }],
+        isError: true,
+      },
+    };
+  }
+}
+
+// Add actor identity payload fields. Workspace was removed in v0.4.0 — physical
+// separation now happens via routing destinations (see routing.ts).
+function addActorPayload(payload: Record<string, unknown>, actor?: ActorIdentity, actorIdOverride?: string): void {
+  const actorId = actor?.actor_id ?? normalizeActorId(actorIdOverride);
   if (actorId) payload["actor_id"] = actorId;
   if (actor?.actor_label) {
     const metadata = payload["metadata"] && typeof payload["metadata"] === "object" && !Array.isArray(payload["metadata"])
@@ -138,8 +233,8 @@ function addWorkspacePayload(payload: Record<string, unknown>, scope: WorkspaceS
   }
 }
 
-async function getPointForWorkspaceWrite(factId: string, _scope: WorkspaceScope): Promise<{ point?: QdrantPoint; error?: Record<string, unknown> }> {
-  const existing = await qdrantGetPoints([factId]);
+async function getPointForWrite(dest: Destination, factId: string): Promise<{ point?: QdrantPoint; error?: Record<string, unknown> }> {
+  const existing = await qdrantGetPoints(dest, [factId]);
   const point = existing.result?.[0];
   if (!point) {
     return { error: { status: "not_found", fact_id: factId } };
@@ -147,10 +242,26 @@ async function getPointForWorkspaceWrite(factId: string, _scope: WorkspaceScope)
   return { point };
 }
 
+// Locate which destination owns a fact ID (fan-out across pool). Used by
+// ID-based ops where the caller doesn't know upfront which destination holds
+// the point (memory_forget, memory_verify, memory_report_outcome, etc.).
+async function locatePoint(factId: string): Promise<{ dest: Destination; point: QdrantPoint } | null> {
+  const found = await findPointById(factId);
+  if (!found) return null;
+  return { dest: found.destination, point: found.point };
+}
+
+function notFoundResult(factId: string): McpToolResult {
+  return {
+    content: [{ type: "text", text: JSON.stringify({ status: "not_found", fact_id: factId }, null, 2) }],
+    isError: true,
+  };
+}
+
 function requireReady(): McpToolResult | null {
   if (!ready) {
     const missing: string[] = [];
-    if (!qdrantUrl) missing.push("qdrant-url");
+    if (!hasPool()) missing.push("destinations");
     return {
       content: [{
         type: "text",
@@ -158,9 +269,6 @@ function requireReady(): McpToolResult | null {
           status: "setup_required",
           ready: false,
           missing,
-          // Surface the underlying init failure (embedding / Qdrant) when
-          // present so users see an actionable reason instead of a generic
-          // "setup required" message.
           ...(setupError ? { setup_error: setupError } : {}),
           setup_instructions:
             "Memory is not configured. Run `bikky setup` or call configure_credentials:\n" +
@@ -205,7 +313,7 @@ interface GraphTraversalResult {
 /**
  * Entity-graph traversal for memory_recall.
  */
-async function graphTraversal(primaryResults: QdrantPoint[], limit: number, scope: WorkspaceScope): Promise<GraphTraversalResult> {
+async function graphTraversal(dest: Destination, primaryResults: QdrantPoint[], limit: number): Promise<GraphTraversalResult> {
   try {
     const primaryEntities = new Set<string>();
     const primaryIds = new Set<string>();
@@ -220,17 +328,17 @@ async function graphTraversal(primaryResults: QdrantPoint[], limit: number, scop
 
     const relatedEntities = new Set<string>();
     for (const entity of primaryEntities) {
-      const outgoingFilter: QdrantFilter = scopedFilter(scope, { excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS }) ?? { must: [] };
+      const outgoingFilter: QdrantFilter = buildFilter({ excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS }) ?? { must: [] };
       outgoingFilter.must.push({ key: "from_entity", match: { value: entity } });
-      const outgoing = await qdrantScroll(outgoingFilter, 10).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
+      const outgoing = await qdrantScroll(dest, outgoingFilter, 10).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
 
       for (const pt of (outgoing.result?.points ?? [])) {
         if (pt.payload.to_entity) relatedEntities.add(pt.payload.to_entity);
       }
 
-      const incomingFilter: QdrantFilter = scopedFilter(scope, { excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS }) ?? { must: [] };
+      const incomingFilter: QdrantFilter = buildFilter({ excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS }) ?? { must: [] };
       incomingFilter.must.push({ key: "to_entity", match: { value: entity } });
-      const incoming = await qdrantScroll(incomingFilter, 10).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
+      const incoming = await qdrantScroll(dest, incomingFilter, 10).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
 
       for (const pt of (incoming.result?.points ?? [])) {
         if (pt.payload.from_entity) relatedEntities.add(pt.payload.from_entity);
@@ -243,9 +351,9 @@ async function graphTraversal(primaryResults: QdrantPoint[], limit: number, scop
     const relatedFacts: QdrantPoint[] = [];
     const maxPerEntity = Math.max(2, Math.floor(limit / relatedEntities.size));
     for (const entity of relatedEntities) {
-      const filter: QdrantFilter = scopedFilter(scope, { excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS }) ?? { must: [] };
+      const filter: QdrantFilter = buildFilter({ excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS }) ?? { must: [] };
       filter.must.push({ key: "entities", match: { value: entity } });
-      const result = await qdrantScroll(filter, maxPerEntity).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
+      const result = await qdrantScroll(dest, filter, maxPerEntity).catch(() => ({ result: { points: [] as QdrantPoint[] } }));
 
       for (const pt of (result.result?.points ?? [])) {
         if (!primaryIds.has(pt.id)) {
@@ -279,32 +387,51 @@ export function registerTools(mcp: McpServer): void {
     ].join(" "),
     {},
     async (): Promise<McpToolResult> => {
-      const activeWorkspace = process.env.BIKKY_WORKSPACE?.trim()
-        || loadConfig().default_workspace?.trim()
-        || null;
+      const cfg = loadConfig();
+      const dests = listDestinations();
       const status: Record<string, unknown> = {
         ready,
-        qdrant_url: !!qdrantUrl,
-        qdrant_api_key: !!qdrantApiKey,
+        destinations_configured: dests.length,
         missing: [] as string[],
-        qdrant_connected: false,
         embedding_connected: false,
         embedding_provider: getEmbeddingConfig().provider,
         embedding_model: getEmbeddingConfig().model,
         embedding_dimensions: getEmbeddingConfig().dimensions,
-        ...(activeWorkspace ? { active_workspace: activeWorkspace } : {}),
         ...(setupError ? { setup_error: setupError } : {}),
       };
       const missing = status["missing"] as string[];
-      if (!qdrantUrl) missing.push("qdrant-url");
-      // qdrant-api-key is optional (local / self-hosted Qdrant doesn't need it).
+      if (dests.length === 0) missing.push("destinations");
 
-      if (qdrantUrl) {
+      // Per-destination health
+      const destStatus: Array<Record<string, unknown>> = [];
+      for (const d of dests) {
+        const block: Record<string, unknown> = {
+          name: d.name,
+          qdrant_url_host: (() => { try { return new URL(d.qdrant_url).host; } catch { return d.qdrant_url; } })(),
+          collection: d.collection,
+          default: d.default ?? false,
+          ...(d.description ? { description: d.description } : {}),
+          connected: false,
+          collection_exists: false,
+        };
         try {
-          await qdrantReq<unknown>("GET", "/collections");
-          status["qdrant_connected"] = true;
+          await qdrantReq<unknown>(d, "GET", "/collections");
+          block["connected"] = true;
+        } catch (e) {
+          block["last_error"] = e instanceof Error ? e.message : String(e);
+        }
+        try {
+          await qdrantReq<unknown>(d, "GET", `/collections/${d.collection}`);
+          block["collection_exists"] = true;
         } catch { /* ignore */ }
+        destStatus.push(block);
       }
+      status["destinations"] = destStatus;
+      status["default_search_scope"] = cfg.default_search_scope;
+      status["search_scopes"] = availableSearchScopes(cfg, dests);
+      status["search_scope_hint"] =
+        "Read/search tools accept search_scope: 'routed', 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Use destination only when you want an exact single-destination override.";
+
       try {
         await embed("test");
         status["embedding_connected"] = true;
@@ -313,7 +440,6 @@ export function registerTools(mcp: McpServer): void {
       // Watcher / extraction health (issue #58)
       const warnings: string[] = [];
       try {
-        const cfg = loadConfig();
         status["watcher_path"] = cfg.watchers.copilot.path;
         for (const issue of inspectWatcherPaths(cfg)) {
           warnings.push(formatIssue(issue));
@@ -365,6 +491,32 @@ export function registerTools(mcp: McpServer): void {
     },
   );
 
+  // ── memory_search_scopes ─────────────────────────────────────────────────
+
+  mcp.tool(
+    "memory_search_scopes",
+    [
+      "List the configured memory search scopes and destination descriptions.",
+      "Use this before memory_recall, memory_entity, or memory_relations when multiple destinations exist so you can choose the right search_scope.",
+      "Read-only — returns built-in scopes ('routed', 'all'), destination-name scopes, configured named scopes, and the default_search_scope.",
+    ].join(" "),
+    {},
+    async (): Promise<McpToolResult> => {
+      const cfg = loadConfig();
+      const dests = listDestinations();
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          default_search_scope: cfg.default_search_scope,
+          scopes: availableSearchScopes(cfg, dests),
+          usage: {
+            search_scope: "Pass one scope name, 'routed', 'all', a destination name, a comma-separated destination list, or an array of destination names.",
+            destination: "Use this older parameter only for an exact single-destination override. Do not combine it with search_scope.",
+          },
+        }, null, 2) }],
+      };
+    },
+  );
+
   // ── configure_credentials ───────────────────────────────────────────────
 
   mcp.tool(
@@ -385,13 +537,11 @@ export function registerTools(mcp: McpServer): void {
       if (qdrant_url) {
         const url = qdrant_url.replace(/\/+$/, "");
         cfg.qdrant_url = url;
-        setQdrantUrl(url);
         results["qdrant_url"] = "stored ✓";
       }
 
       if (qdrant_api_key) {
         cfg.qdrant_api_key = qdrant_api_key;
-        setQdrantApiKey(qdrant_api_key);
         results["qdrant_api_key"] = "stored ✓";
       }
 
@@ -408,13 +558,22 @@ export function registerTools(mcp: McpServer): void {
 
       saveConfig(cfg);
 
-      if (qdrantUrl) {
-        try {
-          await ensureCollection(QDRANT_INDEXES);
-          results["qdrant_collection"] = `'${getCollection()}' ready ✓`;
-        } catch (e) {
-          results["qdrant_collection"] = `error: ${e instanceof Error ? e.message : String(e)}`;
-        }
+      // Rebuild the destination pool from the updated config so the
+      // synthesized default destination picks up the new url/key.
+      try {
+        rebuildPool();
+      } catch (e) {
+        results["pool_rebuild"] = `error: ${e instanceof Error ? e.message : String(e)}`;
+      }
+
+      if (hasPool()) {
+        const ensured = await ensureCollectionsAll(QDRANT_INDEXES);
+        results["destinations"] = ensured.map((r) => ({
+          name: r.destination.name,
+          collection: r.destination.collection,
+          ok: r.ok,
+          ...(r.error ? { error: r.error } : {}),
+        }));
       }
 
       try {
@@ -425,7 +584,7 @@ export function registerTools(mcp: McpServer): void {
         results["embedding"] = `error: ${e instanceof Error ? e.message : String(e)}`;
       }
 
-      setReady(!!qdrantUrl);
+      setReady(hasPool());
       results["ready"] = ready;
 
       return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
@@ -443,20 +602,30 @@ export function registerTools(mcp: McpServer): void {
     ].join(" "),
     {},
     async (): Promise<McpToolResult> => {
-      const results: Record<string, unknown> = { qdrant: false, embedding: false, collection: false };
+      const results: Record<string, unknown> = { embedding: false };
 
-      if (qdrantUrl) {
+      const dests = listDestinations();
+      const destResults: Array<Record<string, unknown>> = [];
+      for (const d of dests) {
+        const block: Record<string, unknown> = {
+          name: d.name,
+          collection: d.collection,
+          qdrant: false,
+          collection_exists: false,
+        };
         try {
-          await qdrantReq<unknown>("GET", "/collections");
-          results["qdrant"] = true;
+          await qdrantReq<unknown>(d, "GET", "/collections");
+          block["qdrant"] = true;
         } catch (e) {
-          results["qdrant_error"] = e instanceof Error ? e.message : String(e);
+          block["qdrant_error"] = e instanceof Error ? e.message : String(e);
         }
         try {
-          await qdrantReq<unknown>("GET", `/collections/${getCollection()}`);
-          results["collection"] = true;
+          await qdrantReq<unknown>(d, "GET", `/collections/${d.collection}`);
+          block["collection_exists"] = true;
         } catch { /* ignore */ }
+        destResults.push(block);
       }
+      results["destinations"] = destResults;
 
       try {
         await embed("connection test");
@@ -465,7 +634,8 @@ export function registerTools(mcp: McpServer): void {
         results["embedding_error"] = e instanceof Error ? e.message : String(e);
       }
 
-      const allReady = results["qdrant"] === true && results["embedding"] === true && results["collection"] === true;
+      const allReady = results["embedding"] === true && destResults.length > 0
+        && destResults.every((b) => b["qdrant"] === true && b["collection_exists"] === true);
       results["ready"] = allReady;
       setReady(allReady);
 
@@ -495,8 +665,9 @@ export function registerTools(mcp: McpServer): void {
       domain: z.enum(domainValues()).default(DEFAULT_DOMAIN).describe(domainEnumDescription()),
       kind: z.enum(kindValues()).default(DEFAULT_KIND).describe(kindEnumDescription()),
       memory_subtype: z.enum(memorySubtypeValues()).optional().describe(memorySubtypeEnumDescription()),
-      workspace_id: z.string().optional().describe(
-        "Workspace namespace for team-shared memory. Omit to use the default workspace from config.",
+      workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op. Routing now uses destinations — see destination."),
+      destination: z.string().optional().describe(
+        "Optional destination override. When set, routes to that destination by name. Hard-errors if no such destination exists. Omit to let routing rules in ~/.bikky/config.json decide based on cwd/entities/content/metadata.",
       ),
       actor_id: z.string().optional().describe(
         "Stable actor/person/agent identity associated with this capture. Overrides identity config/env/Git-derived fallback for this write.",
@@ -541,7 +712,8 @@ export function registerTools(mcp: McpServer): void {
       domain,
       kind,
       memory_subtype,
-      workspace_id,
+      workspace_id: _workspace_id,
+      destination,
       actor_id,
       episode_id,
       workstream_key,
@@ -560,7 +732,14 @@ export function registerTools(mcp: McpServer): void {
       if (guard) return guard;
       lastStoreTime = Date.now();
       const now = nowISO();
-      const scope = resolveScope(workspace_id);
+      const resolved = resolveDestOrError(routingInput({
+        destination,
+        content,
+        entities,
+        metadata,
+      }));
+      if (resolved.error) return resolved.error;
+      const dest = resolved.dest;
       const actor = resolveActorIdentity({ actorId: actor_id, config: loadConfig() });
       const normalizedKind = normalizeKind(kind);
       let normalizedSubtype: string | null = null;
@@ -606,14 +785,14 @@ export function registerTools(mcp: McpServer): void {
 
       // 1. Exact dedup via content hash
       try {
-        const hashFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+        const hashFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
         hashFilter.must.push({ key: "content_hash", match: { value: hash } });
-        const existing = await qdrantScroll(hashFilter, 1);
+        const existing = await qdrantScroll(dest, hashFilter, 1);
         const existingPoint = existing.result?.points?.[0];
         if (existingPoint) {
           const point = existingPoint;
           const count = (point.payload.reinforcement_count || 1) + 1;
-          await qdrantSetPayload([point.id], {
+          await qdrantSetPayload(dest, [point.id], {
             reinforcement_count: count,
             last_reinforced_at: now,
             updated_at: now,
@@ -638,12 +817,12 @@ export function registerTools(mcp: McpServer): void {
       let similarFacts: Array<{ id: string; content: string; score: number }> = [];
       let potentialConflicts: Array<{ id: string; content: string; category: string; similarity: number; shared_entities: string[] }> = [];
       try {
-        const filter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+        const filter: QdrantFilter = buildFilter({}) ?? { must: [] };
         if (normalizedEntities.length > 0) {
           filter.must.push({ key: "entities", match: { any: normalizedEntities } });
         }
 
-        const results = await qdrantSearch(vector, filter, 3);
+        const results = await qdrantSearch(dest, vector, filter, 3);
         const firstResult = results.result?.[0];
         if (results.result?.length > 0 && firstResult) {
           const topScore = firstResult.score ?? 0;
@@ -651,7 +830,7 @@ export function registerTools(mcp: McpServer): void {
           if (topScore > THRESHOLD_DUPLICATE) {
             const point = firstResult;
             const count = (point.payload.reinforcement_count || 1) + 1;
-            await qdrantSetPayload([point.id], {
+            await qdrantSetPayload(dest, [point.id], {
               reinforcement_count: count,
               last_reinforced_at: now,
               updated_at: now,
@@ -703,11 +882,11 @@ export function registerTools(mcp: McpServer): void {
       // 5. Supersede old fact if requested
       if (supersedes) {
         try {
-          const existing = await getPointForWorkspaceWrite(supersedes, scope);
+          const existing = await getPointForWrite(dest, supersedes);
           if (existing.error) {
             return { content: [{ type: "text", text: JSON.stringify(existing.error, null, 2) }], isError: true };
           }
-          await qdrantSetPayload([supersedes], {
+          await qdrantSetPayload(dest, [supersedes], {
             superseded_by: factId,
             superseded_at: now,
           });
@@ -749,9 +928,9 @@ export function registerTools(mcp: McpServer): void {
         payload["metadata"] = metadata;
       }
       if (review_status) payload["review_status"] = review_status;
-      addWorkspacePayload(payload, scope, actor);
+      addActorPayload(payload, actor);
       addRedactionPayload(payload, factRedactionSummary);
-      await qdrantUpsert(factId, vector, payload);
+      await qdrantUpsert(dest, factId, vector, payload);
 
       // 7. Insert relation point if provided
       let relationId: string | null = null;
@@ -779,15 +958,15 @@ export function registerTools(mcp: McpServer): void {
           relation_type: sanitizedRelation.type.toLowerCase(),
           to_entity: sanitizedRelation.to.toLowerCase(),
         };
-        addWorkspacePayload(relPayload, scope, actor);
+        addActorPayload(relPayload, actor);
         addRedactionPayload(relPayload, relationRedactionSummary);
-        await qdrantUpsert(relationId, relVector, relPayload);
+        await qdrantUpsert(dest, relationId, relVector, relPayload);
       }
 
       const result: Record<string, unknown> = {
         action: "inserted",
         fact_id: factId,
-        workspace_id: scope.workspaceId,
+        destination: dest.name,
       };
       if (actor.actor_id) result["actor_id"] = actor.actor_id;
       if (relationId) result["relation_id"] = relationId;
@@ -816,6 +995,7 @@ export function registerTools(mcp: McpServer): void {
       "  3. Conflict/replacement check — recall similar facts when you suspect new information may supersede an older fact. Deduplication during memory_store is automatic.",
       "Combine the natural-language query with structured filters (category, domain, entity, date range, metadata) for tighter results.",
       "If you have a known entity name and want everything about it, prefer memory_entity. For 'what does X own/use?' style questions, prefer memory_relations.",
+      "When multiple Qdrant destinations are configured, use search_scope to choose 'routed' (routing/default behavior), 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Call memory_search_scopes to inspect available scopes and descriptions.",
       `By default output is human-readable text. Use output_format=json for machine-parseable results with separate results and related arrays. Default limit is ${MEMORY_RECALL_DEFAULT_LIMIT}; maximum effective limit is ${MEMORY_RECALL_MAX_LIMIT}.`,
     ].join("\n"),
     {
@@ -834,15 +1014,17 @@ export function registerTools(mcp: McpServer): void {
       memory_subtype: z.string().optional().describe(
         "Filter by memory subtype (must be valid for the chosen kind). Optional.",
       ),
-      workspace_id: z.string().optional().describe(
-        "Filter to facts in this workspace namespace. Omit to use the default workspace from config.",
+      workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
+      destination: z.string().optional().describe(
+        "Optional legacy single-destination override. Do not combine with search_scope. Prefer search_scope for routed/all/list search.",
+      ),
+      search_scope: searchScopeSchema.describe(
+        "Optional read/search scope. Accepts 'routed', 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Omit to use config.default_search_scope.",
       ),
       actor_id: z.string().optional().describe(
         "Filter to facts captured by or associated with this stable actor identity. Optional.",
       ),
-      include_legacy_workspace: z.boolean().optional().describe(
-        "Backwards-compatibility flag: also include legacy facts that have no workspace_id. Default false. Only set this if you suspect pre-migration data is missing from results.",
-      ),
+      include_legacy_workspace: z.boolean().optional().describe("[Removed in v0.4.0] No-op."),
       entity: z.string().optional().describe(
         "Restrict to facts mentioning this entity (case-insensitive). For full entity context prefer memory_entity.",
       ),
@@ -875,9 +1057,11 @@ export function registerTools(mcp: McpServer): void {
       domain,
       kind,
       memory_subtype,
-      workspace_id,
+      workspace_id: _workspace_id,
+      destination,
+      search_scope,
       actor_id,
-      include_legacy_workspace,
+      include_legacy_workspace: _include_legacy_workspace,
       entity,
       episode_id,
       workstream_key,
@@ -897,7 +1081,17 @@ export function registerTools(mcp: McpServer): void {
       const requestedLimit = limit ?? MEMORY_RECALL_DEFAULT_LIMIT;
       const effectiveLimit = clampRecallLimit(limit);
       const actorFilter = resolveActorIdentity({ actorId: actor_id, useGitFallback: false });
-      const scope = resolveScope(workspace_id, include_legacy_workspace, actorFilter.actor_id);
+      const scopeResolved = resolveSearchScopeOrError({
+        destination,
+        search_scope,
+        input: routingInput({
+          content: query,
+          entities: entity ? [entity] : [],
+          metadata: metadata_filter,
+        }),
+      });
+      if (scopeResolved.error) return scopeResolved.error;
+      const searchScope = scopeResolved.scope;
       const redactedQuery = redactStorageText(query);
       const vector = await embed(redactedQuery.text);
       const normalizedKind = kind ? normalizeKind(kind) : undefined;
@@ -912,11 +1106,12 @@ export function registerTools(mcp: McpServer): void {
           };
         }
       }
-      const filter = scopedFilter(scope, {
+      const filter = buildFilter({
         category: category ? normalizeCategory(category) : undefined,
         domain: domain ? normalizeDomain(domain) : undefined,
         kind: normalizedKind,
         memory_subtype: normalizedSubtype,
+        actor_id: actorFilter.actor_id,
         entity,
         episode_id,
         workstream_key,
@@ -929,13 +1124,43 @@ export function registerTools(mcp: McpServer): void {
         metadata: metadata_filter,
         excludeKinds: MEMORY_RECALL_EXCLUDED_KINDS,
       });
-      const results = await qdrantSearch(vector, filter, effectiveLimit * 2);
+      const searchedDestinations = searchScope.destinations.map((dest) => dest.name);
+      const failedDestinations: Array<{ destination: string; error: string }> = [];
+      const scopedResults: ScopedPoint[] = [];
+      for (const dest of searchScope.destinations) {
+        try {
+          const results = await qdrantSearch(dest, vector, filter, effectiveLimit * 2);
+          scopedResults.push(...(results.result ?? []).map((point) => withDestination(point, dest)));
+        } catch (e) {
+          failedDestinations.push({
+            destination: dest.name,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
 
-      if (!results.result?.length) {
+      if (failedDestinations.length === searchScope.destinations.length && searchScope.destinations.length > 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "search_failed",
+            query: redactedQuery.text,
+            search_scope: searchScope.name,
+            searched_destinations: searchedDestinations,
+            failed_destinations: failedDestinations,
+          }, null, 2) }],
+          isError: true,
+        };
+      }
+
+      if (scopedResults.length === 0) {
         const nudge = buildMemoryNudge();
         if (output_format === "json") {
           return { content: [{ type: "text", text: JSON.stringify({
             query: redactedQuery.text,
+            search_scope: searchScope.name,
+            search_scope_description: searchScope.description,
+            searched_destinations: searchedDestinations,
+            failed_destinations: failedDestinations,
             requested_limit: requestedLimit,
             effective_limit: effectiveLimit,
             max_limit: MEMORY_RECALL_MAX_LIMIT,
@@ -949,33 +1174,63 @@ export function registerTools(mcp: McpServer): void {
             ...(redactedQuery.redacted ? { query_redaction: redactedQuery } : {}),
           }, null, 2) }] };
         }
-        const text = nudge ? `No matching facts found.\n\n${nudge}` : "No matching facts found.";
+        const warning = failedDestinations.length > 0
+          ? `\n\nSearch warnings: ${failedDestinations.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")}`
+          : "";
+        const text = nudge
+          ? `No matching facts found.${warning}\n\n${nudge}`
+          : `No matching facts found.${warning}`;
         return { content: [{ type: "text", text }] };
       }
 
-      const ranked = results.result
+      const ranked = scopedResults
         .map((r) => ({ ...r, _combinedScore: computeCombinedScore(r) }))
         .sort((a, b) => b._combinedScore - a._combinedScore)
         .slice(0, effectiveLimit);
 
-      const lines = ranked.map((r) => formatFact(r));
-      let related: GraphTraversalResult = { points: [] };
+      const includeDestination = searchScope.destinations.length > 1 || searchScope.name === "all";
+      const lines = ranked.map((r) => formatScopedFact(r, includeDestination));
+      const related: { points: ScopedPoint[]; errors: Array<{ destination: string; error: string }> } = { points: [], errors: [] };
 
       if ((graph_depth ?? 0) >= 1) {
-        related = await graphTraversal(ranked, effectiveLimit, scope);
+        const byDestination = new Map<string, { dest: Destination; points: QdrantPoint[] }>();
+        for (const point of ranked) {
+          const existing = byDestination.get(point._destination.name);
+          if (existing) {
+            existing.points.push(point);
+          } else {
+            byDestination.set(point._destination.name, { dest: point._destination, points: [point] });
+          }
+        }
+        for (const entry of byDestination.values()) {
+          const traversal = await graphTraversal(entry.dest, entry.points, effectiveLimit);
+          related.points.push(...traversal.points.map((point) => withDestination(point, entry.dest)));
+          if (traversal.error) {
+            related.errors.push({ destination: entry.dest.name, error: traversal.error });
+          }
+        }
+        related.points = related.points.slice(0, Math.ceil(effectiveLimit / 2));
         if (related.points.length > 0) {
           lines.push("", "── Related (1-hop) ──");
-          lines.push(...related.points.map((r) => formatFact(r)));
-        } else if (related.error) {
-          lines.push("", `(graph traversal failed: ${related.error})`);
+          lines.push(...related.points.map((r) => formatScopedFact(r, includeDestination)));
+        }
+        if (related.errors.length > 0) {
+          lines.push("", `(graph traversal warnings: ${related.errors.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")})`);
         }
       }
 
+      if (failedDestinations.length > 0) {
+        lines.push("", `(search warnings: ${failedDestinations.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")})`);
+      }
       const nudge = buildMemoryNudge();
       if (nudge) lines.push("", nudge);
       if (output_format === "json") {
         return { content: [{ type: "text", text: JSON.stringify({
           query: redactedQuery.text,
+          search_scope: searchScope.name,
+          search_scope_description: searchScope.description,
+          searched_destinations: searchedDestinations,
+          failed_destinations: failedDestinations,
           requested_limit: requestedLimit,
           effective_limit: effectiveLimit,
           max_limit: MEMORY_RECALL_MAX_LIMIT,
@@ -983,9 +1238,9 @@ export function registerTools(mcp: McpServer): void {
           graph_depth: graph_depth ?? 0,
           result_count: ranked.length,
           related_count: related.points.length,
-          results: ranked.map((r) => structuredFact(r)),
-          related: related.points.map((r) => structuredFact(r)),
-          ...(related.error ? { graph_error: related.error } : {}),
+          results: ranked.map((r) => structuredScopedFact(r)),
+          related: related.points.map((r) => structuredScopedFact(r)),
+          ...(related.errors.length > 0 ? { graph_errors: related.errors } : {}),
           ...(nudge ? { nudge } : {}),
           ...(redactedQuery.redacted ? { query_redaction: redactedQuery } : {}),
         }, null, 2) }] };
@@ -1008,70 +1263,105 @@ export function registerTools(mcp: McpServer): void {
         "Entity name (case-insensitive, e.g. 'qdrant', 'workspace_id'). Should match the lowercase canonical form used when facts were stored.",
       ),
       limit: z.number().optional().default(20).describe("Max facts to return (default 20). Relations are always returned in full, capped at 50 each direction."),
-      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
-      include_legacy_workspace: z.boolean().optional().describe(
-        "Backwards-compatibility: also include legacy facts with no workspace_id. Default false.",
+      workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
+      destination: z.string().optional().describe("Optional legacy single-destination override. Do not combine with search_scope."),
+      search_scope: searchScopeSchema.describe(
+        "Optional read/search scope. Accepts 'routed', 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Omit to use config.default_search_scope.",
       ),
+      include_legacy_workspace: z.boolean().optional().describe("[Removed in v0.4.0] No-op."),
     },
-    async ({ name, limit, workspace_id, include_legacy_workspace }): Promise<McpToolResult> => {
+    async ({ name, limit, workspace_id: _workspace_id, destination, search_scope, include_legacy_workspace: _include_legacy_workspace }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const entityName = name.toLowerCase();
-      const scope = resolveScope(workspace_id, include_legacy_workspace);
+      const scopeResolved = resolveSearchScopeOrError({
+        destination,
+        search_scope,
+        input: routingInput({ entities: [entityName] }),
+      });
+      if (scopeResolved.error) return scopeResolved.error;
+      const searchScope = scopeResolved.scope;
+      const effectiveLimit = Math.max(1, Math.trunc(limit ?? 20));
+      const entityTypes = new Map<string, string>();
+      const factPoints: ScopedPoint[] = [];
+      const relationPoints: ScopedPoint[] = [];
+      const failures: Array<{ destination: string; error: string }> = [];
 
-      // Look up the daemon-classified entity type, if any.
-      let entityType: string | null = null;
-      try {
-        const typeFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
-        typeFilter.must.push({ key: "kind", match: { value: "entity_type" } });
-        typeFilter.must.push({ key: "entity_name", match: { value: entityName } });
-        const typePoints = await qdrantScroll(typeFilter, 1);
-        const typePoint = typePoints.result?.points?.[0];
-        const payload = typePoint?.payload as unknown as Record<string, unknown> | undefined;
-        if (payload?.entity_type) {
-          entityType = String(payload.entity_type);
+      for (const dest of searchScope.destinations) {
+        // Look up the daemon-classified entity type, if any.
+        try {
+          const typeFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
+          typeFilter.must.push({ key: "kind", match: { value: "entity_type" } });
+          typeFilter.must.push({ key: "entity_name", match: { value: entityName } });
+          const typePoints = await qdrantScroll(dest, typeFilter, 1);
+          const typePoint = typePoints.result?.points?.[0];
+          const payload = typePoint?.payload as unknown as Record<string, unknown> | undefined;
+          if (payload?.entity_type) {
+            entityTypes.set(dest.name, String(payload.entity_type));
+          }
+        } catch {
+          // Type lookup is best-effort — never fails the request.
         }
-      } catch {
-        // Type lookup is best-effort — never fails the request.
+
+        try {
+          const factsFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
+          factsFilter.must.push({ key: "entities", match: { value: entityName } });
+          const facts = await qdrantScroll(dest, factsFilter, effectiveLimit);
+          factPoints.push(...(facts.result?.points ?? []).map((point) => withDestination(point, dest)));
+
+          const fromFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
+          fromFilter.must.push({ key: "from_entity", match: { value: entityName } });
+          const relationsFrom = await qdrantScroll(dest, fromFilter, 50);
+
+          const toFilter: QdrantFilter = buildFilter({}) ?? { must: [] };
+          toFilter.must.push({ key: "to_entity", match: { value: entityName } });
+          const relationsTo = await qdrantScroll(dest, toFilter, 50);
+          relationPoints.push(...[
+            ...(relationsFrom.result?.points ?? []),
+            ...(relationsTo.result?.points ?? []),
+          ].map((point) => withDestination(point, dest)));
+        } catch (e) {
+          failures.push({ destination: dest.name, error: e instanceof Error ? e.message : String(e) });
+        }
       }
 
-      const factsFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
-      factsFilter.must.push({ key: "entities", match: { value: entityName } });
-      const facts = await qdrantScroll(factsFilter, limit ?? 20);
-
-      const fromFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
-      fromFilter.must.push({ key: "from_entity", match: { value: entityName } });
-      const relationsFrom = await qdrantScroll(fromFilter, 50);
-
-      const toFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
-      toFilter.must.push({ key: "to_entity", match: { value: entityName } });
-      const relationsTo = await qdrantScroll(toFilter, 50);
+      if (failures.length === searchScope.destinations.length && searchScope.destinations.length > 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "search_failed",
+            entity: entityName,
+            search_scope: searchScope.name,
+            searched_destinations: searchScope.destinations.map((dest) => dest.name),
+            failed_destinations: failures,
+          }, null, 2) }],
+          isError: true,
+        };
+      }
 
       const output: string[] = [];
+      const includeDestination = searchScope.destinations.length > 1 || searchScope.name === "all";
+      const entityTypeValues = [...new Set(entityTypes.values())];
+      const entityType = entityTypeValues.length === 1 ? entityTypeValues[0] : null;
 
-      const factPoints = facts.result?.points ?? [];
       if (factPoints.length > 0) {
         const header = entityType
-          ? `## Facts about ${name} [type: ${entityType}] (${factPoints.length})`
-          : `## Facts about ${name} (${factPoints.length})`;
+          ? `## Facts about ${name} [type: ${entityType}] (${Math.min(factPoints.length, effectiveLimit)})`
+          : `## Facts about ${name} (${Math.min(factPoints.length, effectiveLimit)})`;
         output.push(header);
-        for (const p of factPoints) {
+        for (const p of factPoints.slice(0, effectiveLimit)) {
           if (p.payload.category !== "relation") {
-            output.push(`- ${formatFact(p)}`);
+            output.push(`- ${formatScopedFact(p, includeDestination)}`);
           }
         }
       } else if (entityType) {
         output.push(`## ${name} [type: ${entityType}]`);
       }
 
-      const allRelations = [
-        ...(relationsFrom.result?.points ?? []),
-        ...(relationsTo.result?.points ?? []),
-      ];
       const seen = new Set<string>();
-      const uniqueRelations = allRelations.filter((r) => {
-        if (seen.has(r.id)) return false;
-        seen.add(r.id);
+      const uniqueRelations = relationPoints.filter((r) => {
+        const key = `${r._destination.name}:${r.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
         return true;
       });
 
@@ -1079,8 +1369,13 @@ export function registerTools(mcp: McpServer): void {
         output.push(`\n## Relations (${uniqueRelations.length})`);
         for (const r of uniqueRelations) {
           const p = r.payload;
-          output.push(`- ${p.from_entity} --[${p.relation_type}]--> ${p.to_entity}`);
+          const prefix = includeDestination ? `[${r._destination.name}] ` : "";
+          output.push(`- ${prefix}${p.from_entity} --[${p.relation_type}]--> ${p.to_entity}`);
         }
+      }
+
+      if (failures.length > 0) {
+        output.push(`\nSearch warnings: ${failures.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")}`);
       }
 
       if (output.length === 0) {
@@ -1108,53 +1403,90 @@ export function registerTools(mcp: McpServer): void {
       direction: z.enum(["from", "to", "both"]).optional().default("both").describe(
         "Which side of the edge the entity is on. 'from' = entity is the source (X --[?]--> ?). 'to' = entity is the target (? --[?]--> X). 'both' = either (default).",
       ),
-      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
-      include_legacy_workspace: z.boolean().optional().describe(
-        "Backwards-compatibility: also include legacy facts with no workspace_id. Default false.",
+      workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
+      destination: z.string().optional().describe("Optional legacy single-destination override. Do not combine with search_scope."),
+      search_scope: searchScopeSchema.describe(
+        "Optional read/search scope. Accepts 'routed', 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Omit to use config.default_search_scope.",
       ),
+      include_legacy_workspace: z.boolean().optional().describe("[Removed in v0.4.0] No-op."),
     },
-    async ({ entity, relation_type, direction, workspace_id, include_legacy_workspace }): Promise<McpToolResult> => {
+    async ({ entity, relation_type, direction, workspace_id: _workspace_id, destination, search_scope, include_legacy_workspace: _include_legacy_workspace }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const entityName = entity.toLowerCase();
-      const scope = resolveScope(workspace_id, include_legacy_workspace);
-      const results: QdrantPoint[] = [];
+      const scopeResolved = resolveSearchScopeOrError({
+        destination,
+        search_scope,
+        input: routingInput({ entities: [entityName] }),
+      });
+      if (scopeResolved.error) return scopeResolved.error;
+      const searchScope = scopeResolved.scope;
+      const results: ScopedPoint[] = [];
+      const failures: Array<{ destination: string; error: string }> = [];
 
-      if (direction === "from" || direction === "both") {
-        const filter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
-        filter.must.push({ key: "from_entity", match: { value: entityName } });
-        if (relation_type) {
-          filter.must.push({ key: "relation_type", match: { value: relation_type.toLowerCase() } });
+      for (const dest of searchScope.destinations) {
+        try {
+          if (direction === "from" || direction === "both") {
+            const filter: QdrantFilter = buildFilter({}) ?? { must: [] };
+            filter.must.push({ key: "from_entity", match: { value: entityName } });
+            if (relation_type) {
+              filter.must.push({ key: "relation_type", match: { value: relation_type.toLowerCase() } });
+            }
+            const r = await qdrantScroll(dest, filter, 50);
+            results.push(...(r.result?.points ?? []).map((point) => withDestination(point, dest)));
+          }
+
+          if (direction === "to" || direction === "both") {
+            const filter: QdrantFilter = buildFilter({}) ?? { must: [] };
+            filter.must.push({ key: "to_entity", match: { value: entityName } });
+            if (relation_type) {
+              filter.must.push({ key: "relation_type", match: { value: relation_type.toLowerCase() } });
+            }
+            const r = await qdrantScroll(dest, filter, 50);
+            results.push(...(r.result?.points ?? []).map((point) => withDestination(point, dest)));
+          }
+        } catch (e) {
+          failures.push({ destination: dest.name, error: e instanceof Error ? e.message : String(e) });
         }
-        const r = await qdrantScroll(filter, 50);
-        results.push(...(r.result?.points ?? []));
       }
 
-      if (direction === "to" || direction === "both") {
-        const filter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
-        filter.must.push({ key: "to_entity", match: { value: entityName } });
-        if (relation_type) {
-          filter.must.push({ key: "relation_type", match: { value: relation_type.toLowerCase() } });
-        }
-        const r = await qdrantScroll(filter, 50);
-        results.push(...(r.result?.points ?? []));
+      if (failures.length === searchScope.destinations.length && searchScope.destinations.length > 0) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "search_failed",
+            entity: entityName,
+            search_scope: searchScope.name,
+            searched_destinations: searchScope.destinations.map((dest) => dest.name),
+            failed_destinations: failures,
+          }, null, 2) }],
+          isError: true,
+        };
       }
 
       const seen = new Set<string>();
       const unique = results.filter((r) => {
-        if (seen.has(r.id)) return false;
-        seen.add(r.id);
+        const key = `${r._destination.name}:${r.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
         return true;
       });
 
       if (unique.length === 0) {
-        return { content: [{ type: "text", text: `No relations found for '${entity}'.` }] };
+        const warning = failures.length > 0
+          ? ` Search warnings: ${failures.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")}`
+          : "";
+        return { content: [{ type: "text", text: `No relations found for '${entity}'.${warning}` }] };
       }
 
+      const includeDestination = searchScope.destinations.length > 1 || searchScope.name === "all";
       const lines = unique.map((r) => {
         const p = r.payload;
-        return `${p.from_entity} --[${p.relation_type}]--> ${p.to_entity} (confidence: ${p.confidence}, id: ${r.id})`;
+        const prefix = includeDestination ? `[${r._destination.name}] ` : "";
+        return `${prefix}${p.from_entity} --[${p.relation_type}]--> ${p.to_entity} (confidence: ${p.confidence}, id: ${r.id})`;
       });
+      if (failures.length > 0) {
+        lines.push("", `Search warnings: ${failures.map((failure) => `${failure.destination}: ${failure.error}`).join("; ")}`);
+      }
       return { content: [{ type: "text", text: lines.join("\n") }] };
     },
   );
@@ -1172,21 +1504,18 @@ export function registerTools(mcp: McpServer): void {
       reason: z.string().describe(
         "Short human-readable reason this fact is being retired (stored in 'superseded_by' for future audit).",
       ),
-      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+      workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
     },
-    async ({ fact_id, reason, workspace_id }): Promise<McpToolResult> => {
+    async ({ fact_id, reason, workspace_id: _workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
-        const now = nowISO();
-        try {
-          const scope = resolveScope(workspace_id);
-          const _actor = resolveActorIdentity({ config: loadConfig() });
-        const existing = await getPointForWorkspaceWrite(fact_id, scope);
-        if (existing.error) {
-          return { content: [{ type: "text", text: JSON.stringify(existing.error, null, 2) }], isError: true };
-        }
+      const now = nowISO();
+      try {
+        const located = await locatePoint(fact_id);
+        if (!located) return notFoundResult(fact_id);
+        const { dest } = located;
         const redactedReason = redactStorageText(reason);
-        await qdrantSetPayload([fact_id], {
+        await qdrantSetPayload(dest, [fact_id], {
           superseded_by: `forgotten:${redactedReason.text}`,
           superseded_at: now,
           updated_at: now,
@@ -1201,6 +1530,7 @@ export function registerTools(mcp: McpServer): void {
         return { content: [{ type: "text", text: JSON.stringify({
           status: "forgotten",
           fact_id,
+          destination: dest.name,
           reason: redactedReason.text,
           ...(redactedReason.redacted ? { redaction: redactedReason } : {}),
         }) }] };
@@ -1221,26 +1551,19 @@ export function registerTools(mcp: McpServer): void {
     ].join(" "),
     {
       fact_id: z.string().describe("ID of the fact to verify (from memory_recall or memory_heartbeat)."),
-      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+      workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
     },
-    async ({ fact_id, workspace_id }): Promise<McpToolResult> => {
+    async ({ fact_id, workspace_id: _workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const now = nowISO();
       try {
-        const scope = resolveScope(workspace_id);
-        const _actor = resolveActorIdentity({ config: loadConfig() });
-        const writable = await getPointForWorkspaceWrite(fact_id, scope);
-        if (writable.error) {
-          return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
-        }
-        let currentCount = 0;
-        const existingPt = writable.point;
-        if (existingPt) {
-          currentCount = existingPt.payload.verification_count ?? 0;
-        }
+        const located = await locatePoint(fact_id);
+        if (!located) return notFoundResult(fact_id);
+        const { dest, point } = located;
+        const currentCount = point.payload.verification_count ?? 0;
         const newCount = currentCount + 1;
-        await qdrantSetPayload([fact_id], {
+        await qdrantSetPayload(dest, [fact_id], {
           last_verified_at: now,
           last_reinforced_at: now,
           verification_count: newCount,
@@ -1250,6 +1573,7 @@ export function registerTools(mcp: McpServer): void {
           content: [{ type: "text", text: JSON.stringify({
             status: "verified",
             fact_id,
+            destination: dest.name,
             verification_count: newCount,
             message: "Fact confirmed as still accurate. Staleness clock reset.",
           }) }],
@@ -1274,23 +1598,20 @@ export function registerTools(mcp: McpServer): void {
       note: z.string().optional().describe(
         "Optional short note about how the fact was useful (e.g. 'unblocked auth debug'). Stored on the telemetry event for future analysis.",
       ),
-      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+      workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
     },
-    async ({ fact_id, note, workspace_id }): Promise<McpToolResult> => {
+    async ({ fact_id, note, workspace_id: _workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const now = nowISO();
       try {
-        const scope = resolveScope(workspace_id);
+        const located = await locatePoint(fact_id);
+        if (!located) return notFoundResult(fact_id);
+        const { dest, point } = located;
         const actor = resolveActorIdentity({ config: loadConfig() });
-        const writable = await getPointForWorkspaceWrite(fact_id, scope);
-        if (writable.error) {
-          return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
-        }
-        const existingPt = writable.point;
-        const currentCount = existingPt?.payload.useful_count ?? 0;
+        const currentCount = point.payload.useful_count ?? 0;
         const newCount = currentCount + 1;
-        await qdrantSetPayload([fact_id], {
+        await qdrantSetPayload(dest, [fact_id], {
           useful_count: newCount,
           last_useful_at: now,
           updated_at: now,
@@ -1320,11 +1641,11 @@ export function registerTools(mcp: McpServer): void {
           created_at: now,
           updated_at: now,
         };
-        addWorkspacePayload(eventPayload, scope, actor);
+        addActorPayload(eventPayload, actor);
         addRedactionPayload(eventPayload, redactedEvent);
         try {
           const eventVector = await embed(redactedEvent.text);
-          await qdrantUpsert(eventId, eventVector, eventPayload);
+          await qdrantUpsert(dest, eventId, eventVector, eventPayload);
         } catch (e) {
           log("WARN", `Failed to record feedback_event: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -1333,6 +1654,7 @@ export function registerTools(mcp: McpServer): void {
           content: [{ type: "text", text: JSON.stringify({
             status: "marked_useful",
             fact_id,
+            destination: dest.name,
             useful_count: newCount,
             event_id: eventId,
           }) }],
@@ -1360,19 +1682,17 @@ export function registerTools(mcp: McpServer): void {
       notes: z.string().optional().describe(
         "Optional short context for the outcome (e.g. 'API moved in v2', 'wrong port number'). Stored on the telemetry event for future analysis.",
       ),
-      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+      workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
     },
-    async ({ fact_id, outcome, notes, workspace_id }): Promise<McpToolResult> => {
+    async ({ fact_id, outcome, notes, workspace_id: _workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       const now = nowISO();
       try {
-        const scope = resolveScope(workspace_id);
+        const located = await locatePoint(fact_id);
+        if (!located) return notFoundResult(fact_id);
+        const { dest } = located;
         const actor = resolveActorIdentity({ config: loadConfig() });
-        const target = await getPointForWorkspaceWrite(fact_id, scope);
-        if (target.error) {
-          return { content: [{ type: "text", text: JSON.stringify(target.error, null, 2) }], isError: true };
-        }
 
         const eventId = newId();
         const eventContent = notes
@@ -1396,15 +1716,16 @@ export function registerTools(mcp: McpServer): void {
           created_at: now,
           updated_at: now,
         };
-        addWorkspacePayload(eventPayload, scope, actor);
+        addActorPayload(eventPayload, actor);
         addRedactionPayload(eventPayload, redactedEvent);
         const eventVector = await embed(redactedEvent.text);
-        await qdrantUpsert(eventId, eventVector, eventPayload);
+        await qdrantUpsert(dest, eventId, eventVector, eventPayload);
 
         return {
           content: [{ type: "text", text: JSON.stringify({
             status: "outcome_recorded",
             fact_id,
+            destination: dest.name,
             outcome,
             event_id: eventId,
           }) }],
@@ -1435,18 +1756,25 @@ export function registerTools(mcp: McpServer): void {
       workstream_key: z.string().optional().describe("Durable continuity key for a long-running objective (survives across sessions)."),
       task_key: z.string().optional().describe("Task or issue key (e.g. GitHub issue number, JIRA key)."),
       repo: z.string().optional().describe("Repository or project surface this summary relates to."),
-      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+      workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
+      destination: z.string().optional().describe("Optional destination override. Omit to let routing rules decide."),
       actor_id: z.string().optional().describe(
         "Stable actor identity associated with this session summary. Overrides identity config/env/Git fallback.",
       ),
     },
-    async ({ content, entities, episode_id, workstream_key, task_key, repo, workspace_id, actor_id }): Promise<McpToolResult> => {
+    async ({ content, entities, episode_id, workstream_key, task_key, repo, workspace_id: _workspace_id, destination, actor_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       lastStoreTime = Date.now();
       const now = nowISO();
       try {
-        const scope = resolveScope(workspace_id);
+        const resolved = resolveDestOrError(routingInput({
+          destination,
+          content,
+          entities: entities ?? [],
+        }));
+        if (resolved.error) return resolved.error;
+        const dest = resolved.dest;
         const actor = resolveActorIdentity({ actorId: actor_id, config: loadConfig() });
         const normalizedEntities = (entities ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean);
         const summaryId = newId();
@@ -1475,15 +1803,15 @@ export function registerTools(mcp: McpServer): void {
         if (workstream_key) payload["workstream_key"] = workstream_key;
         if (task_key) payload["task_key"] = task_key;
         if (repo) payload["repo"] = repo;
-        addWorkspacePayload(payload, scope, actor);
+        addActorPayload(payload, actor);
         addRedactionPayload(payload, redactedContent);
-        await qdrantUpsert(summaryId, vector, payload);
+        await qdrantUpsert(dest, summaryId, vector, payload);
 
         return {
           content: [{ type: "text", text: JSON.stringify({
             status: "summary_stored",
             summary_id: summaryId,
-            workspace_id: scope.workspaceId,
+            destination: dest.name,
             actor_id: actor.actor_id,
           }) }],
         };
@@ -1514,18 +1842,25 @@ export function registerTools(mcp: McpServer): void {
       ),
       task_key: z.string().optional().describe("Task or issue key associated with this learning, if relevant."),
       repo: z.string().optional().describe("Repository or project surface this learning applies to."),
-      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
+      workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
+      destination: z.string().optional().describe("Optional destination override. Omit to let routing rules decide."),
       actor_id: z.string().optional().describe(
         "Stable actor identity associated with this distillation. Overrides identity config/env/Git fallback.",
       ),
     },
-    async ({ content, entities, supersedes, task_key, repo, workspace_id, actor_id }): Promise<McpToolResult> => {
+    async ({ content, entities, supersedes, task_key, repo, workspace_id: _workspace_id, destination, actor_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       lastStoreTime = Date.now();
       const now = nowISO();
       try {
-        const scope = resolveScope(workspace_id);
+        const resolved = resolveDestOrError(routingInput({
+          destination,
+          content,
+          entities,
+        }));
+        if (resolved.error) return resolved.error;
+        const dest = resolved.dest;
         const actor = resolveActorIdentity({ actorId: actor_id, config: loadConfig() });
         const normalizedEntities = entities.map((e) => e.trim().toLowerCase()).filter(Boolean);
         const distilledId = newId();
@@ -1533,11 +1868,10 @@ export function registerTools(mcp: McpServer): void {
         const vector = await embed(redactedContent.text);
 
         if (supersedes) {
-          const existing = await getPointForWorkspaceWrite(supersedes, scope);
-          if (existing.error) {
-            return { content: [{ type: "text", text: JSON.stringify(existing.error, null, 2) }], isError: true };
-          }
-          await qdrantSetPayload([supersedes], {
+          // Supersede may live in a different destination — locate it.
+          const located = await locatePoint(supersedes);
+          if (!located) return notFoundResult(supersedes);
+          await qdrantSetPayload(located.dest, [supersedes], {
             superseded_by: distilledId,
             superseded_at: now,
           });
@@ -1564,16 +1898,16 @@ export function registerTools(mcp: McpServer): void {
         };
         if (task_key) payload["task_key"] = task_key;
         if (repo) payload["repo"] = repo;
-        addWorkspacePayload(payload, scope, actor);
+        addActorPayload(payload, actor);
         addRedactionPayload(payload, redactedContent);
-        await qdrantUpsert(distilledId, vector, payload);
+        await qdrantUpsert(dest, distilledId, vector, payload);
 
         return {
           content: [{ type: "text", text: JSON.stringify({
             status: "distilled_stored",
             distilled_id: distilledId,
+            destination: dest.name,
             supersedes: supersedes ?? null,
-            workspace_id: scope.workspaceId,
             actor_id: actor.actor_id,
           }) }],
         };
@@ -1601,32 +1935,39 @@ export function registerTools(mcp: McpServer): void {
       corrected_content: z.string().optional().describe(
         "Required for action=correct. The fixed fact text. Stored as a new fact that supersedes the original.",
       ),
-      workspace_id: z.string().optional().describe("Workspace namespace. Omit to use the default from config."),
-      include_legacy_workspace: z.boolean().optional().describe(
-        "Backwards-compatibility: also include legacy facts with no workspace_id. Default false.",
-      ),
+      workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
+      include_legacy_workspace: z.boolean().optional().describe("[Removed in v0.4.0] No-op."),
     },
-    async ({ limit, action, fact_id, reason, corrected_content, workspace_id, include_legacy_workspace }): Promise<McpToolResult> => {
+    async ({ limit, action, fact_id, reason, corrected_content, workspace_id: _workspace_id, include_legacy_workspace: _include_legacy_workspace }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
-      const scope = resolveScope(workspace_id, include_legacy_workspace);
 
       if (action === "list") {
-        const filter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
-        filter.must.push({ key: "source", match: { any: ["system", "daemon"] } });
-        const result = await qdrantScroll(filter, (limit ?? 10) * 2);
+        // List spans all destinations.
+        const destinations = listDestinations();
+        const allPoints: Array<{ dest: string; point: { id: string; payload: FactPayload } }> = [];
+        const filter: QdrantFilter = { must: [{ key: "source", match: { any: ["system", "daemon"] } }] };
+        for (const dest of destinations) {
+          try {
+            const result = await qdrantScroll(dest, filter, (limit ?? 10) * 2);
+            const points = result.result?.points ?? [];
+            for (const pt of points) allPoints.push({ dest: dest.name, point: pt });
+          } catch (e) {
+            log("WARN", `memory_review list scroll failed on ${dest.name}: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
 
-        const points = (result.result?.points ?? [])
-          .sort((a, b) => (b.payload.created_at ?? "").localeCompare(a.payload.created_at ?? ""))
+        const sorted = allPoints
+          .sort((a, b) => (b.point.payload.created_at ?? "").localeCompare(a.point.payload.created_at ?? ""))
           .slice(0, limit ?? 10);
 
-        if (points.length === 0) {
+        if (sorted.length === 0) {
           return { content: [{ type: "text", text: "No system-captured facts found." }] };
         }
 
-        const lines = points.map((pt) => {
+        const lines = sorted.map(({ dest, point: pt }) => {
           const p = pt.payload;
-          return `[${p.category}] ${p.content}\n  id: ${pt.id} | confidence: ${p.confidence} | importance: ${p.importance} | entities: ${(p.entities ?? []).join(", ")} | created: ${p.created_at}`;
+          return `[${p.category}] ${p.content}\n  id: ${pt.id} | dest: ${dest} | confidence: ${p.confidence} | importance: ${p.importance} | entities: ${(p.entities ?? []).join(", ")} | created: ${p.created_at}`;
         });
         return { content: [{ type: "text", text: lines.join("\n\n") }] };
       }
@@ -1638,33 +1979,27 @@ export function registerTools(mcp: McpServer): void {
       const now = nowISO();
 
       if (action === "approve") {
-        const writable = await getPointForWorkspaceWrite(fact_id, scope);
-        if (writable.error) {
-          return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
-        }
-        let currentCount = 0;
-        const approvePt = writable.point;
-        if (approvePt) {
-          currentCount = approvePt.payload.verification_count ?? 0;
-        }
-        await qdrantSetPayload([fact_id], {
+        const located = await locatePoint(fact_id);
+        if (!located) return notFoundResult(fact_id);
+        const { dest, point } = located;
+        const currentCount = point.payload.verification_count ?? 0;
+        await qdrantSetPayload(dest, [fact_id], {
           last_verified_at: now,
           verification_count: currentCount + 1,
           updated_at: now,
         });
-        return { content: [{ type: "text", text: JSON.stringify({ status: "approved", fact_id }) }] };
+        return { content: [{ type: "text", text: JSON.stringify({ status: "approved", fact_id, destination: dest.name }) }] };
       }
 
       if (action === "reject") {
         if (!reason) {
           return { content: [{ type: "text", text: "Error: reason is required for reject action." }] };
         }
-        const writable = await getPointForWorkspaceWrite(fact_id, scope);
-        if (writable.error) {
-          return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
-        }
+        const located = await locatePoint(fact_id);
+        if (!located) return notFoundResult(fact_id);
+        const { dest } = located;
         const redactedReason = redactStorageText(reason);
-        await qdrantSetPayload([fact_id], {
+        await qdrantSetPayload(dest, [fact_id], {
           superseded_by: `rejected:${redactedReason.text}`,
           superseded_at: now,
           updated_at: now,
@@ -1672,6 +2007,7 @@ export function registerTools(mcp: McpServer): void {
         return { content: [{ type: "text", text: JSON.stringify({
           status: "rejected",
           fact_id,
+          destination: dest.name,
           reason: redactedReason.text,
           ...(redactedReason.redacted ? { redaction: redactedReason } : {}),
         }) }] };
@@ -1681,15 +2017,11 @@ export function registerTools(mcp: McpServer): void {
         if (!corrected_content) {
           return { content: [{ type: "text", text: "Error: corrected_content is required for correct action." }] };
         }
-        const writable = await getPointForWorkspaceWrite(fact_id, scope);
-        if (writable.error) {
-          return { content: [{ type: "text", text: JSON.stringify(writable.error, null, 2) }], isError: true };
-        }
-        const origPayload = writable.point?.payload;
+        const located = await locatePoint(fact_id);
+        if (!located) return notFoundResult(fact_id);
+        const { dest, point } = located;
+        const origPayload = point.payload;
         const redactedCorrected = redactStorageText(corrected_content);
-        const correctionScope = origPayload?.workspace_id
-          ? resolveScope(origPayload.workspace_id, false)
-          : scope;
         const actor = resolveActorIdentity({ config: loadConfig() });
 
         const vector = await embed(redactedCorrected.text);
@@ -1721,17 +2053,17 @@ export function registerTools(mcp: McpServer): void {
           updated_at: now,
           metadata: { ...(origPayload?.metadata ?? {}), corrected_from: fact_id },
         };
-        addWorkspacePayload(correctedPayload, correctionScope, actor);
+        addActorPayload(correctedPayload, actor);
         addRedactionPayload(correctedPayload, redactedCorrected);
-        await qdrantUpsert(correctedId, vector, correctedPayload);
+        await qdrantUpsert(dest, correctedId, vector, correctedPayload);
 
-        await qdrantSetPayload([fact_id], {
+        await qdrantSetPayload(dest, [fact_id], {
           superseded_by: correctedId,
           superseded_at: now,
           updated_at: now,
         });
 
-        return { content: [{ type: "text", text: JSON.stringify({ status: "corrected", old_fact_id: fact_id, new_fact_id: correctedId }) }] };
+        return { content: [{ type: "text", text: JSON.stringify({ status: "corrected", old_fact_id: fact_id, new_fact_id: correctedId, destination: dest.name }) }] };
       }
 
       return { content: [{ type: "text", text: `Unknown action: ${String(action)}` }] };
@@ -1757,8 +2089,7 @@ export function registerTools(mcp: McpServer): void {
       if (heartbeatCount % 3 === 0 && ready) {
         try {
           const staleThreshold = new Date(Date.now() - STALENESS_DAYS * 86400000).toISOString();
-          const scope = resolveScope();
-          const staleFilter: QdrantFilter = scopedFilter(scope) ?? { must: [] };
+          const staleFilter: QdrantFilter = { must: [] };
           staleFilter.must.push({ key: "category", match: { any: ["engineering", "product", "human", "system"] } });
           staleFilter.should = [
             { key: "last_reinforced_at", range: { lte: staleThreshold } },
@@ -1767,13 +2098,21 @@ export function registerTools(mcp: McpServer): void {
           staleFilter.must_not = [
             { key: "last_verified_at", range: { gte: staleThreshold } },
           ];
-          const staleResults = await qdrantScroll(
-            staleFilter,
-            3,
-          );
-          const staleFacts = staleResults.result?.points ?? [];
-          if (staleFacts.length > 0) {
-            const staleLines = staleFacts.map((f) => {
+          // Aggregate stale facts across all destinations.
+          const staleFacts: Array<{ id: string; payload: FactPayload }> = [];
+          for (const dest of listDestinations()) {
+            try {
+              const r = await qdrantScroll(dest, staleFilter, 3);
+              const pts = r.result?.points ?? [];
+              for (const pt of pts) staleFacts.push(pt);
+              if (staleFacts.length >= 3) break;
+            } catch (e) {
+              log("WARN", `Staleness check failed on ${dest.name}: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+          const trimmed = staleFacts.slice(0, 3);
+          if (trimmed.length > 0) {
+            const staleLines = trimmed.map((f) => {
               const d = Math.round(daysSince(lastActivityDate(f.payload)));
               return `  • [${f.payload.category}] ${f.payload.content} (${d}d old, id: ${f.id})`;
             });

@@ -34,7 +34,7 @@ If you know which path you want, start with the focused guide:
 | ----------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------ |
 | Fully hosted                  | Best performance and teams; managed vector storage and models | [Fully hosted config](config/fully-hosted.md)                            |
 | Local Qdrant + hosted models  | Local vector storage with hosted extraction and embedding    | [Hosted models config](config/hosted-models.md)                          |
-| Local and free                | Private/free testing; quality depends on local models        | [Local config guide](config/local.md)                                    |
+| Local and free                | Local evaluation; quality depends on local models            | [Local config guide](config/local.md)                                    |
 | Hosted Qdrant + local models  | Shared vector storage while keeping model calls local        | [Hosted Qdrant + local models](config/hosted-qdrant-local-models.md)     |
 
 ### Fully hosted
@@ -87,7 +87,7 @@ Best for local vector storage with hosted extraction and embedding quality.
 
 ### Local and free
 
-Use this for private, free, account-free testing. Qdrant runs locally and Ollama provides the default embedding + LLM models.
+Use this for local, free, account-free evaluation. Qdrant runs locally and Ollama provides the default embedding + LLM models.
 
 This setup is usually not the best long-term choice for teams. Extraction, embedding, and curation performance depends on the local models and hardware you run.
 
@@ -256,30 +256,94 @@ Retries use jittered exponential backoff for transient errors, rate limits, and 
 
 Bedrock reads `embedding.extra.region` and `llm.extra.region`. `AWS_BEDROCK_REGION` populates both, falling back to `AWS_REGION`; `aws_profile` or `AWS_PROFILE` selects the shared AWS profile when you are not using direct env credentials.
 
-### Workspace and metadata scoping
+### Multi-destination routing
 
-Most users do not need to manage scopes manually. bikky can store optional metadata such as `workspace_id`, `repo`, `branch`, `task_key`, `workstream_key`, and `episode_id` when an agent or daemon has that context.
+Most users only need one Qdrant destination. Use `destinations[]` when you want one bikky install and one editor MCP connection to read or write separate memory stores for different teams, clients, or environments.
 
-If you do need workspace isolation, scope resolution is:
+Each destination has its own Qdrant credentials and collection. Add `description` when you have more than one destination; MCP tools expose those descriptions so LLM clients can pick the right search scope.
 
-1. Explicit `workspace_id` on a tool call
-2. `BIKKY_WORKSPACE`
-3. `default_workspace` in config
-4. Unscoped
+Writes still target one destination. A destination can include a `match` block with JavaScript `RegExp` strings for `cwd`, `entity`, `content`, or `metadata`. Destinations are evaluated in array order; the first destination with any matching pattern wins. If no pattern matches, bikky uses the destination marked `default: true`, or the first destination.
 
-Example:
+Read tools (`memory_recall`, `memory_entity`, and `memory_relations`) can search one destination, the routed destination, or multiple destinations. Configure `default_search_scope` to control the default read behavior:
 
-```json
+- `"routed"` — search the single destination selected by routing rules. This is the default and preserves older behavior.
+- `"all"` — search every configured destination and merge/rerank the results.
+- `"client-a"` — search one destination by name.
+- `["client-a", "platform"]` — search a fixed list of destinations.
+
+MCP clients can override this per call with `search_scope`. The value accepts `"routed"`, `"all"`, a destination name, a configured named scope, a comma-separated destination list, or an array of destination names. Do not combine `destination` and `search_scope`; keep `destination` for exact single-destination overrides, especially on write tools.
+
+```jsonc
 {
-  "qdrant_url": "http://localhost:6333",
-  "qdrant_api_key": "",
-  "default_workspace": "team"
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "dimensions": 1536
+  },
+  "llm": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini"
+  },
+  "default_search_scope": "routed",
+  "destinations": [
+    {
+      "name": "client-a",
+      "description": "Client A project memory. Use for Client A code, tickets, and operating context.",
+      "qdrant_url": "https://client-a.cloud.qdrant.io:6333",
+      "qdrant_api_key": "...",
+      "collection": "bikky-client-a",
+      "match": {
+        "cwd": ["^/Users/me/code/client-a"],
+        "entity": ["^client-a-"],
+        "content": ["client-a", "CLIENTA-\\d+"],
+        "metadata": { "project": ["^client-a$"] }
+      }
+    },
+    {
+      "name": "research-cloud",
+      "description": "Research and experiment memory that may be useful across projects.",
+      "qdrant_url": "https://research.cloud.qdrant.io:6333",
+      "qdrant_api_key": "...",
+      "collection": "bikky-research",
+      "match": {
+        "content": ["[Rr]esearch[- ][Ll]ab"]
+      }
+    },
+    {
+      "name": "platform",
+      "description": "Default platform engineering memory.",
+      "qdrant_url": "http://localhost:6333",
+      "qdrant_api_key": "",
+      "collection": "bikky-platform",
+      "default": true
+    }
+  ],
+  "search_scopes": [
+    {
+      "name": "project-wide",
+      "description": "Search Client A and shared platform memory together when the answer may depend on both.",
+      "destinations": ["client-a", "platform"]
+    }
+  ]
 }
 ```
 
-`qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant.
+Matching details:
 
-The literal workspace name `"default"` also reads legacy facts that do not have a `workspace_id` payload. Other named workspaces are strict.
+- `match.cwd`, `match.entity`, and `match.content` are lists of JavaScript `RegExp` strings.
+- `match.metadata` maps metadata keys to lists of JavaScript `RegExp` strings matched against that key's value.
+- Matching uses OR logic across fields and within each list; any matching pattern selects the destination.
+- Put the most specific destinations first because first match wins.
+- JavaScript regex flags are not supported in config strings. Use character classes like `[Bb]ikky` for case-insensitive matching.
+- Tool calls can override routing with an explicit destination name, for example `memory_store({ ..., destination: "client-a" })`.
+- Read/search tools also accept `search_scope`; call `memory_search_scopes` or `get_setup_status` to see available scopes and descriptions.
+- All destinations share one embedding provider, so every destination collection must use the same vector dimensions.
+
+Migrating from `workspace_id` pre-v0.4:
+
+- Existing top-level `qdrant_url`, `qdrant_api_key`, and `collection` configs still work as a single synthesized destination.
+- The `workspace_id` argument on memory tools is a no-op for compatibility.
+- Replace `default_workspace` scoping with named destinations when you need isolation.
 
 ### Daemon, watchers, and logs
 

@@ -1,5 +1,6 @@
 import { Link, Outlet, useLocation } from "react-router";
 import { Brain, LayoutDashboard, Share2 } from "lucide-react";
+import DestinationSelector from "./DestinationSelector";
 
 const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -36,6 +37,9 @@ export default function Layout() {
               </Link>
             );
           })}
+        </div>
+        <div className="px-3 py-3 border-t border-zinc-800">
+          <DestinationSelector />
         </div>
       </nav>
 
