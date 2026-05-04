@@ -32,6 +32,7 @@
     "!dist/**/*.itest.d.ts",
     "bin/",
     "docs/configuration.md",
+    "docs/privacy-first.md",
     "docs/config/",
     "docs/diagrams/",
     "docs/screenshots/"
@@ -47,6 +48,7 @@
     "check": "tsc --noEmit && eslint src/",
     "test": "tsc && node --test --test-concurrency=1 $(find dist -name '*.test.js')",
     "test:integration": "tsc && BIKKY_INTEGRATION=${BIKKY_INTEGRATION:-1} node --test $(find dist -name '*.itest.js')",
+    "verify:package": "node scripts/verify-package.mjs",
     "build:diagrams": "node scripts/build-diagrams.mjs",
     "prepublishOnly": "npm run build"
   },

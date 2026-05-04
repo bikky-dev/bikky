@@ -37,6 +37,8 @@ If you know which path you want, start with the focused guide:
 | Local and free                | Local evaluation; quality depends on local models            | [Local config guide](config/local.md)                                    |
 | Hosted Qdrant + local models  | Shared vector storage while keeping model calls local        | [Hosted Qdrant + local models](config/hosted-qdrant-local-models.md)     |
 
+Privacy-conscious users should also read the [privacy-first quickstart](privacy-first.md), which combines local Qdrant, local Ollama models, and transcript-capture disable controls.
+
 ### Fully hosted
 
 Best for performance and teams. Qdrant Cloud stores vectors, and hosted embeddings + LLM calls handle extraction, curation, and recall.

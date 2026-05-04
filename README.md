@@ -132,6 +132,8 @@ For hosted models, custom providers, multiple profiles, or advanced tuning, use 
 
 > 📖 **Full configuration guide:** [docs/configuration.md][configuration-guide]
 >
+> 🔒 **Privacy-first setup:** [local storage, local models, and transcript-capture controls][privacy-quickstart]
+>
 > 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md][contributing]** — it's a single-file change.
 
 #### Optional: separate memory stores
@@ -170,6 +172,7 @@ That is enough for explicit selection in the UI and tools. Add routing rules onl
 [local-config]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/config/local.md
 [hosted-qdrant-local-models-config]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/config/hosted-qdrant-local-models.md
 [configuration-guide]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/configuration.md
+[privacy-quickstart]: https://cdn.jsdelivr.net/npm/bikky@latest/docs/privacy-first.md
 [contributing]: https://cdn.jsdelivr.net/npm/bikky@latest/CONTRIBUTING.md
 
 ---
@@ -236,6 +239,8 @@ Only the configured daemon process reads these files. Extracted facts are redact
 ```
 
 You can also set `daemon.extract_every_sec` to `0` to disable background extraction while keeping MCP recall tools available.
+
+For a local-storage, local-model setup that minimizes what leaves your machine, see the [privacy-first quickstart][privacy-quickstart].
 
 ## License
 
