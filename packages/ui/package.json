@@ -1,19 +1,29 @@
 {
   "name": "bikky-ui",
-  "version": "0.1.10",
+  "version": "0.1.14",
   "description": "Local web UI for browsing and managing bikky memory",
   "type": "module",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bikky-dev/bikky.git",
+    "url": "git+https://github.com/bikky-dev/bikky.git",
     "directory": "packages/ui"
   },
+  "bugs": {
+    "url": "https://github.com/bikky-dev/bikky/issues"
+  },
+  "homepage": "https://github.com/bikky-dev/bikky/tree/main/packages/ui#readme",
   "bin": {
-    "bikky-ui": "./bin/bikky-ui.js"
+    "bikky-ui": "bin/bikky-ui.js"
   },
   "files": [
-    "dist/",
+    "README.md",
+    "LICENSE",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/public/",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
     "bin/"
   ],
   "scripts": {
@@ -22,7 +32,7 @@
     "build:ui": "vite build --config app/vite.config.ts",
     "dev": "vite --config app/vite.config.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsc && node --test --test-isolation=process --test-concurrency=1 \"dist/**/*.test.js\"",
+    "test": "tsc && node --test --test-concurrency=1 $(find dist -name '*.test.js')",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
@@ -48,5 +58,8 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
