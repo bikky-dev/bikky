@@ -4,6 +4,10 @@
   "description": "Local web UI for browsing and managing bikky memory",
   "type": "module",
   "license": "AGPL-3.0-or-later",
+  "author": {
+    "name": "Saber Zrelli",
+    "url": "https://github.com/zrelli-s"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bikky-dev/bikky.git",
