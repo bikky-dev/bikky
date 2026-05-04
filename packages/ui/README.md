@@ -14,3 +14,4 @@ For setup, configuration, and security details, see the main bikky repository:
 - [Configuration guide](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md)
 - [Security policy](https://github.com/bikky-dev/bikky/blob/main/SECURITY.md)
 
+For maintainer contact, reach Saber Zrelli on GitHub: [@zrelli-s](https://github.com/zrelli-s).

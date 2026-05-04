@@ -242,6 +242,10 @@ You can also set `daemon.extract_every_sec` to `0` to disable background extract
 
 For a local-storage, local-model setup that minimizes what leaves your machine, see the [privacy-first quickstart][privacy-quickstart].
 
+## Support and contact
+
+For questions, bugs, and feature requests, please use [GitHub issues](https://github.com/bikky-dev/bikky/issues). For maintainer contact, reach Saber Zrelli on GitHub: [@zrelli-s](https://github.com/zrelli-s).
+
 ## License
 
 AGPL-3.0 — see [LICENSE](LICENSE).
