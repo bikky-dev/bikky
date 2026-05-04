@@ -199,7 +199,7 @@ Configure a fallback chain via `llm.fallback_provider` in config (or
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the project's [AGPL-3.0-or-later](LICENSE) license.
+By contributing, you agree that your contributions will be licensed under the project's [AGPL-3.0-or-later](https://github.com/bikky-dev/bikky/blob/main/LICENSE) license.
 
 ## Code of conduct
 

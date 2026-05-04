@@ -20,4 +20,4 @@ Use the bug report template and include a minimal reproduction when possible. If
 
 ## Security reports
 
-Do not open a public issue for vulnerabilities. Follow [SECURITY.md](SECURITY.md) and use GitHub private vulnerability reporting.
+Do not open a public issue for vulnerabilities. Follow [SECURITY.md](https://github.com/bikky-dev/bikky/blob/main/SECURITY.md) and use GitHub private vulnerability reporting.
