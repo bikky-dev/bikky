@@ -7,7 +7,7 @@ import path from "node:path";
 const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-consolidation-"));
 process.env.BIKKY_HOME = TEST_BIKKY_HOME;
 
-const { detectContradiction, setLogger } = await import("./consolidation.js");
+const { detectContradiction, setLogger, tick, _reset } = await import("./consolidation.js");
 const qdrant = await import("./qdrant.js");
 const { initLLM } = await import("../llm/index.js");
 const { CONFIG_DEFAULTS, loadConfig, saveConfig } = await import("../config.js");
@@ -112,6 +112,7 @@ describe("daemon/consolidation", () => {
     fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
     fs.mkdirSync(TEST_BIKKY_HOME, { recursive: true });
     configure();
+    _reset();
     setLogger(() => {});
   });
 
@@ -200,5 +201,56 @@ describe("daemon/consolidation", () => {
 
     assert.deepEqual(result, { contradiction: false });
     assert.equal(calls.some((call) => call.url === "http://llm.test/v1/chat/completions"), false);
+  });
+
+  it("does not run maintenance work when consolidation is disabled", async () => {
+    const calls = installMock();
+    const posts: string[] = [];
+    const config = {
+      ...loadConfig(),
+      daemon: {
+        ...loadConfig().daemon,
+        consolidation_enabled: false,
+      },
+    };
+
+    _reset(4999);
+    await tick(config, { postHealthFn: async (text) => { posts.push(text); } });
+
+    assert.deepEqual(calls, []);
+    assert.deepEqual(posts, []);
+  });
+
+  it("skips maintenance when Qdrant is not ready", async () => {
+    const calls = installMock();
+    const posts: string[] = [];
+    const config = {
+      ...loadConfig(),
+      qdrant_url: null,
+      qdrant_api_key: null,
+      destinations: [],
+    };
+    saveConfig(config);
+    qdrant.init();
+
+    _reset(4999);
+    await tick(loadConfig(), { postHealthFn: async (text) => { posts.push(text); } });
+
+    assert.deepEqual(calls, []);
+    assert.deepEqual(posts, []);
+  });
+
+  it("posts a health report on the configured maintenance cadence", async () => {
+    const calls = installMock();
+    const posts: string[] = [];
+
+    _reset(4999);
+    await tick(loadConfig(), { postHealthFn: async (text) => { posts.push(text); } });
+
+    assert.equal(posts.length, 1);
+    assert.match(posts[0]!, /Memory Health Report/);
+    assert.match(posts[0]!, /Total facts: 0/);
+    assert.ok(calls.some((call) => call.url.endsWith("/points/count")));
+    assert.ok(calls.some((call) => call.url.endsWith("/points/scroll")));
   });
 });

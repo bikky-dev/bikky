@@ -1,13 +1,167 @@
-import { describe, it } from "node:test";
+import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import type { ExtractedFact } from "./extraction.js";
 
-import {
+const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-extraction-"));
+process.env.BIKKY_HOME = TEST_BIKKY_HOME;
+
+const {
   DEFAULT_EXTRACTION_PROMPT,
   factQualitySignals,
   isHighQualityExtractedFact,
   normalizeExtractedFact,
-  type ExtractedFact,
-} from "./extraction.js";
+  tick,
+  setLogger,
+} = await import("./extraction.js");
+const qdrant = await import("./qdrant.js");
+const { initLLM } = await import("../llm/index.js");
+const { CONFIG_DEFAULTS, STATE_DIR, loadConfig, saveConfig } = await import("../config.js");
+
+const realFetch = globalThis.fetch;
+
+interface FetchCall {
+  destination: string | null;
+  url: string;
+  method: string;
+  body: Record<string, unknown> | null;
+}
+
+function configure(claudeDir: string): void {
+  saveConfig({
+    ...CONFIG_DEFAULTS,
+    destinations: [
+      {
+        name: "personal",
+        qdrant_url: "https://personal.q.test",
+        qdrant_api_key: null,
+        collection: "personal_collection",
+        default: true,
+      },
+      {
+        name: "work",
+        qdrant_url: "https://work.q.test",
+        qdrant_api_key: null,
+        collection: "work_collection",
+        match: { content: ["work Qdrant destination"] },
+      },
+    ],
+    embedding: {
+      ...CONFIG_DEFAULTS.embedding,
+      provider: "ollama",
+      base_url: "http://embed.test",
+      model: "qwen-test",
+      dimensions: 3,
+      timeout_ms: 100,
+      retries: 0,
+    },
+    llm: {
+      ...CONFIG_DEFAULTS.llm,
+      provider: "ollama",
+      base_url: "http://llm.test",
+      model: "llm-test",
+      timeout_ms: 100,
+      retries: 0,
+    },
+    daemon: {
+      ...CONFIG_DEFAULTS.daemon,
+      extract_every_sec: 1,
+      extract_min_events: 2,
+    },
+    watchers: {
+      copilot: { enabled: false, path: path.join(TEST_BIKKY_HOME, "copilot") },
+      claude: { enabled: true, path: claudeDir },
+    },
+    qdrant_client: {
+      ...CONFIG_DEFAULTS.qdrant_client,
+      timeout_ms: 100,
+      retries: 0,
+    },
+  });
+  qdrant.init();
+  initLLM({
+    config: {
+      provider: "ollama",
+      baseUrl: "http://llm.test",
+      model: "llm-test",
+      timeoutMs: 100,
+      retries: 0,
+    },
+    logger: () => {},
+  });
+}
+
+function installMock(): FetchCall[] {
+  const calls: FetchCall[] = [];
+  const destinationForUrl = (url: string): string | null => {
+    if (url.startsWith("https://personal.q.test/")) return "personal";
+    if (url.startsWith("https://work.q.test/")) return "work";
+    return null;
+  };
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const url = typeof input === "string" ? input : input.toString();
+    const method = (init.method ?? "GET").toUpperCase();
+    const body = init.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+    const destination = destinationForUrl(url);
+    calls.push({ destination, url, method, body });
+
+    if (url === "http://llm.test/v1/chat/completions") {
+      return new Response(JSON.stringify({
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              facts: [{
+                content: "Claude transcript facts use src/daemon/extraction.ts and route to the work Qdrant destination.",
+                category: "engineering",
+                memory_subtype: "codebase_map",
+                entities: ["bikky", "src/daemon/extraction.ts"],
+                confidence: 0.9,
+                importance: 0.8,
+                quality_score: 0.9,
+                confidence_reason: "Explicitly stated in the transcript.",
+              }],
+            }),
+          },
+        }],
+      }), { status: 200 });
+    }
+
+    if (url === "http://embed.test/v1/embeddings") {
+      return new Response(JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }), { status: 200 });
+    }
+
+    if (url.endsWith("/points/scroll")) {
+      return new Response(JSON.stringify({ result: { points: [] } }), { status: 200 });
+    }
+
+    if (url.endsWith("/points/search")) {
+      return new Response(JSON.stringify({ result: [] }), { status: 200 });
+    }
+
+    if (method === "PUT" && url.endsWith("/points")) {
+      return new Response(JSON.stringify({ result: { status: "ok" } }), { status: 200 });
+    }
+
+    if (method === "POST" && url.endsWith("/points/payload")) {
+      return new Response(JSON.stringify({ result: { status: "ok" } }), { status: 200 });
+    }
+
+    throw new Error(`unexpected fetch: ${method} ${url}`);
+  }) as typeof fetch;
+
+  return calls;
+}
+
+function claudeLine(role: "user" | "assistant", content: string): string {
+  return JSON.stringify({
+    type: role,
+    timestamp: "2026-01-01T00:00:00.000Z",
+    message: { role, content },
+  });
+}
 
 describe("daemon/extraction prompt", () => {
   it("describes memory ontology fields and avoids legacy domain wording", () => {
@@ -252,5 +406,68 @@ describe("factQualitySignals — self-judgment integration", () => {
     const notSelf = factQualitySignals(baseFact({ self_contained: false }));
     const baseline = factQualitySignals(baseFact());
     assert.ok(notSelf.computedQualityScore < baseline.computedQualityScore);
+  });
+});
+
+describe("daemon extraction tick", () => {
+  before(() => {
+    fs.mkdirSync(TEST_BIKKY_HOME, { recursive: true });
+  });
+
+  after(() => {
+    globalThis.fetch = realFetch;
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
+    fs.mkdirSync(TEST_BIKKY_HOME, { recursive: true });
+    setLogger(() => {});
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it("discovers Claude transcripts, extracts facts, stores them in the routed destination, and advances state", async () => {
+    const claudeDir = path.join(TEST_BIKKY_HOME, "claude");
+    fs.mkdirSync(claudeDir, { recursive: true });
+    const eventsPath = path.join(claudeDir, "session-1.jsonl");
+    const transcript = [
+      claudeLine("user", "hello"),
+      claudeLine("assistant", "hi there"),
+    ].join("\n") + "\n";
+    fs.writeFileSync(eventsPath, transcript, "utf-8");
+    configure(claudeDir);
+    const calls = installMock();
+
+    await tick(loadConfig());
+
+    const extractionCall = calls.find((call) => call.url === "http://llm.test/v1/chat/completions");
+    assert.ok(extractionCall);
+    assert.match(JSON.stringify(extractionCall.body), /\[USER\] hello/);
+
+    const upsert = calls.find((call) => call.method === "PUT" && call.url.endsWith("/points"));
+    assert.ok(upsert);
+    assert.equal(upsert.destination, "work");
+    assert.equal(upsert.url, "https://work.q.test/collections/work_collection/points");
+    const payload = ((upsert.body?.points as Array<{ payload: Record<string, unknown> }>)[0]!.payload);
+    assert.equal(payload.content, "Claude transcript facts use src/daemon/extraction.ts and route to the work Qdrant destination.");
+    assert.equal(payload.category, "engineering");
+    assert.equal(payload.kind, "fact");
+    assert.equal(payload.memory_subtype, "codebase_map");
+    assert.equal(payload.source, "system");
+    assert.equal((payload.metadata as Record<string, unknown>).extraction_source, "claude");
+
+    const states = JSON.parse(fs.readFileSync(path.join(STATE_DIR, "extraction-state.json"), "utf-8")) as Record<string, {
+      byte_offset: number;
+      event_count: number;
+      source: string;
+      events_path: string;
+    }>;
+    assert.equal(states["claude:session-1"]?.byte_offset, Buffer.byteLength(transcript));
+    assert.equal(states["claude:session-1"]?.event_count, 2);
+    assert.equal(states["claude:session-1"]?.source, "claude");
+    assert.equal(states["claude:session-1"]?.events_path, eventsPath);
   });
 });

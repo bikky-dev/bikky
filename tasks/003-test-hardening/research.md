@@ -64,3 +64,11 @@ Add tests for the high-priority gaps identified in the read-only codebase analys
 - The user asked to implement all identified tests.
 - Some tests may expose real bugs, especially watcher disabled handling and transcript truncation behavior. Minimal code fixes needed to make in-scope tests pass are allowed, but broader refactors should be avoided.
 - React behavioral tests may require introducing a browser DOM test dependency. Prefer server/lib/core tests first and only add dependencies if necessary for meaningful React coverage.
+
+## Follow-up research notes
+
+- PR #126 is open from `test/high-priority-coverage` and all required checks were green before the follow-up expansion.
+- Additional daemon extraction coverage can use real transcript discovery from temp Claude transcript files to avoid mocking private module internals; mocked global fetch can handle Ollama-compatible embeddings, LLM chat completions, and Qdrant REST writes.
+- MCP tool handler tests can continue using the fake `McpServer.tool()` collector; API functions route through Qdrant REST clients and embedding providers, so global fetch mocks are sufficient for happy-path write coverage.
+- UI app/client helpers live under `packages/ui/app/src`, while current UI tests only compile `packages/ui/src`. Adding Vite/Vitest-style app tests may require dev tooling changes; keep that isolated to UI dev dependencies and scripts if used.
+- `scripts/verify-package.mjs` currently executes immediately and is not importable. Unit coverage requires extracting pure helpers into a source module or making the script import-safe while preserving CLI behavior.

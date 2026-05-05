@@ -3,13 +3,13 @@
 | Field | Value |
 |---|---|
 | Task | 003-test-hardening |
-| Phase | Verification |
+| Phase | Validation |
 | State | in_progress |
 | Branch | test/high-priority-coverage |
 | Issue | #125 |
 | PR | #126 |
-| Current step | Await explicit merge approval |
-| Pending | Merge approval |
+| Current step | Commit and push expanded PR updates |
+| Pending | Commit, push, CI |
 
 ## Implementation Progress
 
@@ -23,6 +23,11 @@
 - Focused core/UI tests passed for the new coverage areas.
 - Full local validation passed: `npm run check`, `npm test`, UI typecheck/test/build, and `npm run verify:package`.
 - Opened PR #126 and all required CI checks passed.
+- Follow-up request expanded scope to add the remaining suggested tests in the same PR: daemon extraction integration, MCP store and ID mutation paths, app/client helpers, CLI smoke tests, package verifier unit helpers, and consolidation scheduler cadence.
+- Added the follow-up coverage: daemon extraction tick integration, MCP store/ID-mutation write paths, consolidation scheduler cadence, CLI subprocess smoke tests, package verifier helper tests, and UI app-client helper tests.
+- Extracted package verifier helpers into `src/package-verifier.ts` so the package verification script and unit tests share the same forbidden-path/content logic.
+- Added Vitest to the UI package for app/client helper tests while keeping existing Node test coverage intact.
+- Re-ran full local validation for root and UI packages, including package verification.
 
 ## Timeline
 
@@ -33,3 +38,5 @@
 - Implemented the high-priority test-hardening slices listed above.
 - Committed `4fe7bd8` and opened PR #126.
 - Confirmed all six required PR checks passed.
+- Reopened implementation after follow-up request to add the remaining suggested tests to the same PR.
+- Implemented the follow-up tests and completed local validation: `npm run check`, `npm test`, `cd packages/ui && npm run typecheck && npm test && npm run build`, and `npm run verify:package`.
