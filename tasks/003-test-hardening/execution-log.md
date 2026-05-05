@@ -7,9 +7,9 @@
 | State | in_progress |
 | Branch | test/high-priority-coverage |
 | Issue | #125 |
-| PR | not created yet |
-| Current step | Run full local validation |
-| Pending | Full validation, commit, PR, CI |
+| PR | #126 |
+| Current step | Await explicit merge approval |
+| Pending | Merge approval |
 
 ## Implementation Progress
 
@@ -21,6 +21,8 @@
 - Added UI redaction helper tests and server destination-listing/error tests.
 - Added package metadata safety tests for npm package include/exclude policy.
 - Focused core/UI tests passed for the new coverage areas.
+- Full local validation passed: `npm run check`, `npm test`, UI typecheck/test/build, and `npm run verify:package`.
+- Opened PR #126 and all required CI checks passed.
 
 ## Timeline
 
@@ -29,3 +31,5 @@
 - Created task folder `tasks/003-test-hardening/`.
 - Created GitHub issue #125 and branch `test/high-priority-coverage`.
 - Implemented the high-priority test-hardening slices listed above.
+- Committed `4fe7bd8` and opened PR #126.
+- Confirmed all six required PR checks passed.
