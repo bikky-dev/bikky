@@ -184,4 +184,37 @@ describe("transcript source parsing", () => {
     assert.strictEqual(result.events[0].content, "Second message.");
     assert.strictEqual(result.totalLines, 1);
   });
+
+  it("recovers from transcript truncation when byte offset is beyond EOF", async () => {
+    const line = `${JSON.stringify({
+      type: "user",
+      message: { role: "user", content: "Rotated transcript starts over." },
+    })}\n`;
+    const transcriptPath = path.join(testDir, "rotated-session.jsonl");
+    fs.writeFileSync(transcriptPath, line);
+
+    const result = await readNewTranscriptEvents(transcriptPath, 10_000, "claude");
+
+    assert.strictEqual(result.events.length, 1);
+    assert.strictEqual(result.events[0].content, "Rotated transcript starts over.");
+    assert.strictEqual(result.totalLines, 1);
+    assert.strictEqual(result.newOffset, Buffer.byteLength(line));
+  });
+
+  it("advances past malformed transcript lines without poisoning later reads", async () => {
+    const goodLine = `${JSON.stringify({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "text", text: "Valid response." }] },
+    })}\n`;
+    const content = `not-json\n${goodLine}`;
+    const transcriptPath = path.join(testDir, "malformed-session.jsonl");
+    fs.writeFileSync(transcriptPath, content);
+
+    const result = await readNewTranscriptEvents(transcriptPath, 0, "claude");
+
+    assert.strictEqual(result.events.length, 1);
+    assert.strictEqual(result.events[0].content, "Valid response.");
+    assert.strictEqual(result.totalLines, 2);
+    assert.strictEqual(result.newOffset, Buffer.byteLength(content));
+  });
 });

@@ -17,7 +17,7 @@ const savedEnv: Record<string, string | undefined> = {};
 let savedConfig: string | null = null;
 let configExisted = false;
 
-interface QdrantCall { method: string; path: string; body: any }
+interface QdrantCall { method: string; url: string; host: string; path: string; body: any }
 
 /**
  * Install a fetch mock that pretends to be Qdrant + the embedding endpoint.
@@ -45,9 +45,10 @@ function installMock(opts: {
       }), { status: 200 });
     }
 
-    // Qdrant endpoint — extract path after the base URL
-    const qdrantPath = url.replace("https://q.test", "");
-    const call: QdrantCall = { method, path: qdrantPath, body };
+    // Qdrant endpoint — keep host and path so multi-destination tests can
+    // assert that requests were sent to the intended configured destination.
+    const parsed = new URL(url);
+    const call: QdrantCall = { method, url, host: parsed.host, path: parsed.pathname, body };
     calls.push(call);
 
     const result = opts.qdrantHandler ? opts.qdrantHandler(call) : { result: [] };
@@ -102,6 +103,29 @@ const sampleEntityType = (name: string, type: string, overrides: Record<string, 
     ...overrides,
   },
 });
+
+function writeMultiDestinationConfig(): void {
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+    collection: "fallback",
+    destinations: [
+      {
+        name: "perso",
+        qdrant_url: "https://perso.q.test",
+        qdrant_api_key: "perso-key",
+        collection: "perso_collection",
+        default: true,
+      },
+      {
+        name: "work",
+        qdrant_url: "https://work.q.test",
+        qdrant_api_key: "work-key",
+        collection: "work_collection",
+      },
+    ],
+    embedding: { provider: "ollama", model: "qwen", base_url: "http://embed.test", dimensions: 3 },
+  }));
+  _resetConfig();
+}
 
 describe("ui/routes/memory", () => {
   before(() => {
@@ -226,6 +250,30 @@ describe("ui/routes/memory", () => {
       const search = log.calls.find((c) => c.path.endsWith("/points/search"));
       assert.equal(search!.body.limit, 100);
     });
+
+    it("fans out destination=all searches and tags merged results", async () => {
+      writeMultiDestinationConfig();
+      const log = installMock({
+        qdrantHandler: (c) => ({
+          result: c.host === "perso.q.test"
+            ? [{ ...sampleFact({ content: "Personal Bikky memory" }), score: 0.8 }]
+            : [{ ...sampleFact({ content: "Work Bikky memory" }), id: "22222222-2222-2222-2222-222222222222", score: 0.95 }],
+        }),
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=bikky&destination=all"));
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { results: Array<{ content: string; _destination?: string }>; count: number };
+      assert.equal(body.count, 2);
+      assert.deepEqual(body.results.map((r) => r.content), ["Work Bikky memory", "Personal Bikky memory"]);
+      assert.deepEqual(body.results.map((r) => r._destination), ["work", "perso"]);
+      assert.deepEqual(
+        log.calls.filter((c) => c.path.endsWith("/points/search")).map((c) => c.host).sort(),
+        ["perso.q.test", "work.q.test"],
+      );
+    });
   });
 
   describe("GET /browse", () => {
@@ -323,6 +371,56 @@ describe("ui/routes/memory", () => {
         { key: "memory_subtype", match: { value: "convention" } },
         { key: "kind", match: { value: "distilled" } },
       ]);
+    });
+
+    it("targets a named destination when destination is provided", async () => {
+      writeMultiDestinationConfig();
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/count")) return { result: { count: 1 } };
+          return { result: { points: [sampleFact()], next_page_offset: null } };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/browse?destination=work"));
+
+      assert.equal(res.status, 200);
+      assert.deepEqual([...new Set(log.calls.map((c) => c.host))], ["work.q.test"]);
+      assert.deepEqual([...new Set(log.calls.map((c) => c.path.split("/")[2]))], ["work_collection"]);
+    });
+
+    it("fans out destination=all browse requests and suppresses cross-destination offset", async () => {
+      writeMultiDestinationConfig();
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/count")) return { result: { count: 1 } };
+          return {
+            result: {
+              points: [
+                c.host === "perso.q.test"
+                  ? sampleFact({ content: "Personal fact" })
+                  : { ...sampleFact({ content: "Work fact" }), id: "22222222-2222-2222-2222-222222222222" },
+              ],
+              next_page_offset: "ignored",
+            },
+          };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/browse?destination=all&offset=cursor-should-not-cross-destinations"));
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { results: Array<{ content: string; _destination?: string }>; count: number; nextOffset: string | null };
+      assert.equal(body.count, 2);
+      assert.equal(body.nextOffset, null);
+      assert.deepEqual(body.results.map((r) => r._destination), ["perso", "work"]);
+      assert.equal(log.calls.some((c) => c.body?.offset === "cursor-should-not-cross-destinations"), false);
+      assert.deepEqual(
+        log.calls.filter((c) => c.path.endsWith("/points/scroll")).map((c) => c.host).sort(),
+        ["perso.q.test", "work.q.test"],
+      );
     });
   });
 

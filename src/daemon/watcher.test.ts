@@ -104,6 +104,24 @@ describe("discoverSessions", () => {
     assert.strictEqual(sessions[0].active, false);
   });
 
+  it("returns empty array when the Copilot watcher is disabled", () => {
+    const sessionsDir = path.join(testDir, "copilot-disabled");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const sessionDir = path.join(sessionsDir, "disabled-session");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, "events.jsonl"), '{"event":"test"}\n');
+
+    saveConfig({
+      ...CONFIG_DEFAULTS,
+      watchers: {
+        ...CONFIG_DEFAULTS.watchers,
+        copilot: { enabled: false, path: sessionsDir },
+      },
+    });
+
+    assert.deepStrictEqual(discoverSessions(), []);
+  });
+
   it("marks sessions with lock files as active", () => {
     const sessionsDir = path.join(testDir, "active-sessions");
     fs.mkdirSync(sessionsDir, { recursive: true });
