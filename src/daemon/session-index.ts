@@ -146,12 +146,14 @@ export const buildSessionIndexPayload = (input: {
 const findExistingSessionIndex = async (
   sessionId: string,
   scope: WorkspaceScope,
+  destination?: string,
 ): Promise<{ id: string; payload?: Partial<QdrantPayload> } | null> => {
-  const result = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/scroll`, {
+  const collection = qdrant.collectionForDestination(destination);
+  const result = await qdrant.qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
     filter: buildSessionIndexFilter(sessionId, scope),
     limit: 1,
     with_payload: true,
-  }) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
+  }, destination) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
 
   return result.result?.points?.[0] ?? null;
 };
@@ -162,16 +164,29 @@ export const updateSessionIndex = async (input: {
   episodeResults: EpisodeSummaryWriteResult[];
   scope: WorkspaceScope;
   config: BikkyConfig;
-}): Promise<{ action: "stored" | "updated" | "skipped"; factId?: string; reason?: string }> => {
+  destination?: string;
+}): Promise<{ action: "stored" | "updated" | "skipped"; factId?: string; destination?: string; reason?: string }> => {
   if (input.episodeResults.length === 0) {
     return { action: "skipped", reason: "no_episode_results" };
   }
-  const existing = await findExistingSessionIndex(input.sessionId, input.scope);
   const draft = buildSessionIndexDraft({
     sessionId: input.sessionId,
     eventCount: input.eventCount,
     episodeResults: input.episodeResults,
   });
+  const destination = input.destination
+    ?? input.episodeResults.find((result) => result.destination)?.destination
+    ?? qdrant.resolveDestination({
+      content: draft.content,
+      entities: draft.entities,
+      metadata: {
+        session_id: input.sessionId,
+        memory_subtype: "session_index",
+        kind: "summary",
+        source: "system",
+      },
+    }).name;
+  const existing = await findExistingSessionIndex(input.sessionId, input.scope, destination);
   const now = new Date().toISOString();
   const { payload } = buildSessionIndexPayload({
     draft,
@@ -188,9 +203,10 @@ export const updateSessionIndex = async (input: {
   const vector = await qdrant.embed(String(payload.content));
   const factId = existing?.id ?? randomUUID();
 
-  await qdrant.qdrantRequest("PUT", `/collections/${qdrant.collection}/points`, {
+  const collection = qdrant.collectionForDestination(destination);
+  await qdrant.qdrantRequest("PUT", `/collections/${collection}/points`, {
     points: [{ id: factId, vector, payload }],
-  });
+  }, destination);
 
-  return { action: existing ? "updated" : "stored", factId };
+  return { action: existing ? "updated" : "stored", factId, destination };
 };

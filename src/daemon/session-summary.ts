@@ -249,18 +249,42 @@ export const updateSessionSummary = async (input: {
     return { action: "skipped", reason: "no_episode_summaries" };
   }
 
-  const indexResult = await updateSessionIndex({
-    sessionId: input.sessionId,
-    eventCount: input.eventCount,
-    episodeResults,
-    scope,
-    config,
-  });
+  let indexResult: Awaited<ReturnType<typeof updateSessionIndex>> | null = null;
+  const episodeResultsByDestination = new Map<string, typeof episodeResults>();
+  for (const result of episodeResults) {
+    const destination = result.destination ?? qdrant.resolveDestination({
+      content: result.workstreamKey ?? result.episodeId ?? input.sessionId,
+      entities: [result.workstreamKey, result.episodeId].filter((value): value is string => Boolean(value)),
+      metadata: {
+        session_id: input.sessionId,
+        ...(result.episodeId ? { episode_id: result.episodeId } : {}),
+        ...(result.workstreamKey ? { workstream_key: result.workstreamKey } : {}),
+        kind: "summary",
+        memory_subtype: "session_index",
+        source: "system",
+      },
+    }).name;
+    const bucket = episodeResultsByDestination.get(destination) ?? [];
+    bucket.push(result);
+    episodeResultsByDestination.set(destination, bucket);
+  }
+
+  for (const [destination, destinationEpisodeResults] of episodeResultsByDestination) {
+    const result = await updateSessionIndex({
+      sessionId: input.sessionId,
+      eventCount: input.eventCount,
+      episodeResults: destinationEpisodeResults,
+      scope,
+      config,
+      destination,
+    });
+    indexResult ??= result;
+  }
   await updateWorkstreamSummaries({ episodeResults, scope, config });
 
   return {
-    action: indexResult.action,
-    factId: indexResult.factId,
-    reason: indexResult.reason,
+    action: indexResult?.action ?? "skipped",
+    factId: indexResult?.factId,
+    reason: indexResult?.reason,
   };
 };

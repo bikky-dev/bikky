@@ -23,7 +23,7 @@ export interface StaleDeps {
 
 const defaultDeps: StaleDeps = {
   isReady: qdrantMod.isReady,
-  scrollFacts: qdrantMod.scrollFacts,
+  scrollFacts: qdrantMod.scrollFactsAcrossDestinations,
 };
 
 /**
@@ -55,7 +55,7 @@ export const scanStaleFacts = async (config: BikkyConfig, deps: StaleDeps = defa
 
     if (staleFacts.length > 0) {
       // Deduplicate: only log if the set of stale fact IDs has changed
-      const currentIds = staleFacts.map((f) => f.id).sort().join(",");
+      const currentIds = staleFacts.map((f) => `${f.destination ?? "default"}:${f.id}`).sort().join(",");
       if (currentIds === lastStaleIds) {
         logFn("DEBUG", `Staleness scan: same ${staleFacts.length} fact(s) still stale, skipping duplicate log`);
         return;

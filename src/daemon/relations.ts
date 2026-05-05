@@ -122,8 +122,9 @@ const buildChangedCoOccurrenceCandidates = (facts: QdrantScrollResult[]): Change
  * Get the set of entity pairs that already have a system-inferred relation.
  * Returns a Set of pairKeys.
  */
-const getExistingRelations = async (): Promise<Set<string>> => {
+const getExistingRelations = async (destination?: string): Promise<Set<string>> => {
   const existing = new Set<string>();
+  const collection = qdrant.collectionForDestination(destination);
 
   let offset: string | null = null;
   for (;;) {
@@ -142,8 +143,9 @@ const getExistingRelations = async (): Promise<Set<string>> => {
 
     const result = await qdrant.qdrantRequest(
       "POST",
-      `/collections/${qdrant.collection}/points/scroll`,
+      `/collections/${collection}/points/scroll`,
       body,
+      destination,
     ) as {
       result?: {
         points?: Array<{ id: string; payload?: { from_entity?: string; to_entity?: string } }>;
@@ -171,10 +173,12 @@ const getExistingRelations = async (): Promise<Set<string>> => {
 const fetchSupportingFacts = async (
   entityA: string,
   entityB: string,
+  destination?: string,
 ): Promise<RelationFact[]> => {
+  const collection = qdrant.collectionForDestination(destination);
   const result = await qdrant.qdrantRequest(
     "POST",
-    `/collections/${qdrant.collection}/points/scroll`,
+    `/collections/${collection}/points/scroll`,
     {
       filter: {
         must: [
@@ -191,6 +195,7 @@ const fetchSupportingFacts = async (
       limit: SUPPORTING_FACTS_LIMIT,
       with_payload: true,
     },
+    destination,
   ) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
 
   return (result.result?.points ?? []).map((point) => ({
@@ -206,8 +211,9 @@ const fetchSupportingFacts = async (
 
 const buildRelationCandidate = async (
   changed: ChangedCoOccurrence,
+  destination?: string,
 ): Promise<RelationCandidate | null> => {
-  const supportingFacts = await fetchSupportingFacts(changed.entityA, changed.entityB);
+  const supportingFacts = await fetchSupportingFacts(changed.entityA, changed.entityB, destination);
   if (supportingFacts.length < MIN_SHARED_FACTS) return null;
 
   return {
@@ -332,6 +338,7 @@ const storeRelation = async (
   relationType: string,
   content: string,
   candidate: RelationCandidate,
+  destination?: string,
   extras: { evidence?: string; confidence?: number; inVocabulary?: boolean; judgment?: { evidence_strength?: number; durability?: string; directionality_clarity?: string } } = {},
 ): Promise<string> => {
   const hash = createHash("sha256")
@@ -373,7 +380,7 @@ const storeRelation = async (
       type: relationType,
       to: toEntity,
     },
-  });
+  }, destination ? { destination } : undefined);
 
   logFn("INFO", `Relations: inferred ${fromEntity} —[${relationType}]→ ${toEntity} (id: ${id})`);
   return id;
@@ -393,13 +400,14 @@ const tick = async (config: BikkyConfig): Promise<void> => {
   const attempts = pruneRecentAttempts(job.recent_attempts, now, RELATION_ATTEMPT_BACKOFF_MS);
   const maxPairs = config.daemon.relation_inference_max_pairs_per_run ?? 3;
   const since = job.cursor_updated_at ?? new Date(now.getTime() - DEFAULT_LOOKBACK_MS).toISOString();
+  const destination = qdrant.resolveDestination({}).name;
 
   try {
     const changedFacts = await qdrant.scrollFacts({
       sinceUpdated: since,
       excludeKinds: ["relation"],
       orderBy: { key: "updated_at", direction: "asc" },
-    }, CHANGED_FACTS_LIMIT);
+    }, CHANGED_FACTS_LIMIT, destination);
 
     if (changedFacts.length === 0) {
       recordMaintenanceRun("relation_inference", {
@@ -428,7 +436,7 @@ const tick = async (config: BikkyConfig): Promise<void> => {
       return;
     }
 
-    const existing = await getExistingRelations();
+    const existing = await getExistingRelations(destination);
     const touchedPairs = changedPairs
       .filter((pair) => !existing.has(pairKey(pair.entityA, pair.entityB)))
       .filter((pair) => !isAttemptBackedOff(attempts, pairKey(pair.entityA, pair.entityB), now, RELATION_ATTEMPT_BACKOFF_MS));
@@ -436,7 +444,7 @@ const tick = async (config: BikkyConfig): Promise<void> => {
     const supportLookupLimit = Math.max(maxPairs * 5, maxPairs);
     const relationCandidates: RelationCandidate[] = [];
     for (const changed of touchedPairs.slice(0, supportLookupLimit)) {
-      const candidate = await buildRelationCandidate(changed);
+      const candidate = await buildRelationCandidate(changed, destination);
       if (candidate) relationCandidates.push(candidate);
       if (relationCandidates.length >= maxPairs) break;
     }
@@ -456,7 +464,7 @@ const tick = async (config: BikkyConfig): Promise<void> => {
         const hash = createHash("sha256")
           .update(`daemon-relation:${pairKey(result.from, result.to)}:${result.type}`)
           .digest("hex");
-        const dedup = await qdrant.dedupCheck(result.content, hash);
+        const dedup = await qdrant.dedupCheck(result.content, hash, undefined, undefined, { destination });
         if (dedup.action === "skip") {
           logFn("DEBUG", `Relations: skipping duplicate ${candidate.entityA}↔${candidate.entityB}`);
           continue;
@@ -468,6 +476,7 @@ const tick = async (config: BikkyConfig): Promise<void> => {
           result.type,
           result.content,
           candidate,
+          destination,
           { evidence: result.evidence, confidence: result.confidence, inVocabulary: result.inVocabulary, judgment: result.judgment },
         );
         inferred++;

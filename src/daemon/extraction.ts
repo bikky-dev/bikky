@@ -534,14 +534,27 @@ const storeFacts = async (
       entities: fact.entities.map((entity) => entity.toLowerCase()),
     };
     const hash = contentHash(sanitizedFact.content);
+    const routeInput = {
+      content: sanitizedFact.content,
+      entities: sanitizedFact.entities,
+      metadata: {
+        ...baseMeta,
+        ...(fact.repo ? { repo: fact.repo } : {}),
+        ...(fact.branch ? { branch: fact.branch } : {}),
+        ...(fact.task_key ? { task_key: fact.task_key } : {}),
+        ...(fact.workstream_key ? { workstream_key: fact.workstream_key } : {}),
+        ...(actor.actor_id ? { actor_id: actor.actor_id } : {}),
+        category: fact.category,
+      },
+    };
 
     try {
-      const dedup = await qdrant.dedupCheck(sanitizedFact.content, hash);
+      const dedup = await qdrant.dedupCheck(sanitizedFact.content, hash, undefined, undefined, routeInput);
 
       if (dedup.action === "skip") {
         // Reinforce existing fact
         if (dedup.existingId) {
-          await qdrant.reinforceFact(dedup.existingId, dedup.existingCount || 1);
+          await qdrant.reinforceFact(dedup.existingId, dedup.existingCount || 1, dedup.destination);
         }
         continue;
       }
@@ -552,6 +565,7 @@ const storeFacts = async (
           const contradiction = await detectContradiction(sanitizedFact, config, {
             sessionId,
             workstreamKey: sanitizedFact.workstream_key ?? undefined,
+            destination: dedup.destination,
           });
           if (contradiction.contradiction && contradiction.existingId) {
             logFn("INFO", `Extraction: contradiction detected for "${fact.content.slice(0, 60)}..." vs ${contradiction.existingId}: ${contradiction.reason}`);
@@ -644,7 +658,7 @@ const storeFacts = async (
       // Downgrade to candidate with reduced confidence rather than dropping
       // outright: similarity is a soft signal, not a hard reject.
       try {
-        const badMatch = await qdrant.badExemplarCheck(sanitizedFact.content);
+        const badMatch = await qdrant.badExemplarCheck(sanitizedFact.content, undefined, routeInput);
         if (badMatch && badMatch.score >= 0.85) {
           effectiveConfidence = clamp01(effectiveConfidence - 0.2);
           reviewStatus = "candidate";
@@ -690,11 +704,11 @@ const storeFacts = async (
       }
 
       if (dedup.action === "supersede" && dedup.existingId) {
-        const newId = await qdrant.storeFact(storePayload);
-        await qdrant.supersedeFact(dedup.existingId, newId);
+        const newId = await qdrant.storeFact(storePayload, routeInput);
+        await qdrant.supersedeFact(dedup.existingId, newId, dedup.destination);
         stored++;
       } else {
-        await qdrant.storeFact(storePayload);
+        await qdrant.storeFact(storePayload, routeInput);
         stored++;
       }
     } catch (e) {

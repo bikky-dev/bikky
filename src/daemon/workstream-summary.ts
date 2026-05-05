@@ -50,6 +50,7 @@ export interface WorkstreamSummaryPayloadResult {
 export interface WorkstreamUpdateResult {
   action: "stored" | "updated" | "skipped";
   factId?: string;
+  destination?: string;
   workstreamKey?: string;
   reason?: string;
 }
@@ -83,6 +84,22 @@ export const groupEpisodeResultsByWorkstream = (
     const existing = grouped.get(key) ?? [];
     existing.push(result);
     grouped.set(key, existing);
+  }
+  return grouped;
+};
+
+const groupEpisodeResultsByWorkstreamDestination = (
+  episodeResults: EpisodeSummaryWriteResult[],
+): Map<string, { workstreamKey: string; destination?: string; results: EpisodeSummaryWriteResult[] }> => {
+  const grouped = new Map<string, { workstreamKey: string; destination?: string; results: EpisodeSummaryWriteResult[] }>();
+  for (const result of episodeResults) {
+    const workstreamKey = result.workstreamKey?.trim();
+    if (!workstreamKey || !result.episodeId) continue;
+    const destination = result.destination?.trim();
+    const groupKey = `${destination ?? ""}::${workstreamKey}`;
+    const existing = grouped.get(groupKey) ?? { workstreamKey, destination, results: [] };
+    existing.results.push(result);
+    grouped.set(groupKey, existing);
   }
   return grouped;
 };
@@ -229,24 +246,28 @@ const findExistingWorkstreamSummary = async (
   workstreamKey: string,
   scope: WorkspaceScope,
   repo?: string | null,
+  destination?: string,
 ): Promise<{ id: string; payload?: Partial<QdrantPayload> } | null> => {
-  const result = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/scroll`, {
+  const collection = qdrant.collectionForDestination(destination);
+  const result = await qdrant.qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
     filter: buildWorkstreamSummaryFilter(workstreamKey, scope, repo),
     limit: 1,
     with_payload: true,
-  }) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
+  }, destination) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
   return result.result?.points?.[0] ?? null;
 };
 
 const loadEpisodeSummaries = async (
   workstreamKey: string,
   scope: WorkspaceScope,
+  destination?: string,
 ): Promise<Array<{ id: string; payload?: Partial<QdrantPayload> }>> => {
-  const result = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/scroll`, {
+  const collection = qdrant.collectionForDestination(destination);
+  const result = await qdrant.qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
     filter: buildWorkstreamEpisodeFilter(workstreamKey, scope),
     limit: CAPTURE_TRIGGERS.workstreamSummary.maxEpisodesPerUpdate,
     with_payload: true,
-  }) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
+  }, destination) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
   return result.result?.points ?? [];
 };
 
@@ -269,21 +290,32 @@ export const updateWorkstreamSummaries = async (input: {
   scope: WorkspaceScope;
   config: BikkyConfig;
 }): Promise<WorkstreamUpdateResult[]> => {
-  const grouped = groupEpisodeResultsByWorkstream(input.episodeResults);
+  const grouped = groupEpisodeResultsByWorkstreamDestination(input.episodeResults);
   if (grouped.size === 0) return [{ action: "skipped", reason: "no_workstream_keys" }];
 
   const results: WorkstreamUpdateResult[] = [];
-  for (const [workstreamKey] of grouped) {
-    const episodes = await loadEpisodeSummaries(workstreamKey, input.scope);
+  for (const { workstreamKey, destination: groupDestination } of grouped.values()) {
+    const destination = groupDestination
+      ?? qdrant.resolveDestination({
+        content: workstreamKey,
+        entities: [workstreamKey],
+        metadata: {
+          workstream_key: workstreamKey,
+          memory_subtype: "workstream",
+          kind: "summary",
+          source: "system",
+        },
+      }).name;
+    const episodes = await loadEpisodeSummaries(workstreamKey, input.scope, destination);
     const episodeSummaries = episodes
       .map((episode) => episode.payload?.content)
       .filter((content): content is string => Boolean(content?.trim()));
     if (episodeSummaries.length < CAPTURE_TRIGGERS.workstreamSummary.minEpisodeCount) {
-      results.push({ action: "skipped", reason: "not_enough_episodes", workstreamKey });
+      results.push({ action: "skipped", reason: "not_enough_episodes", workstreamKey, destination });
       continue;
     }
 
-    const existing = await findExistingWorkstreamSummary(workstreamKey, input.scope, null);
+    const existing = await findExistingWorkstreamSummary(workstreamKey, input.scope, null, destination);
     const draft = await summarizeWorkstream({
       workstreamKey,
       existingSummary: existing?.payload?.content ?? null,
@@ -305,10 +337,11 @@ export const updateWorkstreamSummaries = async (input: {
     });
     const vector = await qdrant.embed(String(payload.content));
     const factId = existing?.id ?? randomUUID();
-    await qdrant.qdrantRequest("PUT", `/collections/${qdrant.collection}/points`, {
+    const collection = qdrant.collectionForDestination(destination);
+    await qdrant.qdrantRequest("PUT", `/collections/${collection}/points`, {
       points: [{ id: factId, vector, payload }],
-    });
-    results.push({ action: existing ? "updated" : "stored", factId, workstreamKey });
+    }, destination);
+    results.push({ action: existing ? "updated" : "stored", factId, workstreamKey, destination });
   }
 
   return results;

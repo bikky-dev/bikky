@@ -66,6 +66,7 @@ export interface EpisodeSummaryWriteResult {
   action: "stored" | "updated" | "skipped";
   factId?: string;
   episodeId?: string;
+  destination?: string;
   workstreamKey?: string | null;
   reason?: string;
 }
@@ -278,12 +279,14 @@ const summarizeEpisodeTranscript = async (input: {
 const findExistingEpisodeSummary = async (
   episodeId: string,
   scope: WorkspaceScope,
+  destination?: string,
 ): Promise<{ id: string; payload?: Partial<QdrantPayload> } | null> => {
-  const result = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/scroll`, {
+  const collection = qdrant.collectionForDestination(destination);
+  const result = await qdrant.qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
     filter: buildEpisodeSummaryFilter(episodeId, scope),
     limit: 1,
     with_payload: true,
-  }) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
+  }, destination) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
 
   return result.result?.points?.[0] ?? null;
 };
@@ -299,7 +302,22 @@ export const updateEpisodeSummary = async (input: {
     return { action: "skipped", reason: "empty_transcript", episodeId: input.segment.episode_id };
   }
 
-  const existing = await findExistingEpisodeSummary(input.segment.episode_id, input.scope);
+  const destination = qdrant.resolveDestination({
+    content: input.segment.transcript,
+    entities: [
+      input.sessionId,
+      ...(input.segment.workstream_key ? [input.segment.workstream_key] : []),
+    ],
+    metadata: {
+      session_id: input.sessionId,
+      episode_id: input.segment.episode_id,
+      ...(input.segment.workstream_key ? { workstream_key: input.segment.workstream_key } : {}),
+      memory_subtype: "episode",
+      kind: "summary",
+      source: "system",
+    },
+  });
+  const existing = await findExistingEpisodeSummary(input.segment.episode_id, input.scope, destination.name);
   const draft = await summarizeEpisodeTranscript({
     transcript: input.segment.transcript,
     sessionId: input.sessionId,
@@ -335,14 +353,15 @@ export const updateEpisodeSummary = async (input: {
   const vector = await qdrant.embed(String(payload.content));
   const factId = existing?.id ?? randomUUID();
 
-  await qdrant.qdrantRequest("PUT", `/collections/${qdrant.collection}/points`, {
+  await qdrant.qdrantRequest("PUT", `/collections/${destination.collection}/points`, {
     points: [{ id: factId, vector, payload }],
-  });
+  }, destination.name);
 
   return {
     action: existing ? "updated" : "stored",
     factId,
     episodeId: input.segment.episode_id,
+    destination: destination.name,
     workstreamKey: resolved.key,
   };
 };
