@@ -10,10 +10,12 @@
 
 import { createHash, randomUUID } from "node:crypto";
 
-import { loadConfig } from "../config.js";
+import { getEffectiveDestinations, loadConfig, type Destination } from "../config.js";
 import { embed, initEmbedding, getEmbeddingConfig } from "../llm/index.js";
 import type { InitEmbeddingInput } from "../llm/index.js";
-import { QdrantClient, type QdrantLogLevel } from "../lib/qdrant-client.js";
+import { type QdrantLogLevel } from "../lib/qdrant-client.js";
+import { QdrantPool } from "../lib/qdrant-pool.js";
+import { buildResolver, type RoutingInput } from "../routing.js";
 import {
   DEFAULT_DOMAIN,
   QDRANT_INDEXES,
@@ -124,6 +126,7 @@ export interface StoreFact {
 
 export interface QdrantSearchResult {
   id: string;
+  destination?: string;
   score: number;
   content: string;
   category: string;
@@ -135,6 +138,7 @@ export interface QdrantSearchResult {
 
 export interface QdrantScrollResult {
   id: string;
+  destination?: string;
   content: string;
   category: string;
   entities: string[];
@@ -177,6 +181,7 @@ export type DedupAction = "insert" | "skip" | "supersede";
 
 export interface DedupResult {
   action: DedupAction;
+  destination?: string;
   existingId?: string;
   existingCount?: number;
   score?: number;
@@ -191,11 +196,11 @@ export interface DedupThresholds {
 // State
 // ---------------------------------------------------------------------------
 
-let qdrantUrl: string | null = null;
-let qdrantApiKey: string | null = null;
 let collection: string = "bikky";
 let logFn: LogFn = () => {};
-let client: QdrantClient | null = null;
+let destinations: Destination[] = [];
+let pool: QdrantPool | null = null;
+let resolver: ((input: RoutingInput) => Destination) | null = null;
 
 const setLogger = (fn: LogFn): void => { logFn = fn; };
 const setEmbeddingConfig = (overrides?: Partial<InitEmbeddingInput>): void => {
@@ -204,6 +209,62 @@ const setEmbeddingConfig = (overrides?: Partial<InitEmbeddingInput>): void => {
 
 const clientLogAdapter = (level: QdrantLogLevel, msg: string): void => logFn(level, msg);
 
+type DestinationRef = Destination | string | null | undefined;
+
+const fallbackDestination = (): Destination => {
+  if (destinations.length === 0) {
+    throw new Error("Qdrant client not initialized — call init() first");
+  }
+  return destinations.find((destination) => destination.default === true) ?? destinations[0]!;
+};
+
+const resolveDestination = (input: RoutingInput = {}): Destination => {
+  if (!resolver) return fallbackDestination();
+  return resolver(input);
+};
+
+const destinationFromRef = (ref?: DestinationRef): Destination => {
+  if (!ref) return fallbackDestination();
+  if (typeof ref !== "string") return ref;
+  const found = destinations.find((destination) => destination.name === ref);
+  if (!found) {
+    throw new Error(`Unknown Qdrant destination '${ref}'. Configured destinations: ${destinations.map((d) => d.name).join(", ") || "(none)"}`);
+  }
+  return found;
+};
+
+const pathForDestination = (urlPath: string, destination: Destination): string => {
+  if (!urlPath.startsWith("/collections/")) return urlPath;
+  return urlPath.replace(/^\/collections\/[^/]+/, `/collections/${destination.collection}`);
+};
+
+const routingInputForFact = (
+  fact: StoreFact,
+  normalizedContent: string,
+  normalizedEntities: string[],
+  extraMetadata: Record<string, unknown> = {},
+): RoutingInput => ({
+  content: normalizedContent,
+  entities: normalizedEntities,
+  metadata: {
+    ...(fact.metadata ?? {}),
+    ...extraMetadata,
+    category: fact.category,
+    domain: fact.domain ?? DEFAULT_DOMAIN,
+    kind: fact.kind ?? "fact",
+    ...(fact.memory_subtype ? { memory_subtype: fact.memory_subtype } : {}),
+    ...(fact.source ? { source: fact.source } : {}),
+    ...(fact.actor_id ? { actor_id: fact.actor_id } : {}),
+    ...(fact.session_id ? { session_id: fact.session_id } : {}),
+    ...(fact.episode_id ? { episode_id: fact.episode_id } : {}),
+    ...(fact.workstream_key ? { workstream_key: fact.workstream_key } : {}),
+    ...(fact.task_key ? { task_key: fact.task_key } : {}),
+    ...(fact.repo ? { repo: fact.repo } : {}),
+    ...(fact.branch ? { branch: fact.branch } : {}),
+    ...(fact.surface ? { surface: fact.surface } : {}),
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Init — reads credentials from loadConfig()
 // ---------------------------------------------------------------------------
@@ -211,11 +272,10 @@ const clientLogAdapter = (level: QdrantLogLevel, msg: string): void => logFn(lev
 const init = (): boolean => {
   const cfg = loadConfig();
 
-  qdrantUrl = cfg.qdrant_url;
-  qdrantApiKey = cfg.qdrant_api_key;
-  collection = cfg.collection || "bikky";
-
-  if (qdrantUrl) qdrantUrl = qdrantUrl.replace(/\/+$/, "");
+  destinations = getEffectiveDestinations(cfg);
+  collection = (destinations.find((destination) => destination.default === true) ?? destinations[0])?.collection
+    ?? cfg.collection
+    ?? "bikky";
 
   // Initialize embedding provider from config
   const embCfg = initEmbedding({
@@ -231,33 +291,43 @@ const init = (): boolean => {
   });
   logFn("INFO", `Embedding provider: ${embCfg.provider}/${embCfg.model} (${embCfg.dimensions}d) @ ${embCfg.baseUrl}`);
 
-  const ready = !!qdrantUrl;
+  const ready = destinations.length > 0;
   if (ready) {
-    client = new QdrantClient({
-      url: qdrantUrl as string,
-      apiKey: qdrantApiKey,
-      collection,
-      timeoutMs: cfg.qdrant_client.timeout_ms,
-      retries: cfg.qdrant_client.retries,
-      retryBaseDelayMs: cfg.qdrant_client.retry_base_delay_ms,
+    pool = new QdrantPool(destinations, {
+      client: cfg.qdrant_client,
       log: clientLogAdapter,
     });
+    resolver = buildResolver(destinations);
+    logFn("INFO", `Qdrant destinations: ${destinations.map((destination) => `${destination.name}/${destination.collection}`).join(", ")}`);
   } else {
-    client = null;
+    pool = null;
+    resolver = null;
     logFn("WARN", "Qdrant client: missing URL (some memory features disabled)");
   }
   return ready;
 };
 
-const isReady = (): boolean => !!(qdrantUrl && client);
+const isReady = (): boolean => !!(pool && destinations.length > 0);
 
 const ensureCollection = async (): Promise<void> => {
-  if (!client) {
+  if (!pool) {
     throw new Error("Qdrant client not initialized — call init() first");
   }
   const embCfg = getEmbeddingConfig();
-  await client.ensureCollection(embCfg.dimensions, QDRANT_INDEXES);
-  logFn("INFO", `Qdrant collection '${collection}' ready (${QDRANT_INDEXES.length} indexes)`);
+  const results = await Promise.all(destinations.map(async (destination) => {
+    try {
+      await pool!.ensureCollection(destination.name, embCfg.dimensions, QDRANT_INDEXES);
+      logFn("INFO", `Qdrant destination '${destination.name}' collection '${destination.collection}' ready (${QDRANT_INDEXES.length} indexes)`);
+      return { destination, ok: true, error: null as string | null };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      logFn("WARN", `Qdrant destination '${destination.name}' readiness check failed: ${message}`);
+      return { destination, ok: false, error: message };
+    }
+  }));
+  if (!results.some((result) => result.ok)) {
+    throw new Error(`No Qdrant destinations ready: ${results.map((result) => `${result.destination.name}: ${result.error}`).join("; ")}`);
+  }
 };
 
 
@@ -265,13 +335,38 @@ const ensureCollection = async (): Promise<void> => {
 // HTTP requests
 // ---------------------------------------------------------------------------
 
-const qdrantRequest = async (method: string, urlPath: string, body?: unknown): Promise<Record<string, unknown>> => {
-  if (!client) {
+const qdrantRequest = async (
+  method: string,
+  urlPath: string,
+  body?: unknown,
+  destinationRef?: DestinationRef,
+): Promise<Record<string, unknown>> => {
+  if (!pool) {
     throw new Error(`Qdrant client not initialized — call init() first (${method} ${urlPath})`);
   }
-  const result = await client.request<Record<string, unknown> | undefined>(method, urlPath, body);
+  const destination = destinationFromRef(destinationRef);
+  const result = await pool.client(destination.name).request<Record<string, unknown> | undefined>(
+    method,
+    pathForDestination(urlPath, destination),
+    body,
+  );
   // Some Qdrant endpoints return empty bodies on success — preserve old return shape.
   return result ?? {};
+};
+
+const collectionForDestination = (destinationRef?: DestinationRef): string =>
+  destinationFromRef(destinationRef).collection;
+
+const destinationNames = (): string[] => destinations.map((destination) => destination.name);
+
+const readyDestinations = (): Destination[] => {
+  if (!pool) return [];
+  return destinations.filter((destination) => pool!.isCollectionReady(destination.name));
+};
+
+const activeDestinations = (): Destination[] => {
+  const ready = readyDestinations();
+  return ready.length > 0 ? ready : destinations;
 };
 
 // ---------------------------------------------------------------------------
@@ -282,7 +377,9 @@ const searchFacts = async (
   query: string,
   filters: QdrantSearchFilters = {},
   limit = 10,
+  destinationRef?: DestinationRef,
 ): Promise<QdrantSearchResult[]> => {
+  const destination = destinationFromRef(destinationRef);
   const vector = await embed(query);
 
   const must: Record<string, unknown>[] = [
@@ -308,15 +405,16 @@ const searchFacts = async (
     must.push({ key: "workspace_id", match: { value: filters.workspaceId } });
   }
 
-  const result = await qdrantRequest("POST", `/collections/${collection}/points/search`, {
+  const result = await qdrantRequest("POST", `/collections/${destination.collection}/points/search`, {
     vector,
     filter: { must },
     limit,
     with_payload: true,
-  }) as { result?: Array<{ id: string; score: number; payload?: Partial<QdrantPayload> }> };
+  }, destination) as { result?: Array<{ id: string; score: number; payload?: Partial<QdrantPayload> }> };
 
   return (result.result || []).map((hit) => ({
     id: hit.id,
+    destination: destination.name,
     score: hit.score,
     content: hit.payload?.content ?? "",
     category: hit.payload?.category ?? "",
@@ -330,7 +428,9 @@ const searchFacts = async (
 const scrollFacts = async (
   filters: QdrantScrollFilters = {},
   limit = 10,
+  destinationRef?: DestinationRef,
 ): Promise<QdrantScrollResult[]> => {
+  const destination = destinationFromRef(destinationRef);
   const must: Record<string, unknown>[] = [
     { is_null: { key: "superseded_by" } },
   ];
@@ -382,15 +482,16 @@ const scrollFacts = async (
   if (filters.workspaceId) {
     must.push({ key: "workspace_id", match: { value: filters.workspaceId } });
   }
-  const result = await qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
+  const result = await qdrantRequest("POST", `/collections/${destination.collection}/points/scroll`, {
     filter: { must, must_not },
     limit,
     ...(filters.orderBy ? { order_by: { key: filters.orderBy.key, direction: filters.orderBy.direction } } : {}),
     with_payload: true,
-  }) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
+  }, destination) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
 
   return (result.result?.points || []).map((pt) => ({
     id: pt.id,
+    destination: destination.name,
     content: pt.payload?.content ?? "",
     category: pt.payload?.category ?? "",
     entities: pt.payload?.entities || [],
@@ -408,11 +509,24 @@ const scrollFacts = async (
   }));
 };
 
+const scrollFactsAcrossDestinations = async (
+  filters: QdrantScrollFilters = {},
+  limit = 10,
+): Promise<QdrantScrollResult[]> => {
+  const results = await Promise.all(activeDestinations().map((destination) =>
+    scrollFacts(filters, limit, destination).catch((e) => {
+      logFn("WARN", `Qdrant scroll failed for destination '${destination.name}': ${(e as Error).message}`);
+      return [] as QdrantScrollResult[];
+    }),
+  ));
+  return results.flat();
+};
+
 // ---------------------------------------------------------------------------
 // Write methods
 // ---------------------------------------------------------------------------
 
-const storeFact = async (fact: StoreFact): Promise<string> => {
+const storeFact = async (fact: StoreFact, routeInput?: RoutingInput): Promise<string> => {
   const normalizedKind = normalizeKind(fact.kind);
   const normalizedSubtype = validateMemorySubtype(normalizedKind, fact.memory_subtype);
   const normalizedCategory = normalizedSubtype
@@ -432,7 +546,6 @@ const storeFact = async (fact: StoreFact): Promise<string> => {
     ...redactedEntities,
     ...(redactedRelation ? [redactedRelation.from, redactedRelation.type, redactedRelation.to] : []),
   ]);
-  const vector = await embed(redactedContent.text);
   const now = new Date().toISOString();
   const id = randomUUID();
   const payload: QdrantPayload = {
@@ -488,38 +601,53 @@ const storeFact = async (fact: StoreFact): Promise<string> => {
     payload.redaction = redaction;
   }
 
-  await qdrantRequest("PUT", `/collections/${collection}/points`, {
-    points: [{ id, vector, payload }],
-  });
+  const destination = resolveDestination(routeInput ?? routingInputForFact(
+    fact,
+    redactedContent.text,
+    payload.entities,
+    {
+      category: normalizedCategory,
+      domain: normalizedDomain,
+      kind: normalizedKind,
+      ...(normalizedSubtype ? { memory_subtype: normalizedSubtype } : {}),
+    },
+  ));
+  const vector = await embed(redactedContent.text);
 
-  logFn("DEBUG", `Qdrant: stored fact ${id} [${normalizedCategory}] ${redactedContent.text.slice(0, 60)}`);
+  await qdrantRequest("PUT", `/collections/${destination.collection}/points`, {
+    points: [{ id, vector, payload }],
+  }, destination);
+
+  logFn("DEBUG", `Qdrant: stored fact ${id} in '${destination.name}' [${normalizedCategory}] ${redactedContent.text.slice(0, 60)}`);
   return id;
 };
 
-const supersedeFact = async (oldFactId: string, newFactId: string): Promise<void> => {
+const supersedeFact = async (oldFactId: string, newFactId: string, destinationRef?: DestinationRef): Promise<void> => {
+  const destination = destinationFromRef(destinationRef);
   const now = new Date().toISOString();
-  await qdrantRequest("POST", `/collections/${collection}/points/payload`, {
+  await qdrantRequest("POST", `/collections/${destination.collection}/points/payload`, {
     payload: {
       superseded_by: newFactId,
       superseded_at: now,
       updated_at: now,
     },
     points: [oldFactId],
-  });
-  logFn("DEBUG", `Qdrant: superseded fact ${oldFactId} → ${newFactId}`);
+  }, destination);
+  logFn("DEBUG", `Qdrant: superseded fact ${oldFactId} → ${newFactId} in '${destination.name}'`);
 };
 
-const reinforceFact = async (factId: string, currentCount: number): Promise<void> => {
+const reinforceFact = async (factId: string, currentCount: number, destinationRef?: DestinationRef): Promise<void> => {
+  const destination = destinationFromRef(destinationRef);
   const now = new Date().toISOString();
-  await qdrantRequest("POST", `/collections/${collection}/points/payload`, {
+  await qdrantRequest("POST", `/collections/${destination.collection}/points/payload`, {
     payload: {
       reinforcement_count: (currentCount || 1) + 1,
       last_reinforced_at: now,
       updated_at: now,
     },
     points: [factId],
-  });
-  logFn("DEBUG", `Qdrant: reinforced fact ${factId}`);
+  }, destination);
+  logFn("DEBUG", `Qdrant: reinforced fact ${factId} in '${destination.name}'`);
 };
 
 const dedupCheck = async (
@@ -527,7 +655,9 @@ const dedupCheck = async (
   contentHashVal: string,
   { exactThreshold = 0.92, supersedeThreshold = 0.80 }: DedupThresholds = {},
   workspaceId?: string,
+  routeInput?: RoutingInput,
 ): Promise<DedupResult> => {
+  const destination = resolveDestination(routeInput ?? { content });
   // First: hash-based exact check (fast, no embedding)
   try {
     const must: Record<string, unknown>[] = [
@@ -535,16 +665,17 @@ const dedupCheck = async (
       { is_null: { key: "superseded_by" } },
     ];
     if (workspaceId) must.push({ key: "workspace_id", match: { value: workspaceId } });
-    const hashResult = await qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
+    const hashResult = await qdrantRequest("POST", `/collections/${destination.collection}/points/scroll`, {
       filter: { must },
       limit: 1,
       with_payload: true,
-    }) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
+    }, destination) as { result?: { points?: Array<{ id: string; payload?: Partial<QdrantPayload> }> } };
 
     const existing = hashResult.result?.points?.[0];
     if (existing) {
       return {
         action: "skip" as DedupAction,
+        destination: destination.name,
         existingId: existing.id,
         existingCount: existing.payload?.reinforcement_count || 1,
         score: 1.0,
@@ -560,19 +691,20 @@ const dedupCheck = async (
     const vector = await embed(content);
     const must: Record<string, unknown>[] = [{ is_null: { key: "superseded_by" } }];
     if (workspaceId) must.push({ key: "workspace_id", match: { value: workspaceId } });
-    const searchResult = await qdrantRequest("POST", `/collections/${collection}/points/search`, {
+    const searchResult = await qdrantRequest("POST", `/collections/${destination.collection}/points/search`, {
       vector,
       filter: { must },
       limit: 1,
       with_payload: true,
-    }) as { result?: Array<{ id: string; score: number; payload?: Partial<QdrantPayload> }> };
+    }, destination) as { result?: Array<{ id: string; score: number; payload?: Partial<QdrantPayload> }> };
 
     const top = searchResult.result?.[0];
-    if (!top) return { action: "insert" };
+    if (!top) return { action: "insert", destination: destination.name };
 
     if (top.score >= exactThreshold) {
       return {
         action: "skip",
+        destination: destination.name,
         existingId: top.id,
         existingCount: top.payload?.reinforcement_count || 1,
         score: top.score,
@@ -582,17 +714,18 @@ const dedupCheck = async (
     if (top.score >= supersedeThreshold) {
       return {
         action: "supersede",
+        destination: destination.name,
         existingId: top.id,
         existingCount: top.payload?.reinforcement_count || 1,
         score: top.score,
       };
     }
 
-    return { action: "insert" };
+    return { action: "insert", destination: destination.name };
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     logFn("WARN", `Qdrant dedup vector check failed: ${msg}`);
-    return { action: "insert" }; // fail open — better to duplicate than lose
+    return { action: "insert", destination: destination.name }; // fail open — better to duplicate than lose
   }
 };
 
@@ -608,19 +741,21 @@ const dedupCheck = async (
 const badExemplarCheck = async (
   content: string,
   workspaceId?: string,
+  routeInput?: RoutingInput,
 ): Promise<{ score: number; exemplarId: string; reason?: string } | null> => {
+  const destination = resolveDestination(routeInput ?? { content });
   try {
     const vector = await embed(content);
     const must: Record<string, unknown>[] = [
       { key: "is_bad_exemplar", match: { value: true } },
     ];
     if (workspaceId) must.push({ key: "workspace_id", match: { value: workspaceId } });
-    const result = await qdrantRequest("POST", `/collections/${collection}/points/search`, {
+    const result = await qdrantRequest("POST", `/collections/${destination.collection}/points/search`, {
       vector,
       filter: { must },
       limit: 1,
       with_payload: true,
-    }) as { result?: Array<{ id: string; score: number; payload?: Partial<QdrantPayload> }> };
+    }, destination) as { result?: Array<{ id: string; score: number; payload?: Partial<QdrantPayload> }> };
     const top = result.result?.[0];
     if (!top) return null;
     return {
@@ -646,9 +781,15 @@ export {
   setLogger,
   setEmbeddingConfig,
   qdrantRequest,
+  resolveDestination,
+  collectionForDestination,
+  destinationNames,
+  readyDestinations,
+  activeDestinations,
   embed,
   searchFacts,
   scrollFacts,
+  scrollFactsAcrossDestinations,
   storeFact,
   supersedeFact,
   reinforceFact,

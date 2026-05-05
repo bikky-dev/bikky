@@ -90,6 +90,8 @@ const autoDistill = async (
   if (!qdrant.isReady()) return { distilled: false };
 
   try {
+    const destination = qdrant.resolveDestination({}).name;
+    const collection = qdrant.collectionForDestination(destination);
     // Find undistilled session summaries (support both legacy and new taxonomy)
     const legacyFilter = {
       must: [
@@ -107,12 +109,12 @@ const autoDistill = async (
     type ScrollResponse = { result?: { points?: Array<{ id: string; payload?: QdrantPayload }> } };
 
     const [legacyRes, newRes] = await Promise.all([
-      qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/scroll`, {
+      qdrant.qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
         filter: legacyFilter, limit: 50, with_payload: true,
-      }) as Promise<ScrollResponse>,
-      qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/scroll`, {
+      }, destination) as Promise<ScrollResponse>,
+      qdrant.qdrantRequest("POST", `/collections/${collection}/points/scroll`, {
         filter: newFilter, limit: 50, with_payload: true,
-      }) as Promise<ScrollResponse>,
+      }, destination) as Promise<ScrollResponse>,
     ]);
 
     // Deduplicate by ID
@@ -199,12 +201,12 @@ const autoDistill = async (
           distilled_at: new Date().toISOString(),
           distilled_by_prompt: promptStamp,
         },
-      });
+      }, { destination });
     }
 
     // Supersede the source summaries
     for (const pt of batch) {
-      await qdrant.supersedeFact(pt.id, `distilled:${new Date().toISOString()}`);
+      await qdrant.supersedeFact(pt.id, `distilled:${new Date().toISOString()}`, destination);
     }
 
     logFn("INFO", `Auto-distill: consolidated ${batch.length} summaries into ${patterns.length} patterns`);
@@ -224,7 +226,7 @@ const autoDistill = async (
 const detectContradiction = async (
   fact: { content: string; category: string; entities: string[]; importance?: number },
   _config: BikkyConfig,
-  telemetry?: { sessionId?: string; workstreamKey?: string },
+  telemetry?: { sessionId?: string; workstreamKey?: string; destination?: string },
 ): Promise<ContradictionResult> => {
   if (!qdrant.isReady()) return { contradiction: false };
   if ((fact.importance || 0) < 0.3) return { contradiction: false };
@@ -232,12 +234,13 @@ const detectContradiction = async (
   try {
     const vector = await qdrant.embed(fact.content);
     // Search across all categories because contradictions can cross category lines.
-    const results = await qdrant.qdrantRequest("POST", `/collections/${qdrant.collection}/points/search`, {
+    const collection = qdrant.collectionForDestination(telemetry?.destination);
+    const results = await qdrant.qdrantRequest("POST", `/collections/${collection}/points/search`, {
       vector,
       filter: { must: [{ is_null: { key: "superseded_by" } }] },
       limit: 5,
       with_payload: true,
-    });
+    }, telemetry?.destination);
 
     const candidates = ((results.result || []) as Array<{ id: string; score: number; payload?: QdrantPayload }>)
       .filter(r => r.score >= 0.75 && r.score < 0.92);

@@ -18,6 +18,8 @@ import {
   setLogger,
   setEmbeddingConfig,
   storeFact,
+  dedupCheck,
+  reinforceFact,
 } from "./qdrant.js";
 import type { StoreFact } from "./qdrant.js";
 
@@ -155,6 +157,27 @@ describe("daemon/qdrant", () => {
 
       init();
       assert.strictEqual(isReady(), false);
+    });
+
+    it("returns true when only destinations are configured", () => {
+      saveConfig({
+        ...CONFIG_DEFAULTS,
+        qdrant_url: null,
+        qdrant_api_key: null,
+        destinations: [
+          {
+            name: "work",
+            qdrant_url: "https://work-qdrant.example.com:6333",
+            qdrant_api_key: null,
+            collection: "work-memory",
+            default: true,
+          },
+        ],
+      });
+      resetConfig();
+
+      init();
+      assert.strictEqual(isReady(), true);
     });
   });
 
@@ -303,6 +326,141 @@ describe("daemon/qdrant", () => {
         summary: "secret:1",
         matches: [{ type: "secret", count: 1 }],
       });
+    });
+
+    it("routes stored facts by destination match before default fallback", async () => {
+      const upsertUrls: string[] = [];
+
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        const body = init?.body ? JSON.parse(String(init.body)) : null;
+        if (url.includes("/v1/embeddings")) {
+          return new Response(JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }), { status: 200 });
+        }
+        if (init?.method === "PUT" && url.includes("/collections/")) {
+          assert.ok(body?.points, "expected Qdrant upsert points");
+          upsertUrls.push(url);
+        }
+        return new Response(JSON.stringify({ result: {} }), { status: 200 });
+      }) as typeof fetch;
+
+      saveConfig({
+        ...CONFIG_DEFAULTS,
+        qdrant_url: null,
+        qdrant_api_key: null,
+        embedding: {
+          ...CONFIG_DEFAULTS.embedding,
+          provider: "ollama",
+          model: "test-model",
+          base_url: "http://embed.test:11434",
+          dimensions: 3,
+        },
+        destinations: [
+          {
+            name: "perso",
+            qdrant_url: "https://perso-qdrant.example.com:6333",
+            qdrant_api_key: null,
+            collection: "perso-memory",
+            match: {
+              content: ["[Bb]ikky"],
+              entity: ["[Bb]ikky"],
+            },
+          },
+          {
+            name: "work",
+            qdrant_url: "https://work-qdrant.example.com:6333",
+            qdrant_api_key: null,
+            collection: "work-memory",
+            default: true,
+          },
+        ],
+      });
+      resetConfig();
+      init();
+
+      await storeFact({
+        content: "Bikky daemon routing should use destinations.",
+        category: "engineering",
+        entities: ["bikky"],
+        content_hash: "bikky-hash",
+      });
+      await storeFact({
+        content: "Client deployment notes should use the default destination.",
+        category: "engineering",
+        entities: ["client"],
+        content_hash: "work-hash",
+      });
+
+      assert.equal(upsertUrls.length, 2);
+      assert.ok(upsertUrls[0]?.startsWith("https://perso-qdrant.example.com:6333/collections/perso-memory/points"));
+      assert.ok(upsertUrls[1]?.startsWith("https://work-qdrant.example.com:6333/collections/work-memory/points"));
+    });
+
+    it("keeps dedup follow-up mutations in the matched destination", async () => {
+      const mutationUrls: string[] = [];
+
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/collections/perso-memory/points/scroll")) {
+          return new Response(JSON.stringify({
+            result: {
+              points: [
+                {
+                  id: "existing-bikky-fact",
+                  payload: { reinforcement_count: 4 },
+                },
+              ],
+            },
+          }), { status: 200 });
+        }
+        if (url.includes("/collections/work-memory/points/scroll")) {
+          return new Response(JSON.stringify({ result: { points: [] } }), { status: 200 });
+        }
+        if (init?.method === "POST" && url.includes("/points/payload")) {
+          mutationUrls.push(url);
+        }
+        return new Response(JSON.stringify({ result: {} }), { status: 200 });
+      }) as typeof fetch;
+
+      saveConfig({
+        ...CONFIG_DEFAULTS,
+        qdrant_url: null,
+        qdrant_api_key: null,
+        destinations: [
+          {
+            name: "perso",
+            qdrant_url: "https://perso-qdrant.example.com:6333",
+            qdrant_api_key: null,
+            collection: "perso-memory",
+            match: { content: ["[Bb]ikky"], entity: ["[Bb]ikky"] },
+          },
+          {
+            name: "work",
+            qdrant_url: "https://work-qdrant.example.com:6333",
+            qdrant_api_key: null,
+            collection: "work-memory",
+            default: true,
+          },
+        ],
+      });
+      resetConfig();
+      init();
+
+      const dedup = await dedupCheck(
+        "Bikky existing fact",
+        "bikky-hash",
+        undefined,
+        undefined,
+        { content: "Bikky existing fact", entities: ["bikky"] },
+      );
+      assert.equal(dedup.action, "skip");
+      assert.equal(dedup.destination, "perso");
+
+      await reinforceFact(dedup.existingId!, dedup.existingCount!, dedup.destination);
+
+      assert.deepEqual(mutationUrls, [
+        "https://perso-qdrant.example.com:6333/collections/perso-memory/points/payload",
+      ]);
     });
   });
 });
