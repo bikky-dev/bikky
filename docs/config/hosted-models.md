@@ -1,15 +1,15 @@
 # Local Qdrant + hosted models config
 
-This setup keeps Qdrant local while hosted embeddings and LLM calls handle extraction, curation, and recall.
+This setup keeps Qdrant local while a hosted gateway/provider handles extraction, curation, and recall.
 
 ## What you need
 
 - Qdrant running locally, usually with Docker.
-- An OpenAI API key, or another hosted provider configured in the full configuration guide.
+- A Portkey API key (recommended) — one key, many upstream providers, with built-in routing, fallbacks, and observability. Get one at [portkey.ai](https://portkey.ai). Or use OpenAI / Bedrock directly.
 
-For both `embedding.provider` and `llm.provider`, possible values are `openai`, `bedrock`, or `portkey` for hosted models. `ollama` is also supported when you want local model calls.
+For both `embedding.provider` and `llm.provider`, possible values are `portkey`, `openai`, or `bedrock` for hosted models. `ollama` is also supported when you want local model calls.
 
-## Config
+## Config (recommended: Portkey)
 
 Save this as `~/.bikky/config.json`:
 
@@ -18,9 +18,35 @@ Save this as `~/.bikky/config.json`:
   "qdrant_url": "http://localhost:6333",
   "qdrant_api_key": "",
   "embedding": {
+    "provider": "portkey",
+    "model": "@openai/text-embedding-3-small",
+    "dimensions": 1024
+  },
+  "llm": {
+    "provider": "portkey",
+    "model": "@anthropic/claude-sonnet-4"
+  }
+}
+```
+
+Then export the gateway key:
+
+```bash
+export PORTKEY_API_KEY="pk-..."
+```
+
+bikky uses **1024-dimensional embeddings** as the canonical default. This is portable across modern providers (OpenAI 3-small/3-large via Matryoshka truncation, Cohere v3, Voyage, Mistral, Bedrock Titan v2, BGE/E5) so you can switch providers later without re-embedding.
+
+`qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant.
+
+## Alternative: OpenAI directly
+
+```json
+{
+  "embedding": {
     "provider": "openai",
     "model": "text-embedding-3-small",
-    "dimensions": 1536,
+    "dimensions": 1024,
     "api_key": "sk-..."
   },
   "llm": {
@@ -31,13 +57,7 @@ Save this as `~/.bikky/config.json`:
 }
 ```
 
-`qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant.
-
-Prefer not to store hosted model keys in the config file? Omit `api_key` above and set:
-
-```bash
-export OPENAI_API_KEY="sk-..."
-```
+Or set `OPENAI_API_KEY` in the environment instead of the config file.
 
 ## Check it
 
@@ -47,4 +67,4 @@ bikky status
 
 If you started from a fresh install, run `bikky setup` after writing the config, then restart your editor so its MCP process reloads.
 
-For Bedrock, Portkey, custom base URLs, or model-specific dimensions, see the [full configuration guide](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md).
+For Bedrock, custom base URLs, or model-specific dimensions, see the [full configuration guide](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md).

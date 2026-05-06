@@ -27,7 +27,7 @@ export const portkeyEmbeddingProvider: EmbeddingProvider = {
   browserCompatible: true,
   defaults: {
     model: "@openai/text-embedding-3-small",
-    dimensions: 1536,
+    dimensions: 1024,
     baseUrl: "https://api.portkey.ai",
   },
   async embed(text: string, cfg: ResolvedEmbeddingConfig): Promise<number[]> {
@@ -39,12 +39,20 @@ export const portkeyEmbeddingProvider: EmbeddingProvider = {
     if (cfg.extra.virtual_key) headers["x-portkey-virtual-key"] = cfg.extra.virtual_key;
     if (cfg.extra.config_id) headers["x-portkey-config"] = cfg.extra.config_id;
 
+    const body: Record<string, unknown> = { model: cfg.model, input: text };
+    // The `dimensions` parameter (Matryoshka truncation) is supported by the
+    // OpenAI text-embedding-3-* family. Forward it when the model name matches
+    // so users get the configured vector size instead of the provider native.
+    if (cfg.dimensions && /text-embedding-3/.test(cfg.model)) {
+      body.dimensions = cfg.dimensions;
+    }
+
     const resp = await resilientFetch({
       url: `${cfg.baseUrl}/v1/embeddings`,
       init: {
         method: "POST",
         headers,
-        body: JSON.stringify({ model: cfg.model, input: text }),
+        body: JSON.stringify(body),
       },
       timeoutMs: cfg.timeoutMs,
       retries: cfg.retries,

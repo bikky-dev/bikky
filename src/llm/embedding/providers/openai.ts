@@ -18,11 +18,17 @@ export const openaiEmbeddingProvider: EmbeddingProvider = {
   browserCompatible: true,
   defaults: {
     model: "text-embedding-3-small",
-    dimensions: 1536,
+    dimensions: 1024,
     baseUrl: "https://api.openai.com",
   },
   async embed(text: string, cfg: ResolvedEmbeddingConfig): Promise<number[]> {
     if (!cfg.apiKey) throw new Error("Embedding failed [openai]: api key not configured");
+    const body: Record<string, unknown> = { model: cfg.model, input: text };
+    // The `dimensions` parameter (Matryoshka truncation) is only supported by
+    // the text-embedding-3-* family. Older models (e.g. ada-002) reject it.
+    if (cfg.dimensions && /text-embedding-3/.test(cfg.model)) {
+      body.dimensions = cfg.dimensions;
+    }
     const resp = await resilientFetch({
       url: `${cfg.baseUrl}/v1/embeddings`,
       init: {
@@ -31,7 +37,7 @@ export const openaiEmbeddingProvider: EmbeddingProvider = {
           "Content-Type": "application/json",
           Authorization: `Bearer ${cfg.apiKey}`,
         },
-        body: JSON.stringify({ model: cfg.model, input: text }),
+        body: JSON.stringify(body),
       },
       timeoutMs: cfg.timeoutMs,
       retries: cfg.retries,

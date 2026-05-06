@@ -32,7 +32,7 @@ describe("initEmbedding — resolution", () => {
   it("applies openai defaults", async () => {
     const cfg = await initEmbedding({ provider: "openai", apiKey: "sk-test" });
     assert.strictEqual(cfg.model, "text-embedding-3-small");
-    assert.strictEqual(cfg.dimensions, 1536);
+    assert.strictEqual(cfg.dimensions, 1024);
     assert.strictEqual(cfg.baseUrl, "https://api.openai.com");
     assert.strictEqual(cfg.apiKey, "sk-test");
   });
@@ -48,7 +48,7 @@ describe("initEmbedding — resolution", () => {
     const cfg = await initEmbedding({ provider: "portkey", apiKey: "pk-test" });
     assert.strictEqual(cfg.model, "@openai/text-embedding-3-small");
     assert.strictEqual(cfg.baseUrl, "https://api.portkey.ai");
-    assert.strictEqual(cfg.dimensions, 1536);
+    assert.strictEqual(cfg.dimensions, 1024);
   });
 
   it("overrides win over defaults", async () => {
