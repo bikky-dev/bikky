@@ -5,10 +5,12 @@
  */
 
 import { startServer, stopServer } from "./server.js";
+import type { AddressInfo } from "node:net";
 
 const PORT = parseInt(process.env.BIKKY_UI_PORT || "1422", 10);
+const SHOULD_OPEN_BROWSER = !process.env.BIKKY_UI_NO_OPEN && process.env.CI !== "1";
 
-console.log(`🧠 bikky ui starting on http://localhost:${PORT}`);
+console.log(`🧠 bikky ui starting on ${PORT === 0 ? "an available local port" : `http://localhost:${PORT}`}`);
 
 try {
   const server = startServer(PORT);
@@ -22,13 +24,20 @@ try {
     throw err;
   });
 
-  // Open browser after server confirms listening
   server.on("listening", () => {
-    console.log(`✅ bikky ui running — press Ctrl+C to stop\n`);
+    const address = server.address();
+    const actualPort = typeof address === "object" && address !== null
+      ? (address as AddressInfo).port
+      : PORT;
+    const url = `http://localhost:${actualPort}`;
+
+    console.log(`✅ bikky ui running at ${url} — press Ctrl+C to stop\n`);
+    if (!SHOULD_OPEN_BROWSER) return;
+
     import("open")
-      .then((mod) => mod.default(`http://localhost:${PORT}`))
+      .then((mod) => mod.default(url))
       .catch(() => {
-        console.log(`  → Open http://localhost:${PORT} in your browser`);
+        console.log(`  → Open ${url} in your browser`);
       });
   });
 } catch (err) {

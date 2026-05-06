@@ -61,7 +61,13 @@ const packages = [
       "LICENSE",
     ],
     smoke: async (binPath, env) => {
-      await assertLongRunning(binPath, [], { ...env, BIKKY_UI_PORT: "0" }, "bikky-ui", "bikky ui running");
+      await assertLongRunning(
+        binPath,
+        [],
+        { ...env, BIKKY_UI_PORT: "0", BIKKY_UI_NO_OPEN: "1" },
+        "bikky-ui",
+        "bikky ui running",
+      );
     },
   },
 ];
