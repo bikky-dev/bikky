@@ -5,18 +5,24 @@
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 
-import { createApp } from "./server.js";
-import { CONFIG_PATH, _resetConfig } from "./lib/config.js";
+// Sandbox the bikky config dir to a tempdir so tests can never clobber the
+// developer's real ~/.bikky/config.json (root cause of issue #130).
+const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-ui-server-"));
+process.env.BIKKY_HOME = TEST_BIKKY_HOME;
+const CONFIG_PATH = path.join(TEST_BIKKY_HOME, "config.json");
+
+const { createApp } = await import("./server.js");
+const { _resetConfig } = await import("./lib/config.js");
 
 const ENV_KEYS = ["QDRANT_URL", "QDRANT_API_KEY", "BIKKY_COLLECTION", "EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_BASE_URL", "OPENAI_API_KEY"];
 const savedEnv: Record<string, string | undefined> = {};
-let savedConfig: string | null = null;
-let configExisted = false;
 const realFetch = globalThis.fetch;
 
 function writeMultiDestinationConfig(): void {
-  fs.mkdirSync(CONFIG_PATH.replace(/\/[^/]+$/, ""), { recursive: true });
+  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
   fs.writeFileSync(CONFIG_PATH, JSON.stringify({
     collection: "fallback",
     destinations: [
@@ -41,10 +47,7 @@ function writeMultiDestinationConfig(): void {
 describe("ui/server", () => {
   before(() => {
     for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
-    if (fs.existsSync(CONFIG_PATH)) {
-      configExisted = true;
-      savedConfig = fs.readFileSync(CONFIG_PATH, "utf-8");
-    }
+    fs.mkdirSync(TEST_BIKKY_HOME, { recursive: true });
   });
 
   after(() => {
@@ -52,8 +55,7 @@ describe("ui/server", () => {
       if (savedEnv[k] === undefined) delete process.env[k];
       else process.env[k] = savedEnv[k];
     }
-    if (savedConfig !== null) fs.writeFileSync(CONFIG_PATH, savedConfig);
-    else if (!configExisted && fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
     _resetConfig();
   });
 

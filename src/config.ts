@@ -15,15 +15,43 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 
 // BIKKY_HOME env var lets tests (and advanced users) override the config dir
-// without touching the real ~/.bikky/. Tests MUST set this to an isolated
-// tempdir before importing this module — otherwise saveConfig() will write to
-// the user's real config file.
-export const BIKKY_DIR = process.env.BIKKY_HOME ?? path.join(os.homedir(), ".bikky");
-export const CONFIG_PATH = path.join(BIKKY_DIR, "config.json");
-export const LOG_DIR = path.join(BIKKY_DIR, "logs");
-export const STATE_DIR = path.join(BIKKY_DIR, "state");
-export const PID_PATH = path.join(STATE_DIR, "daemon.pid");
-export const EXTRACTION_HEALTH_PATH = path.join(STATE_DIR, "extraction-health.json");
+// without touching the real ~/.bikky/. The getter functions below re-read the
+// env var on every call, so changing BIKKY_HOME at runtime (e.g. in a test
+// setup hook) takes effect for all subsequent saveConfig()/loadConfig() calls.
+//
+// The legacy `BIKKY_DIR` / `CONFIG_PATH` / etc. exports are kept for
+// backward-compatibility, but they capture the env state at module load
+// time and should NOT be relied on for safe writes. Internal callers — and
+// any test that wants sandboxing — should call the getter functions instead.
+
+export function getBikkyDir(): string {
+  return process.env.BIKKY_HOME ?? path.join(os.homedir(), ".bikky");
+}
+export function getConfigPath(): string {
+  return path.join(getBikkyDir(), "config.json");
+}
+export function getLogDir(): string {
+  return path.join(getBikkyDir(), "logs");
+}
+export function getStateDir(): string {
+  return path.join(getBikkyDir(), "state");
+}
+export function getPidPath(): string {
+  return path.join(getStateDir(), "daemon.pid");
+}
+export function getExtractionHealthPath(): string {
+  return path.join(getStateDir(), "extraction-health.json");
+}
+
+// Legacy constant exports — captured at module load. Prefer the getter
+// functions above when you need fresh values (e.g. inside tests, or after
+// mutating BIKKY_HOME at runtime).
+export const BIKKY_DIR = getBikkyDir();
+export const CONFIG_PATH = getConfigPath();
+export const LOG_DIR = getLogDir();
+export const STATE_DIR = getStateDir();
+export const PID_PATH = getPidPath();
+export const EXTRACTION_HEALTH_PATH = getExtractionHealthPath();
 
 // ---------------------------------------------------------------------------
 // Config types
@@ -641,7 +669,7 @@ export function validateConfigObject(raw: unknown): ConfigIssue[] {
   return issues;
 }
 
-export function inspectConfigFile(configPath = CONFIG_PATH): ConfigFileDiagnostics {
+export function inspectConfigFile(configPath = getConfigPath()): ConfigFileDiagnostics {
   if (!fs.existsSync(configPath)) {
     return { path: configPath, exists: false, parse_error: null, issues: [] };
   }
@@ -690,21 +718,46 @@ export function loadConfig(): BikkyConfig {
   if (_config) return _config;
 
   // Ensure dirs exist
-  fs.mkdirSync(BIKKY_DIR, { recursive: true });
-  fs.mkdirSync(LOG_DIR, { recursive: true });
-  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.mkdirSync(getBikkyDir(), { recursive: true });
+  fs.mkdirSync(getLogDir(), { recursive: true });
+  fs.mkdirSync(getStateDir(), { recursive: true });
 
   // Start from defaults
   let config = structuredClone(DEFAULTS);
 
   // Merge config file
-  if (fs.existsSync(CONFIG_PATH)) {
+  const configPath = getConfigPath();
+  let fileConfig: Record<string, unknown> = {};
+  if (fs.existsSync(configPath)) {
     try {
-      const fileConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as Record<string, unknown>;
+      fileConfig = JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
       config = deepMerge(config as unknown as Record<string, unknown>, fileConfig) as unknown as BikkyConfig;
     } catch (e) {
-      console.error(`bikky: failed to parse ${CONFIG_PATH}: ${e instanceof Error ? e.message : String(e)}`);
+      console.error(`bikky: failed to parse ${configPath}: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  // Provider/base_url consistency (issue #131): the DEFAULTS.embedding.base_url
+  // is the ollama localhost URL, baked in for the default ollama provider. If
+  // the user picks a different provider (portkey/openai/bedrock) but doesn't
+  // set an explicit base_url, drop the inherited ollama URL so initEmbedding()
+  // can apply the provider's own default — otherwise we'd POST every embedding
+  // request to localhost:11434 and Ollama would reject the foreign model name.
+  const fileEmbedding = (fileConfig.embedding ?? {}) as Record<string, unknown>;
+  if (
+    config.embedding.provider !== DEFAULTS.embedding.provider
+    && typeof fileEmbedding.base_url !== "string"
+    && !process.env.EMBEDDING_BASE_URL
+  ) {
+    config.embedding.base_url = "";
+  }
+  const fileLlm = (fileConfig.llm ?? {}) as Record<string, unknown>;
+  if (
+    config.llm.provider !== DEFAULTS.llm.provider
+    && typeof fileLlm.base_url !== "string"
+    && !process.env.LLM_BASE_URL
+  ) {
+    config.llm.base_url = "";
   }
 
   // Env var overrides (highest priority)
@@ -861,8 +914,8 @@ export function getEffectiveDestinations(config: BikkyConfig = loadConfig()): De
 
 /** Save config to disk (used by setup command). */
 export function saveConfig(config: BikkyConfig): void {
-  fs.mkdirSync(BIKKY_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n");
+  fs.mkdirSync(getBikkyDir(), { recursive: true });
+  fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2) + "\n");
   _config = config;
 }
 

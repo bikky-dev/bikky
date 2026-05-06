@@ -71,6 +71,27 @@ describe("initEmbedding — resolution", () => {
     assert.strictEqual(cfg.baseUrl, "http://localhost:11434");
   });
 
+  it("falls back to provider default when baseUrl is an empty string (issue #131)", async () => {
+    // Config layers may normalise an absent base_url to "" instead of leaving
+    // it undefined; nullish-coalesce alone won't fall through "" so we used to
+    // ship an empty baseUrl to the provider. Verify the provider default wins.
+    const cfg = await initEmbedding({
+      provider: "portkey",
+      apiKey: "pk-test",
+      baseUrl: "",
+    });
+    assert.strictEqual(cfg.baseUrl, "https://api.portkey.ai");
+  });
+
+  it("falls back to provider default when baseUrl is whitespace only", async () => {
+    const cfg = await initEmbedding({
+      provider: "openai",
+      apiKey: "sk-test",
+      baseUrl: "   ",
+    });
+    assert.strictEqual(cfg.baseUrl, "https://api.openai.com");
+  });
+
   it("passes extra bag through unchanged", async () => {
     const cfg = await initEmbedding({
       provider: "portkey",

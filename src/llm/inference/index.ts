@@ -27,6 +27,7 @@ import type {
   ResolvedInferenceConfig,
 } from "./types.js";
 import type { LlmHttpError } from "../errors.js";
+import { firstNonEmptyString } from "../util.js";
 import { estimateTokens, writeTelemetry } from "../telemetry.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -44,7 +45,7 @@ export function initLLM(opts: { config: InitLLMInput; logger?: LogFn }): Resolve
   resolved = {
     provider: provider.name,
     model: opts.config.model ?? provider.defaults.model,
-    baseUrl: (opts.config.baseUrl ?? provider.defaults.baseUrl ?? "").replace(/\/+$/, ""),
+    baseUrl: (firstNonEmptyString(opts.config.baseUrl, provider.defaults.baseUrl) ?? "").replace(/\/+$/, ""),
     apiKey: opts.config.apiKey ?? null,
     fallback: opts.config.fallback ?? null,
     extra: opts.config.extra ?? {},

@@ -8,8 +8,17 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-export const BIKKY_DIR = process.env.BIKKY_HOME ?? path.join(os.homedir(), ".bikky");
-export const CONFIG_PATH = path.join(BIKKY_DIR, "config.json");
+export function getBikkyDir(): string {
+  return process.env.BIKKY_HOME ?? path.join(os.homedir(), ".bikky");
+}
+export function getConfigPath(): string {
+  return path.join(getBikkyDir(), "config.json");
+}
+
+// Legacy constants — captured at module load. Prefer getBikkyDir()/getConfigPath()
+// when sandboxing in tests or after mutating BIKKY_HOME at runtime.
+export const BIKKY_DIR = getBikkyDir();
+export const CONFIG_PATH = getConfigPath();
 
 export interface UIDestination {
   name: string;
@@ -65,9 +74,10 @@ export function loadConfig(): BikkyUIConfig {
 
   let config = structuredClone(DEFAULTS);
 
-  if (fs.existsSync(CONFIG_PATH)) {
+  const configPath = getConfigPath();
+  if (fs.existsSync(configPath)) {
     try {
-      const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as Record<string, unknown>;
+      const raw = JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
       if (raw.qdrant_url) config.qdrant_url = raw.qdrant_url as string;
       if (raw.qdrant_api_key) config.qdrant_api_key = raw.qdrant_api_key as string;
       if (raw.collection) config.collection = raw.collection as string;
@@ -97,7 +107,7 @@ export function loadConfig(): BikkyUIConfig {
         if (typeof identity.user_name === "string") config.identity.user_name = identity.user_name;
       }
     } catch {
-      console.error(`bikky-ui: failed to parse ${CONFIG_PATH}`);
+      console.error(`bikky-ui: failed to parse ${configPath}`);
     }
   }
 

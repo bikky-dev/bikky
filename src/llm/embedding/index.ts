@@ -21,6 +21,7 @@ import "./providers/index.js";
 
 import { getEmbeddingProvider } from "./registry.js";
 import { EmbeddingDimensionMismatchError } from "../errors.js";
+import { firstNonEmptyString } from "../util.js";
 import type { ResolvedEmbeddingConfig } from "./types.js";
 
 export type { EmbeddingProvider, ResolvedEmbeddingConfig } from "./types.js";
@@ -59,7 +60,7 @@ export function initEmbedding(input: InitEmbeddingInput): ResolvedEmbeddingConfi
     provider: provider.name,
     model: input.model ?? provider.defaults.model,
     dimensions: input.dimensions ?? provider.defaults.dimensions,
-    baseUrl: (input.baseUrl ?? provider.defaults.baseUrl ?? "").replace(/\/+$/, ""),
+    baseUrl: (firstNonEmptyString(input.baseUrl, provider.defaults.baseUrl) ?? "").replace(/\/+$/, ""),
     apiKey: input.apiKey ?? null,
     extra: input.extra ?? {},
     timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,

@@ -65,6 +65,11 @@ describe("initLLM — resolution", () => {
     const cfg = initLLM({ config: { provider: "ollama", baseUrl: "http://x///" } });
     assert.strictEqual(cfg.baseUrl, "http://x");
   });
+
+  it("falls back to provider default when baseUrl is an empty string (issue #131)", () => {
+    const cfg = initLLM({ config: { provider: "portkey", apiKey: "pk", baseUrl: "" } });
+    assert.strictEqual(cfg.baseUrl, "https://api.portkey.ai");
+  });
 });
 
 describe("getInferenceConfig", () => {
