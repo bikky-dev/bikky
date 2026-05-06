@@ -9,11 +9,34 @@ import fs from "node:fs";
 import { createApp } from "./server.js";
 import { CONFIG_PATH, _resetConfig } from "./lib/config.js";
 
-const ENV_KEYS = ["QDRANT_URL", "QDRANT_API_KEY", "BIKKY_COLLECTION"];
+const ENV_KEYS = ["QDRANT_URL", "QDRANT_API_KEY", "BIKKY_COLLECTION", "EMBEDDING_PROVIDER", "EMBEDDING_MODEL", "EMBEDDING_BASE_URL", "OPENAI_API_KEY"];
 const savedEnv: Record<string, string | undefined> = {};
 let savedConfig: string | null = null;
 let configExisted = false;
 const realFetch = globalThis.fetch;
+
+function writeMultiDestinationConfig(): void {
+  fs.mkdirSync(CONFIG_PATH.replace(/\/[^/]+$/, ""), { recursive: true });
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+    collection: "fallback",
+    destinations: [
+      {
+        name: "perso",
+        qdrant_url: "https://perso.q.test",
+        qdrant_api_key: "perso-key",
+        collection: "perso_collection",
+        default: true,
+      },
+      {
+        name: "work",
+        qdrant_url: "https://work.q.test",
+        qdrant_api_key: "work-key",
+        collection: "work_collection",
+      },
+    ],
+  }));
+  _resetConfig();
+}
 
 describe("ui/server", () => {
   before(() => {
@@ -101,5 +124,31 @@ describe("ui/server", () => {
     const res = await app.fetch(new Request("http://localhost/non-existent-page"));
     // Either the SPA fallback (200 + text) or 404 — both acceptable when public/ may or may not exist.
     assert.ok([200, 404].includes(res.status), `unexpected status ${res.status}`);
+  });
+
+  it("lists configured destinations without exposing Qdrant URLs or API keys", async () => {
+    writeMultiDestinationConfig();
+
+    const res = await createApp().fetch(new Request("http://localhost/api/destinations"));
+
+    assert.equal(res.status, 200);
+    const body = await res.json() as { destinations: Array<Record<string, unknown>> };
+    assert.deepEqual(body.destinations, [
+      { name: "perso", collection: "perso_collection", isDefault: true },
+      { name: "work", collection: "work_collection", isDefault: false },
+    ]);
+    assert.equal(JSON.stringify(body).includes("perso-key"), false);
+    assert.equal(JSON.stringify(body).includes("perso.q.test"), false);
+  });
+
+  it("turns unknown destination route errors into a 503 API response", async () => {
+    writeMultiDestinationConfig();
+
+    const res = await createApp().fetch(new Request("http://localhost/api/memory/browse?destination=missing"));
+
+    assert.equal(res.status, 503);
+    const body = await res.json() as { code: string; error: string };
+    assert.equal(body.code, "NOT_CONFIGURED");
+    assert.match(body.error, /destination 'missing'/);
   });
 });

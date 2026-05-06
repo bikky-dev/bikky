@@ -8,17 +8,17 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-package-verify-"));
-
-const textExtensions = new Set([
-  ".css",
-  ".d.ts",
-  ".html",
-  ".js",
-  ".json",
-  ".md",
-  ".svg",
-  ".txt",
-]);
+const {
+  assertPackageContents,
+  assertSafeTextContent,
+  normalizePackPath,
+  shouldScanText,
+} = await import("../dist/package-verifier.js").catch((err) => {
+  throw new Error(
+    "Package verifier helpers are missing. Run `npm run build` before `npm run verify:package`.",
+    { cause: err },
+  );
+});
 
 const packages = [
   {
@@ -64,27 +64,6 @@ const packages = [
       await assertLongRunning(binPath, [], { ...env, BIKKY_UI_PORT: "0" }, "bikky-ui", "bikky ui running");
     },
   },
-];
-
-const forbiddenPathPatterns = [
-  { re: /(^|\/)(tasks|node_modules|\.git)(\/|$)/, reason: "task, node_modules, or git metadata" },
-  { re: /(^|\/)\.env($|\.)/, reason: "environment files" },
-  { re: /(\.test|\.itest)\.(js|d\.ts)$/i, reason: "compiled test artifacts" },
-  { re: /(^|\/)(id_rsa|id_ed25519|.*\.pem|.*\.key)$/i, reason: "private key material" },
-  { re: /(^|\/)Users\/|\/Users\//i, reason: "absolute local user paths" },
-  { re: /saber-zrelli-private|saber-apate|apate/i, reason: "private identity references" },
-];
-
-const forbiddenContentPatterns = [
-  { re: /gh[pousr]_[A-Za-z0-9_]{20,}/, reason: "GitHub token" },
-  { re: /github_pat_[A-Za-z0-9_]{20,}/, reason: "GitHub fine-grained token" },
-  { re: /sk-[A-Za-z0-9]{20,}/, reason: "OpenAI-style API key" },
-  { re: /AKIA[0-9A-Z]{16}/, reason: "AWS access key id" },
-  { re: /AIza[0-9A-Za-z_-]{35}/, reason: "Google API key" },
-  { re: /xox[baprs]-[0-9A-Za-z-]{20,}/, reason: "Slack token" },
-  { re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/, reason: "private key block" },
-  { re: /\/Users\/saber\b/i, reason: "local user path" },
-  { re: /saber-zrelli-private|saber-apate|apate-ai|apate\.com/i, reason: "private identity reference" },
 ];
 
 try {
@@ -141,23 +120,6 @@ function pack(pkg, dryRun) {
   };
 }
 
-function assertPackageContents(pkg, files) {
-  const fileSet = new Set(files);
-  for (const requiredPath of pkg.requiredPaths) {
-    if (!fileSet.has(requiredPath)) {
-      throw new Error(`${pkg.name} package is missing required file: ${requiredPath}`);
-    }
-  }
-
-  for (const file of files) {
-    for (const { re, reason } of forbiddenPathPatterns) {
-      if (re.test(file)) {
-        throw new Error(`${pkg.name} package includes forbidden path (${reason}): ${file}`);
-      }
-    }
-  }
-}
-
 function scanTarballContents(pkg, tarball) {
   const extractDir = fs.mkdtempSync(path.join(workDir, `${pkg.name}-extract-`));
   runCommand("tar", ["-xzf", tarball, "-C", extractDir], { cwd: repoRoot });
@@ -167,11 +129,7 @@ function scanTarballContents(pkg, tarball) {
     const rel = path.relative(packageDir, file);
     if (!shouldScanText(file)) continue;
     const content = fs.readFileSync(file, "utf8");
-    for (const { re, reason } of forbiddenContentPatterns) {
-      if (re.test(content)) {
-        throw new Error(`${pkg.name} package includes forbidden content (${reason}) in ${rel}`);
-      }
-    }
+    assertSafeTextContent(pkg.name, rel, content);
   }
 }
 
@@ -184,18 +142,6 @@ function* walk(dir) {
       yield fullPath;
     }
   }
-}
-
-function shouldScanText(file) {
-  const stat = fs.statSync(file);
-  if (stat.size > 2_000_000) return false;
-  const lower = file.toLowerCase();
-  if (lower.endsWith(".d.ts")) return true;
-  return textExtensions.has(path.extname(lower));
-}
-
-function normalizePackPath(file) {
-  return file.replace(/^package\//, "");
 }
 
 function assertIncludes(value, expected, message) {

@@ -210,12 +210,13 @@ export const readNewTranscriptEvents = async (
   source: TranscriptSource,
 ): Promise<{ events: ParsedEvent[]; newOffset: number; totalLines: number }> => {
   const fileStat = await stat(eventsPath);
-  if (fileStat.size <= byteOffset) {
+  if (fileStat.size === byteOffset) {
     return { events: [], newOffset: byteOffset, totalLines: 0 };
   }
+  const startOffset = fileStat.size < byteOffset ? 0 : byteOffset;
 
   const buf = await readFile(eventsPath);
-  const newContent = buf.subarray(byteOffset).toString("utf-8");
+  const newContent = buf.subarray(startOffset).toString("utf-8");
   const events: ParsedEvent[] = [];
   let totalLines = 0;
 

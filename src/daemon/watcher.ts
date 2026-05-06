@@ -15,6 +15,7 @@ export interface WatchedSession {
 
 export function discoverSessions(): WatchedSession[] {
   const cfg = loadConfig();
+  if (!cfg.watchers.copilot.enabled) return [];
   const baseDir = cfg.watchers.copilot.path;
   if (!fs.existsSync(baseDir)) return [];
 

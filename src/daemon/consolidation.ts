@@ -591,8 +591,8 @@ const tick = async (config: BikkyConfig, opts: ConsolidationTickOptions = {}): P
 };
 
 /** Reset state (for testing). */
-const _reset = (): void => {
-  consolidationTickCount = 0;
+const _reset = (tickCount = 0): void => {
+  consolidationTickCount = tickCount;
 };
 
 export {
