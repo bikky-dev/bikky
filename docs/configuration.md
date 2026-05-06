@@ -26,6 +26,20 @@ bikky status
 
 Config lives at `~/.bikky/config.json`, or at `BIKKY_HOME/config.json` when `BIKKY_HOME` is set. Environment variables override the config file.
 
+## Origin identity
+
+New memory writes store canonical `origin` metadata. `origin.user` is the configured human identity, `origin.agent` is the automated actor or local surface, `origin.interface` is the entry point (`mcp`, `daemon`, `ui`, `api`, `cli`, or `system`), and `origin.operation` records the create/update/delete/verify/forget/review/correct/reinforce/supersede/feedback action.
+
+`bikky setup` provisions `identity.user_id` and `identity.user_name` if they are missing. It never overwrites an existing configured user. Runtime detection uses this order:
+
+1. `identity.user_id` / `identity.user_name` from config
+2. `BIKKY_USER_ID` / `BIKKY_USER_NAME`
+3. Git config (`user.name`, `user.email`; email-like identifiers are hashed)
+4. Shell/OS username
+5. Hostname fallback
+
+MCP callers cannot pass `origin` or override the human user. Use `BIKKY_AGENT_ID` / `BIKKY_AGENT_NAME` only when you need to label the local automated agent process explicitly; otherwise bikky labels the daemon/UI/MCP surface from the hostname.
+
 ## Common setups
 
 If you know which path you want, start with the focused guide:
@@ -139,6 +153,10 @@ Useful basics:
 | `QDRANT_URL`     | `qdrant_url`     | Required unless set in config                                               |
 | `QDRANT_API_KEY` | `qdrant_api_key` | Optional for local/unauthenticated Qdrant; usually needed for Qdrant Cloud  |
 | `BIKKY_HOME`     | —                | Moves the config/log/state directory from `~/.bikky`                        |
+| `BIKKY_USER_ID`  | `identity.user_id` | Explicit human user id for origin provisioning                            |
+| `BIKKY_USER_NAME` | `identity.user_name` | Human-readable human user name for origin provisioning                  |
+| `BIKKY_AGENT_ID` | —                | Optional local automated-agent id stored in `origin.agent`                  |
+| `BIKKY_AGENT_NAME` | —              | Optional local automated-agent label stored in `origin.agent`               |
 
 ## Provider options
 

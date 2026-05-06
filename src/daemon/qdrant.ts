@@ -24,7 +24,6 @@ import {
   normalizeCategory,
   normalizeDomain,
   normalizeKind,
-  normalizeSource,
   validateMemorySubtype,
 } from "../mcp/taxonomy.js";
 import {
@@ -32,6 +31,7 @@ import {
   redactStorageText,
   type RedactionSummary,
 } from "../privacy/redaction.js";
+import { buildOperationOrigin, type OperationOrigin } from "../provenance/origin.js";
 
 // ---------------------------------------------------------------------------
 // Types (local)
@@ -46,10 +46,15 @@ export interface QdrantPayload {
   kind: string;
   layer?: string | null;
   memory_subtype?: string | null;
+  origin?: OperationOrigin;
+  last_operation_origin?: OperationOrigin;
+  /** @deprecated Origin is canonical for new writes. */
   workspace_id?: string;
+  /** @deprecated Origin is canonical for new writes. */
   actor_id?: string;
   entities: string[];
-  source: string;
+  /** @deprecated Origin is canonical for new writes. */
+  source?: string;
   confidence: number;
   importance: number;
   content_hash: string;
@@ -94,11 +99,15 @@ export interface StoreFact {
   layer?: string | null;
   memory_subtype?: string | null;
   entities: string[];
+  origin?: OperationOrigin;
+  last_operation_origin?: OperationOrigin;
+  /** @deprecated Origin is canonical for new writes. */
   source?: string;
   confidence?: number;
   importance?: number;
   content_hash: string;
   workspace_id?: string;
+  /** @deprecated Origin is canonical for new writes. */
   actor_id?: string;
   metadata?: Record<string, string | number | boolean | null>;
   session_id?: string | null;
@@ -548,6 +557,16 @@ const storeFact = async (fact: StoreFact, routeInput?: RoutingInput): Promise<st
   ]);
   const now = new Date().toISOString();
   const id = randomUUID();
+  const origin = fact.origin ?? buildOperationOrigin({
+    interface: "daemon",
+    action: "create",
+    subsystem: "qdrant.store_fact",
+    metadata: {
+      category: normalizedCategory,
+      kind: normalizedKind,
+      ...(normalizedSubtype ? { memory_subtype: normalizedSubtype } : {}),
+    },
+  });
   const payload: QdrantPayload = {
     content: redactedContent.text,
     category: normalizedCategory,
@@ -555,9 +574,9 @@ const storeFact = async (fact: StoreFact, routeInput?: RoutingInput): Promise<st
     kind: normalizedKind,
     ...(normalizedLayer ? { layer: normalizedLayer } : {}),
     ...(normalizedSubtype ? { memory_subtype: normalizedSubtype } : {}),
-    ...(fact.actor_id ? { actor_id: fact.actor_id } : {}),
+    origin,
+    ...(fact.last_operation_origin ? { last_operation_origin: fact.last_operation_origin } : {}),
     entities: redactedEntities.map((entity) => entity.text.toLowerCase()),
-    source: normalizeSource(fact.source ?? "system"),
     confidence: fact.confidence ?? 0.7,
     importance: fact.importance ?? 0.5,
     content_hash: redactedContent.redacted
@@ -622,7 +641,7 @@ const storeFact = async (fact: StoreFact, routeInput?: RoutingInput): Promise<st
   return id;
 };
 
-const supersedeFact = async (oldFactId: string, newFactId: string, destinationRef?: DestinationRef): Promise<void> => {
+const supersedeFact = async (oldFactId: string, newFactId: string, destinationRef?: DestinationRef, origin?: OperationOrigin): Promise<void> => {
   const destination = destinationFromRef(destinationRef);
   const now = new Date().toISOString();
   await qdrantRequest("POST", `/collections/${destination.collection}/points/payload`, {
@@ -630,13 +649,19 @@ const supersedeFact = async (oldFactId: string, newFactId: string, destinationRe
       superseded_by: newFactId,
       superseded_at: now,
       updated_at: now,
+      last_operation_origin: origin ?? buildOperationOrigin({
+        interface: "daemon",
+        action: "supersede",
+        subsystem: "qdrant.supersede_fact",
+        metadata: { new_fact_id: newFactId },
+      }),
     },
     points: [oldFactId],
   }, destination);
   logFn("DEBUG", `Qdrant: superseded fact ${oldFactId} → ${newFactId} in '${destination.name}'`);
 };
 
-const reinforceFact = async (factId: string, currentCount: number, destinationRef?: DestinationRef): Promise<void> => {
+const reinforceFact = async (factId: string, currentCount: number, destinationRef?: DestinationRef, origin?: OperationOrigin): Promise<void> => {
   const destination = destinationFromRef(destinationRef);
   const now = new Date().toISOString();
   await qdrantRequest("POST", `/collections/${destination.collection}/points/payload`, {
@@ -644,6 +669,11 @@ const reinforceFact = async (factId: string, currentCount: number, destinationRe
       reinforcement_count: (currentCount || 1) + 1,
       last_reinforced_at: now,
       updated_at: now,
+      last_operation_origin: origin ?? buildOperationOrigin({
+        interface: "daemon",
+        action: "reinforce",
+        subsystem: "qdrant.reinforce_fact",
+      }),
     },
     points: [factId],
   }, destination);

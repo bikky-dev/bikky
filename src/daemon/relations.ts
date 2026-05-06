@@ -8,6 +8,7 @@
 
 import { createHash } from "node:crypto";
 import * as qdrant from "./qdrant.js";
+import { buildOperationOrigin } from "../provenance/origin.js";
 import { chatCompletion } from "../llm/index.js";
 import {
   relationsPrompt,
@@ -368,11 +369,19 @@ const storeRelation = async (
     domain: DEFAULT_CAPTURE_CONTEXT.domain,
     kind: "relation",
     entities: [fromEntity, toEntity],
-    source: "system",
     confidence: extras.confidence ?? 0.7,
     importance: 0.6,
     content_hash: hash,
     metadata,
+    origin: buildOperationOrigin({
+      interface: "daemon",
+      action: "create",
+      subsystem: "relations",
+      metadata: {
+        relation_type: relationType,
+        supporting_fact_count: candidate.supportingFactIds.length,
+      },
+    }),
     source_fact_ids: candidate.supportingFactIds,
     ...(candidate.workstreamKeys.length > 0 ? { workstream_key: candidate.workstreamKeys[0] } : {}),
     relation: {

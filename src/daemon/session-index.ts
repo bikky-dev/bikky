@@ -16,6 +16,7 @@ import {
   redactStorageText,
   type RedactionSummary,
 } from "../privacy/redaction.js";
+import { buildOperationOrigin, type OperationOrigin } from "../provenance/origin.js";
 
 export interface WorkspaceScope {
   workspaceId?: string;
@@ -90,11 +91,23 @@ export const buildSessionIndexPayload = (input: {
   existing?: { id: string; payload?: Partial<QdrantPayload> } | null;
   eventCount: number;
   redactionOptions: { enabled: boolean; redactPii: boolean };
+  config?: BikkyConfig;
+  origin?: OperationOrigin;
 }): SessionIndexPayloadResult => {
   const redactedContent = redactStorageText(input.draft.content, input.redactionOptions);
   const redactedEntities = input.draft.entities.map((entity) => redactStorageText(entity, input.redactionOptions));
   const redaction = combineRedactions([redactedContent, ...redactedEntities]);
   const existingPayload = input.existing?.payload ?? {};
+  const operationOrigin = input.origin ?? buildOperationOrigin({
+    interface: "daemon",
+    action: input.existing ? "update" : "create",
+    subsystem: "session_index",
+    config: input.config,
+    metadata: {
+      session_id: input.sessionId,
+      event_count: input.eventCount,
+    },
+  });
 
   const payload: Record<string, unknown> = {
     ...existingPayload,
@@ -105,9 +118,9 @@ export const buildSessionIndexPayload = (input: {
     memory_subtype: "session_index",
     layer: "episode",
     ...(input.scope.workspaceId ? { workspace_id: input.scope.workspaceId } : {}),
-    ...(input.scope.actorId ? { actor_id: input.scope.actorId } : {}),
+    origin: existingPayload.origin ?? operationOrigin,
+    ...(input.existing ? { last_operation_origin: operationOrigin } : {}),
     entities: redactedEntities.map((entity) => entity.text.toLowerCase()),
-    source: "system",
     confidence: 1.0,
     importance: input.draft.importance,
     content_hash: contentHash(redactedContent.text),
@@ -183,7 +196,8 @@ export const updateSessionIndex = async (input: {
         session_id: input.sessionId,
         memory_subtype: "session_index",
         kind: "summary",
-        source: "system",
+        origin_interface: "daemon",
+        origin_agent_type: "daemon",
       },
     }).name;
   const existing = await findExistingSessionIndex(input.sessionId, input.scope, destination);
@@ -195,6 +209,7 @@ export const updateSessionIndex = async (input: {
     now,
     existing,
     eventCount: input.eventCount,
+    config: input.config,
     redactionOptions: {
       enabled: true,
       redactPii: false,

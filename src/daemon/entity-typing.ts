@@ -20,6 +20,7 @@ import {
   shouldRunMaintenance,
 } from "./maintenance-state.js";
 import { isGenericEntity } from "./relations-vocab.js";
+import { buildOperationOrigin } from "../provenance/origin.js";
 
 const FACTS_SCAN_LIMIT = 200;
 const FACTS_PER_ENTITY = 5;
@@ -223,6 +224,15 @@ const upsertEntityTypePoint = async (
           classified_at: now,
           updated_at: now,
           created_at: now,
+          origin: buildOperationOrigin({
+            interface: "daemon",
+            action: "create",
+            subsystem: "entity_typing",
+            metadata: {
+              entity_name: candidate.name,
+              classification_source: source,
+            },
+          }),
           source_fact_ids: candidate.factIds,
           ...(candidate.workstreamKeys.length > 0 ? { workstream_key: candidate.workstreamKeys[0] } : {}),
           metadata: {

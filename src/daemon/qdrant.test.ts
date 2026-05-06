@@ -245,7 +245,13 @@ describe("daemon/qdrant", () => {
         content_hash: "def456",
         domain: "software_engineering",
         kind: "fact",
-        source: "agent",
+        origin: {
+          schema_version: 1,
+          user: null,
+          agent: { type: "daemon", id: "daemon:test", name: "test daemon", source: "config" },
+          interface: "daemon",
+          operation: { action: "create", subsystem: "test" },
+        },
         confidence: 0.9,
         importance: 0.7,
         metadata: { session_id: "abc" },
@@ -253,7 +259,7 @@ describe("daemon/qdrant", () => {
       };
       assert.strictEqual(fact.domain, "software_engineering");
       assert.strictEqual(fact.kind, "fact");
-      assert.strictEqual(fact.source, "agent");
+      assert.strictEqual(fact.origin?.agent.id, "daemon:test");
       assert.strictEqual(fact.confidence, 0.9);
       assert.strictEqual(fact.importance, 0.7);
       assert.deepStrictEqual(fact.metadata, { session_id: "abc" });

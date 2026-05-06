@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { writeInstallConfig } from "./install.js";
+import { provisionUserIdentityConfig, writeInstallConfig } from "./install.js";
 
 const serverEntry = {
   type: "stdio",
@@ -29,6 +29,10 @@ function claudeConfigPath(): string {
 
 function legacyClaudeConfigPath(): string {
   return path.join(tempHome, ".claude", "mcp.json");
+}
+
+function bikkyConfigPath(): string {
+  return path.join(tempHome, ".bikky", "config.json");
 }
 
 function readJson(filePath: string): Record<string, unknown> {
@@ -205,5 +209,57 @@ describe("writeInstallConfig", () => {
 
     assertBikkyEntry(readJson(copilotConfigPath()));
     assertBikkyEntry(readJson(claudeConfigPath()));
+  });
+
+  it("provisions missing user identity from env into bikky config", () => {
+    const identity = provisionUserIdentityConfig({
+      homeDir: tempHome,
+      env: { BIKKY_USER_ID: "saber-local", BIKKY_USER_NAME: "Saber" },
+      shellUsername: null,
+      hostname: "fallback-host",
+      cwd: "/tmp/does-not-exist",
+    });
+
+    assert.equal(identity?.source, "env");
+    assert.deepStrictEqual((readJson(bikkyConfigPath()).identity as Record<string, unknown>), {
+      user_id: "saber-local",
+      user_name: "Saber",
+    });
+  });
+
+  it("does not overwrite an existing configured user identity", () => {
+    fs.mkdirSync(path.dirname(bikkyConfigPath()), { recursive: true });
+    fs.writeFileSync(
+      bikkyConfigPath(),
+      JSON.stringify({
+        identity: {
+          user_id: "existing-user",
+          user_name: "Existing User",
+          actor_id: "legacy-actor",
+        },
+      }),
+    );
+
+    const identity = provisionUserIdentityConfig({
+      homeDir: tempHome,
+      env: { BIKKY_USER_ID: "new-user", BIKKY_USER_NAME: "New User" },
+    });
+
+    assert.equal(identity, null);
+    assert.deepStrictEqual((readJson(bikkyConfigPath()).identity as Record<string, unknown>), {
+      user_id: "existing-user",
+      user_name: "Existing User",
+      actor_id: "legacy-actor",
+    });
+  });
+
+  it("provisions identity under BIKKY_HOME when no explicit homeDir is provided", () => {
+    const bikkyHome = path.join(tempHome, "custom-bikky-home");
+    const identity = provisionUserIdentityConfig({
+      env: { BIKKY_HOME: bikkyHome, BIKKY_USER_ID: "home-user", BIKKY_USER_NAME: "Home User" },
+    });
+
+    assert.equal(identity?.source, "env");
+    assert.equal((readJson(path.join(bikkyHome, "config.json")).identity as Record<string, unknown>).user_id, "home-user");
   });
 });

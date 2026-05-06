@@ -53,7 +53,13 @@ describe("ui/lib/qdrant", () => {
         { key: "domain", match: { value: "work" } },
         { key: "kind", match: { value: "fact" } },
         { key: "memory_subtype", match: { value: "codebase_map" } },
-        { key: "source", match: { any: ["agent", "cortex"] } },
+        {
+          should: [
+            { key: "origin.agent.type", match: { any: ["agent", "cortex"] } },
+            { key: "origin.interface", match: { any: ["agent", "cortex"] } },
+            { key: "source", match: { any: ["agent", "cortex"] } },
+          ],
+        },
       ]);
     });
 

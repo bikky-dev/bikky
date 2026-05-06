@@ -19,12 +19,9 @@ import {
   kindEnumDescription,
   memorySubtypeValues,
   memorySubtypeEnumDescription,
-  sourceValues,
-  sourceEnumDescription,
   DEFAULT_CATEGORY,
   DEFAULT_DOMAIN,
   DEFAULT_KIND,
-  DEFAULT_SOURCE,
   categoryForMemorySubtype,
   layerForMemorySubtype,
   normalizeCategory,
@@ -74,7 +71,7 @@ import {
 } from "../search-scope.js";
 import { existsSync, readFileSync } from "node:fs";
 import { inspectWatcherPaths, formatIssue, repairSuspiciousWatcherPaths } from "../daemon/watcher-health.js";
-import { normalizeActorId, resolveActorIdentity, type ActorIdentity } from "../provenance/actor.js";
+import { buildOperationOrigin, type OperationOrigin, type OriginAction } from "../provenance/origin.js";
 import {
   addRedactionPayload,
   combineRedactions,
@@ -218,19 +215,22 @@ function resolveSearchScopeOrError(args: {
   }
 }
 
-// Add actor identity payload fields. Workspace was removed in v0.4.0 — physical
-// separation now happens via routing destinations (see routing.ts).
-function addActorPayload(payload: Record<string, unknown>, actor?: ActorIdentity, actorIdOverride?: string): void {
-  const actorId = actor?.actor_id ?? normalizeActorId(actorIdOverride);
-  if (actorId) payload["actor_id"] = actorId;
-  if (actor?.actor_label) {
-    const metadata = payload["metadata"] && typeof payload["metadata"] === "object" && !Array.isArray(payload["metadata"])
-      ? payload["metadata"] as Record<string, unknown>
-      : {};
-    metadata["actor_label"] = actor.actor_label;
-    if (actor.source) metadata["actor_source"] = actor.source;
-    payload["metadata"] = metadata;
-  }
+function mcpOrigin(input: {
+  action: OriginAction;
+  tool: string;
+  outcome?: string;
+  metadata?: Record<string, unknown>;
+}): OperationOrigin {
+  return buildOperationOrigin({
+    interface: "mcp",
+    agentType: "coding_agent",
+    action: input.action,
+    tool: input.tool,
+    outcome: input.outcome,
+    config: loadConfig(),
+    cwd: process.cwd(),
+    metadata: input.metadata,
+  });
 }
 
 async function getPointForWrite(dest: Destination, factId: string): Promise<{ point?: QdrantPoint; error?: Record<string, unknown> }> {
@@ -680,9 +680,6 @@ export function registerTools(mcp: McpServer): void {
       destination: z.string().optional().describe(
         "Optional destination override. When set, routes to that destination by name. Hard-errors if no such destination exists. Omit to let routing rules in ~/.bikky/config.json decide based on cwd/entities/content/metadata.",
       ),
-      actor_id: z.string().optional().describe(
-        "Stable actor/person/agent identity associated with this capture. Overrides identity config/env/Git-derived fallback for this write.",
-      ),
       episode_id: z.string().optional().describe(
         "Coherent activity-segment ID. Group facts captured during the same coherent task or transcript.",
       ),
@@ -695,7 +692,6 @@ export function registerTools(mcp: McpServer): void {
       review_status: z.enum(["candidate", "reviewed", "approved", "rejected"]).optional().describe(
         "Review lifecycle status. candidate=auto-extracted (daemon), reviewed=human-checked, approved=human-confirmed, rejected=incorrect. Agents normally leave this unset.",
       ),
-      source: z.enum(sourceValues()).default(DEFAULT_SOURCE).describe(sourceEnumDescription()),
       confidence: z.number().min(0).max(1).default(0.9).describe(
         "How certain you are this fact is correct (0.0-1.0). Default 0.9. Lower (~0.6) for inferred or unverified facts.",
       ),
@@ -725,14 +721,12 @@ export function registerTools(mcp: McpServer): void {
       memory_subtype,
       workspace_id: _workspace_id,
       destination,
-      actor_id,
       episode_id,
       workstream_key,
       task_key,
       repo,
       branch,
       review_status,
-      source,
       confidence,
       importance,
       supersedes,
@@ -751,7 +745,6 @@ export function registerTools(mcp: McpServer): void {
       }));
       if (resolved.error) return resolved.error;
       const dest = resolved.dest;
-      const actor = resolveActorIdentity({ actorId: actor_id, config: loadConfig() });
       const normalizedKind = normalizeKind(kind);
       let normalizedSubtype: string | null = null;
       try {
@@ -793,6 +786,19 @@ export function registerTools(mcp: McpServer): void {
         type: redactedRelation.type.text,
         to: redactedRelation.to.text,
       } : null;
+      const createOrigin = mcpOrigin({
+        action: "create",
+        tool: "memory_store",
+        metadata: {
+          destination: dest.name,
+          category: normalizedCategory,
+          kind: normalizedKind,
+          ...(normalizedSubtype ? { memory_subtype: normalizedSubtype } : {}),
+          ...(task_key ? { task_key } : {}),
+          ...(repo ? { repo } : {}),
+          ...(branch ? { branch } : {}),
+        },
+      });
 
       // 1. Exact dedup via content hash
       try {
@@ -807,6 +813,12 @@ export function registerTools(mcp: McpServer): void {
             reinforcement_count: count,
             last_reinforced_at: now,
             updated_at: now,
+            last_operation_origin: mcpOrigin({
+              action: "reinforce",
+              tool: "memory_store",
+              outcome: "exact_duplicate",
+              metadata: { destination: dest.name, fact_id: point.id },
+            }),
           });
           return {
             content: [{ type: "text", text: JSON.stringify({
@@ -845,6 +857,12 @@ export function registerTools(mcp: McpServer): void {
               reinforcement_count: count,
               last_reinforced_at: now,
               updated_at: now,
+              last_operation_origin: mcpOrigin({
+                action: "reinforce",
+                tool: "memory_store",
+                outcome: "semantic_duplicate",
+                metadata: { destination: dest.name, fact_id: point.id, similarity: topScore },
+              }),
             });
             return {
               content: [{ type: "text", text: JSON.stringify({
@@ -900,6 +918,12 @@ export function registerTools(mcp: McpServer): void {
           await qdrantSetPayload(dest, [supersedes], {
             superseded_by: factId,
             superseded_at: now,
+            updated_at: now,
+            last_operation_origin: mcpOrigin({
+              action: "supersede",
+              tool: "memory_store",
+              metadata: { destination: dest.name, new_fact_id: factId },
+            }),
           });
         } catch (e) {
           log("WARN", `Failed to supersede ${supersedes}: ${e instanceof Error ? e.message : String(e)}`);
@@ -913,7 +937,7 @@ export function registerTools(mcp: McpServer): void {
         domain: normalizedDomain,
         kind: normalizedKind,
         entities: normalizedEntities,
-        source,
+        origin: createOrigin,
         confidence,
         importance: importance ?? 0.5,
         content_hash: hash,
@@ -939,7 +963,6 @@ export function registerTools(mcp: McpServer): void {
         payload["metadata"] = metadata;
       }
       if (review_status) payload["review_status"] = review_status;
-      addActorPayload(payload, actor);
       addRedactionPayload(payload, factRedactionSummary);
       await qdrantUpsert(dest, factId, vector, payload);
 
@@ -956,7 +979,15 @@ export function registerTools(mcp: McpServer): void {
           kind: "relation",
           layer: "memory_object",
           entities: [sanitizedRelation.from.toLowerCase(), sanitizedRelation.to.toLowerCase()],
-          source,
+          origin: mcpOrigin({
+            action: "create",
+            tool: "memory_store",
+            metadata: {
+              destination: dest.name,
+              parent_fact_id: factId,
+              relation_type: sanitizedRelation.type.toLowerCase(),
+            },
+          }),
           confidence,
           content_hash: contentHash("relation", relContent),
           reinforcement_count: 1,
@@ -969,7 +1000,6 @@ export function registerTools(mcp: McpServer): void {
           relation_type: sanitizedRelation.type.toLowerCase(),
           to_entity: sanitizedRelation.to.toLowerCase(),
         };
-        addActorPayload(relPayload, actor);
         addRedactionPayload(relPayload, relationRedactionSummary);
         await qdrantUpsert(dest, relationId, relVector, relPayload);
       }
@@ -978,8 +1008,8 @@ export function registerTools(mcp: McpServer): void {
         action: "inserted",
         fact_id: factId,
         destination: dest.name,
+        origin: createOrigin,
       };
-      if (actor.actor_id) result["actor_id"] = actor.actor_id;
       if (relationId) result["relation_id"] = relationId;
       if (redactionSummary.redacted) result["redaction"] = redactionSummary;
       if (similarFacts.length > 0) result["similar_facts"] = similarFacts;
@@ -1032,8 +1062,14 @@ export function registerTools(mcp: McpServer): void {
       search_scope: searchScopeSchema.describe(
         "Optional read/search scope. Accepts 'routed', 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Omit to use config.default_search_scope.",
       ),
-      actor_id: z.string().optional().describe(
-        "Filter to facts captured by or associated with this stable actor identity. Optional.",
+      origin_user_id: z.string().optional().describe(
+        "Filter to facts whose creation origin.user.id matches this value. Optional.",
+      ),
+      origin_agent_id: z.string().optional().describe(
+        "Filter to facts whose creation origin.agent.id matches this value. Optional.",
+      ),
+      origin_interface: z.enum(["mcp", "daemon", "ui", "api", "cli", "system"]).optional().describe(
+        "Filter to facts created through this origin interface. Optional.",
       ),
       include_legacy_workspace: z.boolean().optional().describe("[Removed in v0.4.0] No-op."),
       entity: z.string().optional().describe(
@@ -1071,7 +1107,9 @@ export function registerTools(mcp: McpServer): void {
       workspace_id: _workspace_id,
       destination,
       search_scope,
-      actor_id,
+      origin_user_id,
+      origin_agent_id,
+      origin_interface,
       include_legacy_workspace: _include_legacy_workspace,
       entity,
       episode_id,
@@ -1091,7 +1129,6 @@ export function registerTools(mcp: McpServer): void {
       if (guard) return guard;
       const requestedLimit = limit ?? MEMORY_RECALL_DEFAULT_LIMIT;
       const effectiveLimit = clampRecallLimit(limit);
-      const actorFilter = resolveActorIdentity({ actorId: actor_id, useGitFallback: false });
       const scopeResolved = resolveSearchScopeOrError({
         destination,
         search_scope,
@@ -1122,7 +1159,9 @@ export function registerTools(mcp: McpServer): void {
         domain: domain ? normalizeDomain(domain) : undefined,
         kind: normalizedKind,
         memory_subtype: normalizedSubtype,
-        actor_id: actorFilter.actor_id,
+        origin_user_id,
+        origin_agent_id,
+        origin_interface,
         entity,
         episode_id,
         workstream_key,
@@ -1530,6 +1569,11 @@ export function registerTools(mcp: McpServer): void {
           superseded_by: `forgotten:${redactedReason.text}`,
           superseded_at: now,
           updated_at: now,
+          last_operation_origin: mcpOrigin({
+            action: "forget",
+            tool: "memory_forget",
+            metadata: { destination: dest.name, fact_id },
+          }),
           // Mark this fact's vector as a bad-exemplar centroid: future
           // candidates with high cosine similarity will be auto-flagged
           // for review. Forgotten facts keep their original vector — the
@@ -1579,6 +1623,11 @@ export function registerTools(mcp: McpServer): void {
           last_reinforced_at: now,
           verification_count: newCount,
           updated_at: now,
+          last_operation_origin: mcpOrigin({
+            action: "verify",
+            tool: "memory_verify",
+            metadata: { destination: dest.name, fact_id },
+          }),
         });
         return {
           content: [{ type: "text", text: JSON.stringify({
@@ -1619,13 +1668,19 @@ export function registerTools(mcp: McpServer): void {
         const located = await locatePoint(fact_id);
         if (!located) return notFoundResult(fact_id);
         const { dest, point } = located;
-        const actor = resolveActorIdentity({ config: loadConfig() });
         const currentCount = point.payload.useful_count ?? 0;
         const newCount = currentCount + 1;
+        const feedbackOrigin = mcpOrigin({
+          action: "feedback",
+          tool: "memory_mark_useful",
+          outcome: "useful",
+          metadata: { destination: dest.name, fact_id },
+        });
         await qdrantSetPayload(dest, [fact_id], {
           useful_count: newCount,
           last_useful_at: now,
           updated_at: now,
+          last_operation_origin: feedbackOrigin,
         });
 
         // Write a telemetry feedback_event row so the signal is also visible
@@ -1643,7 +1698,7 @@ export function registerTools(mcp: McpServer): void {
           memory_subtype: "feedback_event",
           layer: "memory_object",
           entities: [],
-          source: "agent",
+          origin: feedbackOrigin,
           confidence: 1.0,
           importance: 0.3,
           content_hash: contentHash("feedback_event", `${fact_id}:useful:${now}`),
@@ -1652,7 +1707,6 @@ export function registerTools(mcp: McpServer): void {
           created_at: now,
           updated_at: now,
         };
-        addActorPayload(eventPayload, actor);
         addRedactionPayload(eventPayload, redactedEvent);
         try {
           const eventVector = await embed(redactedEvent.text);
@@ -1703,7 +1757,16 @@ export function registerTools(mcp: McpServer): void {
         const located = await locatePoint(fact_id);
         if (!located) return notFoundResult(fact_id);
         const { dest } = located;
-        const actor = resolveActorIdentity({ config: loadConfig() });
+        const feedbackOrigin = mcpOrigin({
+          action: "feedback",
+          tool: "memory_report_outcome",
+          outcome,
+          metadata: { destination: dest.name, fact_id },
+        });
+        await qdrantSetPayload(dest, [fact_id], {
+          updated_at: now,
+          last_operation_origin: feedbackOrigin,
+        });
 
         const eventId = newId();
         const eventContent = notes
@@ -1718,7 +1781,7 @@ export function registerTools(mcp: McpServer): void {
           memory_subtype: "outcome_event",
           layer: "memory_object",
           entities: [],
-          source: "agent",
+          origin: feedbackOrigin,
           confidence: 1.0,
           importance: outcome === "wrong" || outcome === "misleading" ? 0.6 : 0.3,
           content_hash: contentHash("outcome_event", `${fact_id}:${outcome}:${now}`),
@@ -1727,7 +1790,6 @@ export function registerTools(mcp: McpServer): void {
           created_at: now,
           updated_at: now,
         };
-        addActorPayload(eventPayload, actor);
         addRedactionPayload(eventPayload, redactedEvent);
         const eventVector = await embed(redactedEvent.text);
         await qdrantUpsert(dest, eventId, eventVector, eventPayload);
@@ -1753,7 +1815,7 @@ export function registerTools(mcp: McpServer): void {
     "memory_session_summary",
     [
       "Persist a compact summary of the current session — what got done, what decisions were made, what's still open.",
-      "Stored as kind='summary', memory_subtype='session_index', source='agent'. Keep it short (target 30-80 words). Future sessions retrieve these via memory_recall to bootstrap context faster than re-reading the original transcript.",
+      "Stored as kind='summary', memory_subtype='session_index' with canonical origin metadata. Keep it short (target 30-80 words). Future sessions retrieve these via memory_recall to bootstrap context faster than re-reading the original transcript.",
       "Call this near session close (or at major milestone boundaries) when the work is meaningful enough to want a future agent to inherit. Skip for trivial single-question sessions.",
     ].join(" "),
     {
@@ -1769,11 +1831,8 @@ export function registerTools(mcp: McpServer): void {
       repo: z.string().optional().describe("Repository or project surface this summary relates to."),
       workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
       destination: z.string().optional().describe("Optional destination override. Omit to let routing rules decide."),
-      actor_id: z.string().optional().describe(
-        "Stable actor identity associated with this session summary. Overrides identity config/env/Git fallback.",
-      ),
     },
-    async ({ content, entities, episode_id, workstream_key, task_key, repo, workspace_id: _workspace_id, destination, actor_id }): Promise<McpToolResult> => {
+    async ({ content, entities, episode_id, workstream_key, task_key, repo, workspace_id: _workspace_id, destination }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       lastStoreTime = Date.now();
@@ -1786,11 +1845,21 @@ export function registerTools(mcp: McpServer): void {
         }));
         if (resolved.error) return resolved.error;
         const dest = resolved.dest;
-        const actor = resolveActorIdentity({ actorId: actor_id, config: loadConfig() });
         const normalizedEntities = (entities ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean);
         const summaryId = newId();
         const redactedContent = redactStorageText(content);
         const vector = await embed(redactedContent.text);
+        const origin = mcpOrigin({
+          action: "create",
+          tool: "memory_session_summary",
+          metadata: {
+            destination: dest.name,
+            ...(episode_id ? { episode_id } : {}),
+            ...(workstream_key ? { workstream_key } : {}),
+            ...(task_key ? { task_key } : {}),
+            ...(repo ? { repo } : {}),
+          },
+        });
         const payload: Record<string, unknown> = {
           content: redactedContent.text,
           category: categoryForMemorySubtype("session_index") ?? "system",
@@ -1799,7 +1868,7 @@ export function registerTools(mcp: McpServer): void {
           memory_subtype: "session_index",
           layer: layerForMemorySubtype("session_index") ?? "episode",
           entities: normalizedEntities,
-          source: "agent",
+          origin,
           confidence: 0.9,
           importance: 0.6,
           content_hash: contentHash("summary", redactedContent.text),
@@ -1814,7 +1883,6 @@ export function registerTools(mcp: McpServer): void {
         if (workstream_key) payload["workstream_key"] = workstream_key;
         if (task_key) payload["task_key"] = task_key;
         if (repo) payload["repo"] = repo;
-        addActorPayload(payload, actor);
         addRedactionPayload(payload, redactedContent);
         await qdrantUpsert(dest, summaryId, vector, payload);
 
@@ -1823,7 +1891,7 @@ export function registerTools(mcp: McpServer): void {
             status: "summary_stored",
             summary_id: summaryId,
             destination: dest.name,
-            actor_id: actor.actor_id,
+            origin,
           }) }],
         };
       } catch (e) {
@@ -1838,7 +1906,7 @@ export function registerTools(mcp: McpServer): void {
     "memory_distill",
     [
       "Persist a distilled convention — a reusable learning, pattern, or runbook synthesized from multiple prior memories.",
-      "Stored as kind='distilled', memory_subtype='convention', source='agent'. Use this when you've noticed a pattern across several prior facts/sessions that's worth surfacing as its own atomic learning. The new memory will rank above raw facts in semantic recall because distilled patterns are higher-signal.",
+      "Stored as kind='distilled', memory_subtype='convention' with canonical origin metadata. Use this when you've noticed a pattern across several prior facts/sessions that's worth surfacing as its own atomic learning. The new memory will rank above raw facts in semantic recall because distilled patterns are higher-signal.",
       "Provide 'supersedes' if this distillation replaces an earlier convention. The original stays in storage but is excluded from recall.",
     ].join(" "),
     {
@@ -1855,11 +1923,8 @@ export function registerTools(mcp: McpServer): void {
       repo: z.string().optional().describe("Repository or project surface this learning applies to."),
       workspace_id: z.string().optional().describe("[Removed in v0.4.0] No-op."),
       destination: z.string().optional().describe("Optional destination override. Omit to let routing rules decide."),
-      actor_id: z.string().optional().describe(
-        "Stable actor identity associated with this distillation. Overrides identity config/env/Git fallback.",
-      ),
     },
-    async ({ content, entities, supersedes, task_key, repo, workspace_id: _workspace_id, destination, actor_id }): Promise<McpToolResult> => {
+    async ({ content, entities, supersedes, task_key, repo, workspace_id: _workspace_id, destination }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
       lastStoreTime = Date.now();
@@ -1872,11 +1937,20 @@ export function registerTools(mcp: McpServer): void {
         }));
         if (resolved.error) return resolved.error;
         const dest = resolved.dest;
-        const actor = resolveActorIdentity({ actorId: actor_id, config: loadConfig() });
         const normalizedEntities = entities.map((e) => e.trim().toLowerCase()).filter(Boolean);
         const distilledId = newId();
         const redactedContent = redactStorageText(content);
         const vector = await embed(redactedContent.text);
+        const origin = mcpOrigin({
+          action: "create",
+          tool: "memory_distill",
+          metadata: {
+            destination: dest.name,
+            ...(task_key ? { task_key } : {}),
+            ...(repo ? { repo } : {}),
+            ...(supersedes ? { supersedes } : {}),
+          },
+        });
 
         if (supersedes) {
           // Supersede may live in a different destination — locate it.
@@ -1885,6 +1959,12 @@ export function registerTools(mcp: McpServer): void {
           await qdrantSetPayload(located.dest, [supersedes], {
             superseded_by: distilledId,
             superseded_at: now,
+            updated_at: now,
+            last_operation_origin: mcpOrigin({
+              action: "supersede",
+              tool: "memory_distill",
+              metadata: { destination: located.dest.name, new_fact_id: distilledId },
+            }),
           });
         }
 
@@ -1896,7 +1976,7 @@ export function registerTools(mcp: McpServer): void {
           memory_subtype: "convention",
           layer: layerForMemorySubtype("convention") ?? "domain",
           entities: normalizedEntities,
-          source: "agent",
+          origin,
           confidence: 0.9,
           importance: 0.7,
           content_hash: contentHash("distilled", redactedContent.text),
@@ -1909,7 +1989,6 @@ export function registerTools(mcp: McpServer): void {
         };
         if (task_key) payload["task_key"] = task_key;
         if (repo) payload["repo"] = repo;
-        addActorPayload(payload, actor);
         addRedactionPayload(payload, redactedContent);
         await qdrantUpsert(dest, distilledId, vector, payload);
 
@@ -1919,7 +1998,7 @@ export function registerTools(mcp: McpServer): void {
             distilled_id: distilledId,
             destination: dest.name,
             supersedes: supersedes ?? null,
-            actor_id: actor.actor_id,
+            origin,
           }) }],
         };
       } catch (e) {
@@ -1933,8 +2012,8 @@ export function registerTools(mcp: McpServer): void {
   mcp.tool(
     "memory_review",
     [
-      "Triage facts that were captured automatically by Bikky (source='system').",
-      "Only useful when the daemon is running and capturing memories from logs/transcripts; otherwise this returns an empty list. Supports four actions: list (default — show recent system-captured facts), approve (mark verified), reject (mark superseded with reason), correct (replace with edited content as a new fact).",
+      "Triage facts that were captured automatically by Bikky (origin.interface='daemon' or legacy source='system').",
+      "Only useful when the daemon is running and capturing memories from logs/transcripts; otherwise this returns an empty list. Supports four actions: list (default — show recent daemon/system-captured facts), approve (mark verified), reject (mark superseded with reason), correct (replace with edited content as a new fact).",
     ].join(" "),
     {
       limit: z.number().optional().default(10).describe("Max facts to return when action=list (default 10)."),
@@ -1957,7 +2036,14 @@ export function registerTools(mcp: McpServer): void {
         // List spans all destinations.
         const destinations = listDestinations();
         const allPoints: Array<{ dest: string; point: { id: string; payload: FactPayload } }> = [];
-        const filter: QdrantFilter = { must: [{ key: "source", match: { any: ["system", "daemon"] } }] };
+        const filter: QdrantFilter = {
+          must: [],
+          should: [
+            { key: "origin.interface", match: { value: "daemon" } },
+            { key: "origin.agent.type", match: { any: ["daemon", "system"] } },
+            { key: "source", match: { any: ["system", "daemon"] } },
+          ],
+        };
         for (const dest of destinations) {
           try {
             const result = await qdrantScroll(dest, filter, (limit ?? 10) * 2);
@@ -1998,6 +2084,12 @@ export function registerTools(mcp: McpServer): void {
           last_verified_at: now,
           verification_count: currentCount + 1,
           updated_at: now,
+          last_operation_origin: mcpOrigin({
+            action: "review",
+            tool: "memory_review",
+            outcome: "approved",
+            metadata: { destination: dest.name, fact_id },
+          }),
         });
         return { content: [{ type: "text", text: JSON.stringify({ status: "approved", fact_id, destination: dest.name }) }] };
       }
@@ -2014,6 +2106,12 @@ export function registerTools(mcp: McpServer): void {
           superseded_by: `rejected:${redactedReason.text}`,
           superseded_at: now,
           updated_at: now,
+          last_operation_origin: mcpOrigin({
+            action: "review",
+            tool: "memory_review",
+            outcome: "rejected",
+            metadata: { destination: dest.name, fact_id },
+          }),
         });
         return { content: [{ type: "text", text: JSON.stringify({
           status: "rejected",
@@ -2033,12 +2131,16 @@ export function registerTools(mcp: McpServer): void {
         const { dest, point } = located;
         const origPayload = point.payload;
         const redactedCorrected = redactStorageText(corrected_content);
-        const actor = resolveActorIdentity({ config: loadConfig() });
 
         const vector = await embed(redactedCorrected.text);
         const correctedId = crypto.randomUUID();
         const origCategory = normalizeCategory(origPayload?.category ?? DEFAULT_CATEGORY);
         const hash = contentHash(origCategory, redactedCorrected.text);
+        const correctOrigin = mcpOrigin({
+          action: "correct",
+          tool: "memory_review",
+          metadata: { destination: dest.name, corrected_from: fact_id },
+        });
         const correctedPayload: Record<string, unknown> = {
           content: redactedCorrected.text,
           category: origCategory,
@@ -2052,7 +2154,7 @@ export function registerTools(mcp: McpServer): void {
           ...(origPayload?.repo ? { repo: origPayload.repo } : {}),
           ...(origPayload?.branch ? { branch: origPayload.branch } : {}),
           entities: origPayload?.entities ?? [],
-          source: "user",
+          origin: correctOrigin,
           confidence: 0.95,
           importance: origPayload?.importance ?? 0.5,
           content_hash: hash,
@@ -2064,7 +2166,6 @@ export function registerTools(mcp: McpServer): void {
           updated_at: now,
           metadata: { ...(origPayload?.metadata ?? {}), corrected_from: fact_id },
         };
-        addActorPayload(correctedPayload, actor);
         addRedactionPayload(correctedPayload, redactedCorrected);
         await qdrantUpsert(dest, correctedId, vector, correctedPayload);
 
@@ -2072,6 +2173,12 @@ export function registerTools(mcp: McpServer): void {
           superseded_by: correctedId,
           superseded_at: now,
           updated_at: now,
+          last_operation_origin: mcpOrigin({
+            action: "supersede",
+            tool: "memory_review",
+            outcome: "corrected",
+            metadata: { destination: dest.name, new_fact_id: correctedId },
+          }),
         });
 
         return { content: [{ type: "text", text: JSON.stringify({ status: "corrected", old_fact_id: fact_id, new_fact_id: correctedId, destination: dest.name }) }] };

@@ -128,6 +128,8 @@ Pick the setup guide above for the copy-paste config. All setup shapes use the s
 
 Config lives at `~/.bikky/config.json`, or at `BIKKY_HOME/config.json` when `BIKKY_HOME` is set. You can keep credentials out of the file with environment variables such as `QDRANT_URL`, `QDRANT_API_KEY`, and provider API keys.
 
+`bikky setup` also provisions `identity.user_id` / `identity.user_name` when they are missing. New memory writes store canonical `origin` metadata with the configured human user, the acting agent or daemon/UI surface, the interface, and the operation. MCP clients cannot supply or spoof `origin.user`; if config, env, Git, and shell identity detection all fail, bikky falls back to the local hostname.
+
 For hosted models, custom providers, multiple profiles, or advanced tuning, use the full configuration guide.
 
 > 📖 **Full configuration guide:** [docs/configuration.md][configuration-guide]
@@ -196,7 +198,7 @@ bikky-ui              # opens http://localhost:1422
 <p align="center">
   <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/screenshots/memory.png" alt="Memory browser — search, filter, and browse all stored facts" width="720" />
 </p>
-<p align="center"><i>Memory browser — search, filter by category/kind/source, and browse all stored facts</i></p>
+<p align="center"><i>Memory browser — search, filter by category/kind/origin, and browse all stored facts</i></p>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/screenshots/graph.png" alt="Entity graph — interactive visualization of entity relationships" width="720" />

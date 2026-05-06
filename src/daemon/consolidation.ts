@@ -15,6 +15,7 @@ import { join, dirname } from "node:path";
 import { createHash } from "node:crypto";
 
 import * as qdrant from "./qdrant.js";
+import { buildOperationOrigin } from "../provenance/origin.js";
 import { chatCompletion } from "../llm/index.js";
 import { categoryValues, normalizeCategory, normalizeDomain } from "../mcp/taxonomy.js";
 import type { ALLOWED_BRIEF_HEADINGS } from "../prompts/index.js";
@@ -192,7 +193,6 @@ const autoDistill = async (
         domain: normalizeDomain(pattern.domain ?? "software_engineering"),
         kind: "distilled",
         entities: Array.isArray(pattern.entities) ? pattern.entities.map(e => String(e).toLowerCase()) : [],
-        source: "system",
         confidence: 0.85,
         importance: pattern.importance || 0.7,
         content_hash: hash,
@@ -201,12 +201,26 @@ const autoDistill = async (
           distilled_at: new Date().toISOString(),
           distilled_by_prompt: promptStamp,
         },
+        origin: buildOperationOrigin({
+          interface: "daemon",
+          action: "create",
+          subsystem: "consolidation",
+          metadata: {
+            distilled_from_count: batch.length,
+            prompt: promptStamp,
+          },
+        }),
       }, { destination });
     }
 
     // Supersede the source summaries
     for (const pt of batch) {
-      await qdrant.supersedeFact(pt.id, `distilled:${new Date().toISOString()}`, destination);
+      await qdrant.supersedeFact(pt.id, `distilled:${new Date().toISOString()}`, destination, buildOperationOrigin({
+        interface: "daemon",
+        action: "supersede",
+        subsystem: "consolidation",
+        metadata: { prompt: promptStamp },
+      }));
     }
 
     logFn("INFO", `Auto-distill: consolidated ${batch.length} summaries into ${patterns.length} patterns`);

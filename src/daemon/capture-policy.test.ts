@@ -17,7 +17,6 @@ describe("daemon/capture-policy", () => {
   it("uses memory ontology and software_engineering defaults", () => {
     assert.strictEqual(CAPTURE_POLICY_VERSION, "capture-policy-v2");
     assert.strictEqual(DEFAULT_CAPTURE_CONTEXT.domain, "software_engineering");
-    assert.strictEqual(DEFAULT_CAPTURE_CONTEXT.source, "system");
     assert.strictEqual(DEFAULT_CAPTURE_CONTEXT.reviewStatus, "candidate");
   });
 

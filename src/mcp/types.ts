@@ -2,6 +2,8 @@
  * Type definitions for the Memory MCP server.
  */
 
+import type { OperationOrigin } from "../provenance/origin.js";
+
 // ---------------------------------------------------------------------------
 // MCP SDK result type
 // ---------------------------------------------------------------------------
@@ -40,6 +42,9 @@ export interface QdrantFilterCondition {
   range?: { gte?: string; lte?: string };
   is_null?: { key: string };
   is_empty?: { key: string };
+  must?: QdrantFilterCondition[];
+  should?: QdrantFilterCondition[];
+  must_not?: QdrantFilterCondition[];
 }
 
 export interface QdrantFilter {
@@ -83,8 +88,12 @@ export interface FactPayload {
   kind?: string;
   layer?: string | null;
   memory_subtype?: string | null;
+  origin?: OperationOrigin;
+  last_operation_origin?: OperationOrigin;
+  /** @deprecated Origin is canonical for new writes. */
   actor_id?: string;
   entities: string[];
+  /** @deprecated Origin is canonical for new writes. */
   source?: string;
   confidence: number;
   importance?: number;
@@ -166,6 +175,10 @@ export interface FilterParams {
   domain?: string;
   kind?: string;
   memory_subtype?: string;
+  origin_user_id?: string;
+  origin_agent_id?: string;
+  origin_interface?: string;
+  /** @deprecated Use origin_user_id / origin_agent_id. */
   actor_id?: string;
   entity?: string;
   session_id?: string;

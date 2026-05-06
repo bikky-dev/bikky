@@ -33,6 +33,10 @@ export interface BikkyUIConfig {
     api_key: string | null;
     extra?: Record<string, string>;
   };
+  identity: {
+    user_id: string | null;
+    user_name: string | null;
+  };
 }
 
 const DEFAULTS: BikkyUIConfig = {
@@ -47,6 +51,10 @@ const DEFAULTS: BikkyUIConfig = {
     base_url: "http://localhost:11434",
     api_key: null,
     extra: {},
+  },
+  identity: {
+    user_id: null,
+    user_name: null,
   },
 };
 
@@ -83,6 +91,11 @@ export function loadConfig(): BikkyUIConfig {
         if (emb.api_key) config.embedding.api_key = emb.api_key as string;
         if (emb.extra && typeof emb.extra === "object") config.embedding.extra = emb.extra as Record<string, string>;
       }
+      if (raw.identity && typeof raw.identity === "object") {
+        const identity = raw.identity as Record<string, unknown>;
+        if (typeof identity.user_id === "string") config.identity.user_id = identity.user_id;
+        if (typeof identity.user_name === "string") config.identity.user_name = identity.user_name;
+      }
     } catch {
       console.error(`bikky-ui: failed to parse ${CONFIG_PATH}`);
     }
@@ -100,6 +113,8 @@ export function loadConfig(): BikkyUIConfig {
     if (Number.isFinite(n) && n > 0) config.embedding.dimensions = n;
   }
   if (process.env.OPENAI_API_KEY) config.embedding.api_key = process.env.OPENAI_API_KEY;
+  if (process.env.BIKKY_USER_ID) config.identity.user_id = process.env.BIKKY_USER_ID;
+  if (process.env.BIKKY_USER_NAME) config.identity.user_name = process.env.BIKKY_USER_NAME;
 
   // Strip trailing slashes
   if (config.qdrant_url) config.qdrant_url = config.qdrant_url.replace(/\/+$/, "");

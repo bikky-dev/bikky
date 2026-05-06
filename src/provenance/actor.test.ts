@@ -17,7 +17,7 @@ test("normalizeActorId hashes email-shaped values", () => {
 test("resolveActorIdentity prefers explicit input over env and config", () => {
   const cfg: BikkyConfig = {
     ...CONFIG_DEFAULTS,
-    identity: { actor_id: "config-actor", actor_label: "Config Actor" },
+    identity: { ...CONFIG_DEFAULTS.identity, actor_id: "config-actor", actor_label: "Config Actor" },
   };
   const actor = resolveActorIdentity({
     actorId: "input-actor",
@@ -36,7 +36,7 @@ test("resolveActorIdentity prefers explicit input over env and config", () => {
 test("resolveActorIdentity uses env before config", () => {
   const cfg: BikkyConfig = {
     ...CONFIG_DEFAULTS,
-    identity: { actor_id: "config-actor", actor_label: "Config Actor" },
+    identity: { ...CONFIG_DEFAULTS.identity, actor_id: "config-actor", actor_label: "Config Actor" },
   };
   const actor = resolveActorIdentity({
     config: cfg,

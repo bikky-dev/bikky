@@ -223,12 +223,18 @@ describe("ui/routes/memory", () => {
       assert.ok(search);
       assert.equal(search!.body.limit, 5);
       assert.deepEqual(search!.body.filter.must[0], {
-        key: "source",
-        match: { any: ["system", "daemon"] },
+        should: [
+          { key: "origin.agent.type", match: { any: ["system", "daemon"] } },
+          { key: "origin.interface", match: { any: ["system", "daemon"] } },
+          { key: "source", match: { any: ["system", "daemon"] } },
+        ],
       });
       assert.deepEqual(search!.body.filter.must[1], {
-        key: "actor_id",
-        match: { value: "agent-1" },
+        should: [
+          { key: "origin.user.id", match: { value: "agent-1" } },
+          { key: "origin.agent.id", match: { value: "agent-1" } },
+          { key: "actor_id", match: { value: "agent-1" } },
+        ],
       });
       assert.deepEqual(search!.body.filter.should, [
         {
@@ -545,7 +551,6 @@ describe("ui/routes/memory", () => {
         body: JSON.stringify({
           content: "Hello password=supersecretvalue",
           category: "engineering",
-          actor_id: "agent-1",
           entities: ["FOO", "api_key=entitysecret"],
           from_entity: "token=fromsecret",
           relation_type: "Owns",
@@ -563,8 +568,10 @@ describe("ui/routes/memory", () => {
       assert.equal(point.payload.from_entity, "token=[REDACTED:secret]");
       assert.equal(point.payload.relation_type, "Owns");
       assert.equal(point.payload.to_entity, "Bar");
-      assert.equal(point.payload.source, "user");
-      assert.equal(point.payload.actor_id, "agent-1");
+      assert.equal(point.payload.source, undefined);
+      assert.equal(point.payload.actor_id, undefined);
+      assert.equal(point.payload.origin.interface, "ui");
+      assert.equal(point.payload.origin.operation.action, "create");
       assert.deepEqual(point.payload.metadata, { note: "manual add", created_via: "ui" });
       assert.equal(point.payload.kind, "fact");
       assert.equal(point.payload.domain, "software_engineering");
@@ -885,7 +892,13 @@ describe("ui/routes/memory", () => {
       assert.deepEqual(engineeringCount!.body.filter.must, [
         { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
         { key: "kind", match: { value: "fact" } },
-        { key: "source", match: { any: ["system", "daemon"] } },
+        {
+          should: [
+            { key: "origin.agent.type", match: { any: ["system", "daemon"] } },
+            { key: "origin.interface", match: { any: ["system", "daemon"] } },
+            { key: "source", match: { any: ["system", "daemon"] } },
+          ],
+        },
       ]);
 
       const subtypeCount = countCalls.find((c) =>
@@ -895,7 +908,13 @@ describe("ui/routes/memory", () => {
       assert.deepEqual(subtypeCount!.body.filter.must, [
         { key: "kind", match: { value: "fact" } },
         { key: "memory_subtype", match: { value: "codebase_map" } },
-        { key: "source", match: { any: ["system", "daemon"] } },
+        {
+          should: [
+            { key: "origin.agent.type", match: { any: ["system", "daemon"] } },
+            { key: "origin.interface", match: { any: ["system", "daemon"] } },
+            { key: "source", match: { any: ["system", "daemon"] } },
+          ],
+        },
       ]);
     });
 

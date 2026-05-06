@@ -456,7 +456,14 @@ describe("daemon extraction tick", () => {
     assert.equal(payload.category, "engineering");
     assert.equal(payload.kind, "fact");
     assert.equal(payload.memory_subtype, "codebase_map");
-    assert.equal(payload.source, "system");
+    assert.equal(Object.prototype.hasOwnProperty.call(payload, "source"), false);
+    const origin = payload.origin as Record<string, unknown>;
+    assert.equal(origin.schema_version, 1);
+    assert.equal(origin.interface, "daemon");
+    assert.equal((origin.agent as Record<string, unknown>).type, "daemon");
+    assert.equal((origin.operation as Record<string, unknown>).action, "create");
+    assert.equal((origin.operation as Record<string, unknown>).subsystem, "extraction");
+    assert.equal((origin.metadata as Record<string, unknown>).transcript_source, "claude");
     assert.equal((payload.metadata as Record<string, unknown>).extraction_source, "claude");
 
     const states = JSON.parse(fs.readFileSync(path.join(STATE_DIR, "extraction-state.json"), "utf-8")) as Record<string, {
