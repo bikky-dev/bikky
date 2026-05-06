@@ -48,9 +48,37 @@ describe("openai embedding provider", () => {
     });
   });
 
+  it("forwards dimensions in body for text-embedding-3 models", async () => {
+    let captured: { url: string; init: RequestInit } | null = null;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      captured = { url, init };
+      return new Response(JSON.stringify({ data: [{ embedding: [0.1] }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await openaiEmbeddingProvider.embed("hi", { ...baseCfg, dimensions: 1024 });
+    const body = JSON.parse(captured!.init.body as string) as { dimensions?: number };
+    assert.strictEqual(body.dimensions, 1024);
+  });
+
+  it("omits dimensions for legacy ada-002 model", async () => {
+    let captured: { url: string; init: RequestInit } | null = null;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      captured = { url, init };
+      return new Response(JSON.stringify({ data: [{ embedding: [0.1] }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await openaiEmbeddingProvider.embed("hi", {
+      ...baseCfg,
+      model: "text-embedding-ada-002",
+      dimensions: 1536,
+    });
+    const body = JSON.parse(captured!.init.body as string) as { dimensions?: number };
+    assert.strictEqual(body.dimensions, undefined);
+  });
+
   it("declares browserCompatible + openai defaults", () => {
     assert.strictEqual(openaiEmbeddingProvider.browserCompatible, true);
     assert.strictEqual(openaiEmbeddingProvider.defaults.model, "text-embedding-3-small");
-    assert.strictEqual(openaiEmbeddingProvider.defaults.dimensions, 1536);
+    assert.strictEqual(openaiEmbeddingProvider.defaults.dimensions, 1024);
   });
 });

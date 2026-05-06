@@ -58,8 +58,37 @@ describe("portkey embedding provider", () => {
     });
   });
 
+  it("forwards dimensions in body for text-embedding-3 models", async () => {
+    let captured: RequestInit | null = null;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      captured = init;
+      return new Response(JSON.stringify({ data: [{ embedding: [0.1] }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await portkeyEmbeddingProvider.embed("hi", { ...baseCfg, dimensions: 1024 });
+    const body = JSON.parse(captured!.body as string) as { dimensions?: number };
+    assert.strictEqual(body.dimensions, 1024);
+  });
+
+  it("omits dimensions when the model is not OpenAI text-embedding-3", async () => {
+    let captured: RequestInit | null = null;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      captured = init;
+      return new Response(JSON.stringify({ data: [{ embedding: [0.1] }] }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await portkeyEmbeddingProvider.embed("hi", {
+      ...baseCfg,
+      model: "@cohere/embed-english-v3.0",
+      dimensions: 1024,
+    });
+    const body = JSON.parse(captured!.body as string) as { dimensions?: number };
+    assert.strictEqual(body.dimensions, undefined);
+  });
+
   it("declares browserCompatible + portkey defaults", () => {
     assert.strictEqual(portkeyEmbeddingProvider.browserCompatible, true);
     assert.strictEqual(portkeyEmbeddingProvider.defaults.baseUrl, "https://api.portkey.ai");
+    assert.strictEqual(portkeyEmbeddingProvider.defaults.dimensions, 1024);
   });
 });

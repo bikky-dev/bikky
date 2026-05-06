@@ -256,6 +256,7 @@ export const CONFIG_ENV_KEYS = [
   "EMBEDDING_BASE_URL",
   "EMBEDDING_DIMENSIONS",
   "OPENAI_API_KEY",
+  "PORTKEY_API_KEY",
   "LLM_PROVIDER",
   "LLM_MODEL",
   "LLM_BASE_URL",
@@ -708,6 +709,12 @@ export function loadConfig(): BikkyConfig {
     if (Number.isFinite(n) && n > 0) config.embedding.dimensions = n;
   }
   if (process.env.OPENAI_API_KEY) config.embedding.api_key = process.env.OPENAI_API_KEY;
+  // Portkey users can supply their gateway key via PORTKEY_API_KEY without
+  // needing to repurpose OPENAI_API_KEY. Only applied when the embedding
+  // provider is Portkey, so non-Portkey setups remain untouched.
+  if (process.env.PORTKEY_API_KEY && config.embedding.provider === "portkey") {
+    config.embedding.api_key = process.env.PORTKEY_API_KEY;
+  }
   // Generic provider-extras: BIKKY_EMBEDDING_EXTRA_<KEY>=value
   config.embedding.extra = config.embedding.extra ?? {};
   for (const [k, v] of Object.entries(process.env)) {
@@ -721,6 +728,9 @@ export function loadConfig(): BikkyConfig {
   if (process.env.LLM_MODEL) config.llm.model = process.env.LLM_MODEL;
   if (process.env.LLM_BASE_URL) config.llm.base_url = process.env.LLM_BASE_URL;
   if (process.env.OPENAI_API_KEY && !config.llm.api_key) config.llm.api_key = process.env.OPENAI_API_KEY;
+  if (process.env.PORTKEY_API_KEY && config.llm.provider === "portkey" && !config.llm.api_key) {
+    config.llm.api_key = process.env.PORTKEY_API_KEY;
+  }
   if (process.env.LLM_FALLBACK_PROVIDER) config.llm.fallback_provider = process.env.LLM_FALLBACK_PROVIDER;
   if (process.env.AWS_PROFILE) config.aws_profile = process.env.AWS_PROFILE;
   // Generic provider-extras: BIKKY_LLM_EXTRA_<KEY>=value

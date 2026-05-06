@@ -101,11 +101,11 @@ bikky supports four common setup shapes. Pick based on where you want Qdrant to 
 | ----------------------- | ------------------------------ | ---------------------------------------------------------------------------------------- |
 | **Node.js**             | ≥ 20                           | `nvm install 20` or your package manager                                                 |
 | **Vector store**        | Qdrant                         | Local Docker · [Qdrant Cloud](https://cloud.qdrant.io) · Self-hosted                     |
-| **Embeddings**          | One provider                   | OpenAI · Ollama · Bedrock · Portkey                                                     |
-| **LLM**                 | One provider                   | OpenAI · Ollama · Bedrock · Portkey                                                     |
+| **Embeddings**          | One provider                   | Portkey · OpenAI · Ollama · Bedrock                                                     |
+| **LLM**                 | One provider                   | Portkey · OpenAI · Ollama · Bedrock                                                     |
 | **Docker** *(optional)* | Only if you run Qdrant locally | Docker Desktop, OrbStack, colima, etc.                                                   |
 
-Both `embedding.provider` and `llm.provider` accept the same values: `ollama`, `openai`, `bedrock`, or `portkey`.
+Both `embedding.provider` and `llm.provider` accept the same values: `ollama`, `openai`, `bedrock`, or `portkey`. **Portkey is the easiest cloud option** — one API key, any upstream provider, with built-in routing/fallbacks. Bikky's canonical embedding dimension is **1024**, portable across every modern provider.
 
 > ⚠️ **Qdrant Cloud free tier does not include automatic backups.** Deleted collections cannot be recovered. If your memory data is valuable, use a paid Qdrant Cloud plan (which includes daily backups), run Qdrant locally with your own backup strategy, or periodically export snapshots via the [Qdrant snapshots API](https://qdrant.tech/documentation/concepts/snapshots/).
 
