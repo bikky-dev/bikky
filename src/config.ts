@@ -290,7 +290,7 @@ const CONFIG_ENV_PREFIXES = [
 
 const nonNegativeInt = z.number().int().nonnegative();
 const positiveInt = z.number().int().positive();
-const stringRecord = z.record(z.string());
+const stringRecord = z.record(z.string(), z.string());
 
 const embeddingConfigFileSchema = z.object({
   provider: z.string().optional(),
@@ -359,7 +359,7 @@ const destinationMatchSchema = z.object({
   cwd: regexArrayField,
   entity: regexArrayField,
   content: regexArrayField,
-  metadata: z.record(z.array(z.string())).optional(),
+  metadata: z.record(z.string(), z.array(z.string())).optional(),
 }).passthrough();
 
 const destinationFileSchema = z.object({
@@ -417,7 +417,7 @@ function deepMerge<T extends Record<string, unknown>>(base: T, override: Record<
   return result;
 }
 
-function issuePath(pathParts: Array<string | number>): string {
+function issuePath(pathParts: PropertyKey[]): string {
   return pathParts.length === 0 ? "$" : pathParts.map(String).join(".");
 }
 
