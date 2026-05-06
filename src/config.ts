@@ -727,13 +727,37 @@ export function loadConfig(): BikkyConfig {
 
   // Merge config file
   const configPath = getConfigPath();
+  let fileConfig: Record<string, unknown> = {};
   if (fs.existsSync(configPath)) {
     try {
-      const fileConfig = JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
+      fileConfig = JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
       config = deepMerge(config as unknown as Record<string, unknown>, fileConfig) as unknown as BikkyConfig;
     } catch (e) {
       console.error(`bikky: failed to parse ${configPath}: ${e instanceof Error ? e.message : String(e)}`);
     }
+  }
+
+  // Provider/base_url consistency (issue #131): the DEFAULTS.embedding.base_url
+  // is the ollama localhost URL, baked in for the default ollama provider. If
+  // the user picks a different provider (portkey/openai/bedrock) but doesn't
+  // set an explicit base_url, drop the inherited ollama URL so initEmbedding()
+  // can apply the provider's own default — otherwise we'd POST every embedding
+  // request to localhost:11434 and Ollama would reject the foreign model name.
+  const fileEmbedding = (fileConfig.embedding ?? {}) as Record<string, unknown>;
+  if (
+    config.embedding.provider !== DEFAULTS.embedding.provider
+    && typeof fileEmbedding.base_url !== "string"
+    && !process.env.EMBEDDING_BASE_URL
+  ) {
+    config.embedding.base_url = "";
+  }
+  const fileLlm = (fileConfig.llm ?? {}) as Record<string, unknown>;
+  if (
+    config.llm.provider !== DEFAULTS.llm.provider
+    && typeof fileLlm.base_url !== "string"
+    && !process.env.LLM_BASE_URL
+  ) {
+    config.llm.base_url = "";
   }
 
   // Env var overrides (highest priority)

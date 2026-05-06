@@ -302,6 +302,37 @@ describe("config", () => {
       assert.deepStrictEqual(cfg.default_search_scope, "routed");
       assert.deepStrictEqual(cfg.search_scopes, []);
     });
+
+    it("clears the inherited ollama base_url when user picks a non-ollama embedding provider (issue #131)", () => {
+      // Otherwise initEmbedding() would forward localhost:11434 to Portkey/OpenAI/Bedrock,
+      // and bikky would POST every embedding request to a local Ollama daemon.
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+        embedding: { provider: "portkey", model: "@openai/text-embedding-3-small", api_key: "k" },
+      }));
+      resetConfig();
+      const cfg = loadConfig();
+      assert.strictEqual(cfg.embedding.provider, "portkey");
+      assert.strictEqual(cfg.embedding.base_url, "");
+    });
+
+    it("preserves an explicit base_url even for non-ollama providers", () => {
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+        embedding: { provider: "portkey", base_url: "https://custom.gateway.example", api_key: "k" },
+      }));
+      resetConfig();
+      const cfg = loadConfig();
+      assert.strictEqual(cfg.embedding.base_url, "https://custom.gateway.example");
+    });
+
+    it("clears the inherited ollama base_url when user picks a non-ollama llm provider (issue #131)", () => {
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify({
+        llm: { provider: "portkey", model: "@anthropic/claude-sonnet-4", api_key: "k" },
+      }));
+      resetConfig();
+      const cfg = loadConfig();
+      assert.strictEqual(cfg.llm.provider, "portkey");
+      assert.strictEqual(cfg.llm.base_url, "");
+    });
   });
 
   // ── CONFIG_DEFAULTS export ────────────────────────────────────────────────
@@ -567,8 +598,10 @@ describe("config", () => {
       assert.strictEqual(cfg.embedding.provider, "openai");
       assert.strictEqual(cfg.embedding.model, "text-embedding-3-small");
       assert.strictEqual(cfg.embedding.dimensions, 1536);
-      // base_url should still be default
-      assert.strictEqual(cfg.embedding.base_url, "http://localhost:11434");
+      // base_url should be cleared because user picked a non-ollama provider
+      // without an explicit base_url (issue #131) — initEmbedding() will then
+      // apply the openai provider default.
+      assert.strictEqual(cfg.embedding.base_url, "");
     });
 
     it("nested identity config merges correctly", () => {
