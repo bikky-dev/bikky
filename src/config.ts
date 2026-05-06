@@ -86,7 +86,11 @@ export interface QdrantClientConfig {
 }
 
 export interface IdentityConfig {
+  user_id: string | null;
+  user_name: string | null;
+  /** @deprecated Use origin.user.id instead. */
   actor_id: string | null;
+  /** @deprecated Use origin.user.name / origin.agent.name instead. */
   actor_label: string | null;
 }
 
@@ -233,6 +237,8 @@ const DEFAULTS: BikkyConfig = {
     staleness_threshold_days: 30,
   },
   identity: {
+    user_id: null,
+    user_name: null,
     actor_id: null,
     actor_label: null,
   },
@@ -279,6 +285,10 @@ export const CONFIG_ENV_KEYS = [
   "BIKKY_DAEMON_ENTITY_TYPING_ENABLED",
   "BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC",
   "BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN",
+  "BIKKY_USER_ID",
+  "BIKKY_USER_NAME",
+  "BIKKY_AGENT_ID",
+  "BIKKY_AGENT_NAME",
   "BIKKY_ACTOR_ID",
   "BIKKY_ACTOR_LABEL",
 ] as const;
@@ -349,6 +359,8 @@ const qdrantClientConfigFileSchema = z.object({
 }).passthrough();
 
 const identityConfigFileSchema = z.object({
+  user_id: z.string().nullable().optional(),
+  user_name: z.string().nullable().optional(),
   actor_id: z.string().nullable().optional(),
   actor_label: z.string().nullable().optional(),
 }).passthrough();
@@ -801,6 +813,8 @@ export function loadConfig(): BikkyConfig {
   if (entityTypingInterval !== null) config.daemon.entity_typing_interval_sec = entityTypingInterval;
   const entityTypingMax = positiveInt(process.env.BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN);
   if (entityTypingMax !== null) config.daemon.entity_typing_max_entities_per_run = entityTypingMax;
+  if (process.env.BIKKY_USER_ID) config.identity.user_id = process.env.BIKKY_USER_ID;
+  if (process.env.BIKKY_USER_NAME) config.identity.user_name = process.env.BIKKY_USER_NAME;
   if (process.env.BIKKY_ACTOR_ID) config.identity.actor_id = process.env.BIKKY_ACTOR_ID;
   if (process.env.BIKKY_ACTOR_LABEL) config.identity.actor_label = process.env.BIKKY_ACTOR_LABEL;
 

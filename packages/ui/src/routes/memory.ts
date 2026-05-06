@@ -5,9 +5,10 @@
 
 import { Hono, type Context } from "hono";
 import { createQdrantClient, buildFilter, resolveTargetDestinations, type QdrantPoint, type QdrantFilter, type FactPayload, QdrantClient } from "../lib/qdrant.js";
-import { getEffectiveDestinations, getDefaultDestination } from "../lib/config.js";
+import { getEffectiveDestinations, getDefaultDestination, loadConfig } from "../lib/config.js";
 import { embed, isEmbeddingAvailable } from "../lib/embed.js";
 import { addRedactionPayload, combineRedactions, redactStorageText } from "../lib/redaction.js";
+import { buildOperationOrigin } from "../lib/origin.js";
 
 export const memoryRoutes = new Hono();
 
@@ -137,6 +138,8 @@ const keywordHaystack = (payload: FactPayload): string => {
     payload.domain,
     payload.kind,
     payload.memory_subtype ?? undefined,
+    payload.origin,
+    payload.last_operation_origin,
     payload.actor_id,
     payload.source,
     payload.from_entity,
@@ -316,6 +319,12 @@ memoryRoutes.put("/facts/:id", async (c) => {
   if (existing.length === 0) return c.json({ error: "Not found" }, 404);
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  updates.last_operation_origin = buildOperationOrigin({
+    config: loadConfig(),
+    action: "update",
+    route: "PUT /api/memory/facts/:id",
+    metadata: { fact_id: id, destination: destName ?? "default" },
+  });
   const redactedContent = body.content !== undefined ? redactStorageText(body.content) : null;
   const redactedEntities = body.entities !== undefined ? body.entities.map((entity) => redactStorageText(entity)) : null;
   const redactedFromEntity = body.from_entity !== undefined ? redactStorageText(body.from_entity) : null;
@@ -371,6 +380,12 @@ memoryRoutes.delete("/facts/:id", async (c) => {
     superseded_by: "ui-deleted",
     superseded_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    last_operation_origin: buildOperationOrigin({
+      config: loadConfig(),
+      action: "delete",
+      route: "DELETE /api/memory/facts/:id",
+      metadata: { fact_id: id, destination: destName ?? "default" },
+    }),
   });
 
   return c.json({ ok: true, id });
@@ -384,7 +399,6 @@ memoryRoutes.post("/facts", async (c) => {
     entities: string[];
     domain?: string;
     kind?: string;
-    actor_id?: string;
     confidence?: number;
     metadata?: Record<string, string>;
     from_entity?: string;
@@ -426,8 +440,12 @@ memoryRoutes.post("/facts", async (c) => {
     domain: body.domain || "software_engineering",
     kind: body.kind || "fact",
     entities: redactedEntities.map((e) => e.text.toLowerCase()),
-    source: "user",
-    ...(body.actor_id ? { actor_id: body.actor_id } : {}),
+    origin: buildOperationOrigin({
+      config: loadConfig(),
+      action: "create",
+      route: "POST /api/memory/facts",
+      metadata: { destination: destName ?? "default", category: body.category },
+    }),
     confidence: body.confidence ?? 0.9,
     content_hash: await hashContent(redactedContent.text),
     reinforcement_count: 0,

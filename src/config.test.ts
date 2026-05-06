@@ -75,6 +75,10 @@ const ENV_KEYS = [
   "BIKKY_DAEMON_ENTITY_TYPING_ENABLED",
   "BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC",
   "BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN",
+  "BIKKY_USER_ID",
+  "BIKKY_USER_NAME",
+  "BIKKY_AGENT_ID",
+  "BIKKY_AGENT_NAME",
   "BIKKY_ACTOR_ID",
   "BIKKY_ACTOR_LABEL",
 ];
@@ -238,9 +242,11 @@ describe("config", () => {
       assert.strictEqual(cfg.watchers.claude.enabled, true);
     });
 
-    it("identity defaults to no configured actor", () => {
+    it("identity defaults to no configured user or legacy actor", () => {
       if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
       const cfg = loadConfig();
+      assert.strictEqual(cfg.identity.user_id, null);
+      assert.strictEqual(cfg.identity.user_name, null);
       assert.strictEqual(cfg.identity.actor_id, null);
       assert.strictEqual(cfg.identity.actor_label, null);
     });
@@ -419,7 +425,18 @@ describe("config", () => {
       assert.strictEqual(cfg.daemon.entity_typing_max_entities_per_run, 4);
     });
 
-    it("BIKKY_ACTOR_* env vars override identity", () => {
+    it("BIKKY_USER_* env vars override user identity", () => {
+      if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
+      process.env.BIKKY_USER_ID = "saber-local";
+      process.env.BIKKY_USER_NAME = "Saber";
+
+      const cfg = loadConfig();
+
+      assert.strictEqual(cfg.identity.user_id, "saber-local");
+      assert.strictEqual(cfg.identity.user_name, "Saber");
+    });
+
+    it("BIKKY_ACTOR_* env vars still override legacy actor identity", () => {
       if (fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
       process.env.BIKKY_ACTOR_ID = "saber-local";
       process.env.BIKKY_ACTOR_LABEL = "Saber";
@@ -515,6 +532,8 @@ describe("config", () => {
         CONFIG_PATH,
         JSON.stringify({
           identity: {
+            user_id: "configured-user",
+            user_name: "Configured User",
             actor_id: "configured-actor",
             actor_label: "Configured Actor",
           },
@@ -523,6 +542,8 @@ describe("config", () => {
 
       const cfg = loadConfig();
 
+      assert.strictEqual(cfg.identity.user_id, "configured-user");
+      assert.strictEqual(cfg.identity.user_name, "Configured User");
       assert.strictEqual(cfg.identity.actor_id, "configured-actor");
       assert.strictEqual(cfg.identity.actor_label, "Configured Actor");
     });

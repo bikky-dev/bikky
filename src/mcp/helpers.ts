@@ -7,6 +7,7 @@
 import crypto from "node:crypto";
 import type { FactPayload, FilterParams, QdrantFilter, QdrantPoint } from "./types.js";
 import { DEFAULT_DOMAIN, getDecayHalfLife, STALENESS_DAYS } from "./taxonomy.js";
+import { isOperationOrigin, type OperationOrigin } from "../provenance/origin.js";
 
 export interface StructuredFact {
   id: string;
@@ -15,7 +16,11 @@ export interface StructuredFact {
   domain?: string;
   kind?: string;
   memory_subtype?: string | null;
+  origin?: OperationOrigin;
+  last_operation_origin?: OperationOrigin;
+  /** @deprecated Origin is canonical for new writes. */
   actor_id?: string;
+  /** @deprecated Origin is canonical for new writes. */
   source?: string;
   entities: string[];
   confidence?: number;
@@ -153,6 +158,9 @@ export function buildFilter(params: FilterParams = {}): QdrantFilter | undefined
     domain,
     kind,
     memory_subtype,
+    origin_user_id,
+    origin_agent_id,
+    origin_interface,
     actor_id,
     entity,
     session_id,
@@ -186,8 +194,23 @@ export function buildFilter(params: FilterParams = {}): QdrantFilter | undefined
   if (memory_subtype) {
     must.push({ key: "memory_subtype", match: { value: memory_subtype } });
   }
+  if (origin_user_id) {
+    must.push({ key: "origin.user.id", match: { value: origin_user_id } });
+  }
+  if (origin_agent_id) {
+    must.push({ key: "origin.agent.id", match: { value: origin_agent_id } });
+  }
+  if (origin_interface) {
+    must.push({ key: "origin.interface", match: { value: origin_interface } });
+  }
   if (actor_id) {
-    must.push({ key: "actor_id", match: { value: actor_id } });
+    must.push({
+      should: [
+        { key: "origin.user.id", match: { value: actor_id } },
+        { key: "origin.agent.id", match: { value: actor_id } },
+        { key: "actor_id", match: { value: actor_id } },
+      ],
+    } as QdrantFilter["must"][number]);
   }
   if (entity) {
     must.push({ key: "entities", match: { value: entity.toLowerCase() } });
@@ -242,7 +265,13 @@ export function formatFact(point: QdrantPoint): string {
   if (p.domain && p.domain !== DEFAULT_DOMAIN) parts.push(`domain: ${p.domain}`);
   if (p.kind && p.kind !== "fact") parts.push(`kind: ${p.kind}`);
   if (p.memory_subtype) parts.push(`subtype: ${p.memory_subtype}`);
-  if (p.actor_id) parts.push(`actor: ${p.actor_id}`);
+  if (isOperationOrigin(p.origin)) {
+    const user = p.origin.user?.name ?? p.origin.user?.id;
+    const agent = p.origin.agent.name ?? p.origin.agent.id ?? p.origin.agent.type;
+    parts.push(`origin: ${user ? `${user} via ` : ""}${agent} (${p.origin.interface}/${p.origin.operation.action})`);
+  } else if (p.actor_id) {
+    parts.push(`actor: ${p.actor_id}`);
+  }
   if (p.workstream_key) parts.push(`workstream: ${p.workstream_key}`);
   if (p.episode_id) parts.push(`episode: ${p.episode_id}`);
   if (p.entities?.length) parts.push(`entities: ${p.entities.join(", ")}`);
@@ -293,6 +322,8 @@ export function structuredFact(point: QdrantPoint): StructuredFact {
     ...(p.domain ? { domain: p.domain } : {}),
     ...(p.kind ? { kind: p.kind } : {}),
     ...(p.memory_subtype ? { memory_subtype: p.memory_subtype } : {}),
+    ...(isOperationOrigin(p.origin) ? { origin: p.origin } : {}),
+    ...(isOperationOrigin(p.last_operation_origin) ? { last_operation_origin: p.last_operation_origin } : {}),
     ...(p.actor_id ? { actor_id: p.actor_id } : {}),
     ...(p.source ? { source: p.source } : {}),
     entities: p.entities ?? [],

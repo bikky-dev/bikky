@@ -136,9 +136,9 @@ describe("daemon/session-summary", () => {
       assert.equal(payload.domain, "software_engineering");
       assert.equal(payload.kind, "summary");
       assert.equal(payload.memory_subtype, "session_index");
-      assert.equal(payload.source, "system");
       assert.equal(payload.workspace_id, "team-a");
-      assert.equal(payload.actor_id, "agent-1");
+      assert.equal((payload.origin as { interface?: string }).interface, "daemon");
+      assert.equal((payload.origin as { operation?: { action?: string } }).operation?.action, "create");
       assert.equal(payload.session_id, "uuid:test-session");
       assert.equal(payload.content, "Configured service with password=[REDACTED:secret] during daemon summary work.");
       assert.deepEqual(payload.tasks_completed, ["issue #14"]);

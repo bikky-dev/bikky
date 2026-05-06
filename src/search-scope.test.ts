@@ -50,6 +50,8 @@ const cfg = (extra: Partial<BikkyConfig> = {}): BikkyConfig => ({
     staleness_threshold_days: 30,
   },
   identity: {
+    user_id: null,
+    user_name: null,
     actor_id: null,
     actor_label: null,
   },

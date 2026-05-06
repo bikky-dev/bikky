@@ -500,6 +500,20 @@ describe("buildFilter", () => {
     assert.deepStrictEqual(taskFilter.match, { value: "fix-bug" });
   });
 
+  it("adds canonical origin filters", () => {
+    const result = buildFilter({
+      origin_user_id: "saber",
+      origin_agent_id: "copilot",
+      origin_interface: "mcp",
+    });
+    assert.ok(result);
+    assert.deepStrictEqual(result.must.slice(1), [
+      { key: "origin.user.id", match: { value: "saber" } },
+      { key: "origin.agent.id", match: { value: "copilot" } },
+      { key: "origin.interface", match: { value: "mcp" } },
+    ]);
+  });
+
   it("combines all filters together", () => {
     const result = buildFilter({
       category: "engineering",

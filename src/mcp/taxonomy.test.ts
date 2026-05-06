@@ -241,7 +241,13 @@ describe("QDRANT_INDEXES", () => {
     assert.strictEqual(indexes.get("content_hash"), "keyword");
     assert.strictEqual(indexes.get("entities"), "keyword");
     assert.strictEqual(indexes.get("workspace_id"), "keyword");
+    assert.strictEqual(indexes.get("source"), "keyword");
     assert.strictEqual(indexes.get("actor_id"), "keyword");
+    assert.strictEqual(indexes.get("origin.user.id"), "keyword");
+    assert.strictEqual(indexes.get("origin.agent.id"), "keyword");
+    assert.strictEqual(indexes.get("origin.interface"), "keyword");
+    assert.strictEqual(indexes.get("origin.operation.action"), "keyword");
+    assert.strictEqual(indexes.get("last_operation_origin.operation.action"), "keyword");
     assert.strictEqual(indexes.get("episode_id"), "keyword");
     assert.strictEqual(indexes.get("workstream_key"), "keyword");
     assert.strictEqual(indexes.get("task_key"), "keyword");

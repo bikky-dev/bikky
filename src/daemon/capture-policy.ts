@@ -120,7 +120,6 @@ export const FACT_CATEGORY_TO_SUBTYPE: Record<Category, MemorySubtype> = {
 
 export const DEFAULT_CAPTURE_CONTEXT = {
   domain: DEFAULT_DOMAIN,
-  source: "system",
   reviewStatus: "candidate",
   // Default fallback volatility when the LLM does not self-judge. Storage path
   // overrides this with the LLM's value (or the volatility verifier's

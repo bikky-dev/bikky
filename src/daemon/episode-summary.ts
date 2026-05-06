@@ -29,6 +29,7 @@ import {
   type ResolvedWorkstream,
   type WorkstreamRegistry,
 } from "./workstream-resolver.js";
+import { buildOperationOrigin, type OperationOrigin } from "../provenance/origin.js";
 
 export { buildEpisodeSummaryMessages } from "../prompts/index.js";
 
@@ -190,6 +191,8 @@ export const buildEpisodeSummaryPayload = (input: {
   now: string;
   existing?: { id: string; payload?: Partial<QdrantPayload> } | null;
   redactionOptions: { enabled: boolean; redactPii: boolean };
+  config?: BikkyConfig;
+  origin?: OperationOrigin;
 }): EpisodeSummaryPayloadResult => {
   const redactedContent = redactStorageText(input.draft.content, input.redactionOptions);
   const redactedTasks = input.draft.tasks_completed.map((task) => redactStorageText(task, input.redactionOptions));
@@ -205,6 +208,17 @@ export const buildEpisodeSummaryPayload = (input: {
   ]);
   const existingPayload = input.existing?.payload ?? {};
   const workstreamKey = input.draft.workstream_key ?? input.segment.workstream_key ?? null;
+  const operationOrigin = input.origin ?? buildOperationOrigin({
+    interface: "daemon",
+    action: input.existing ? "update" : "create",
+    subsystem: "episode_summary",
+    config: input.config,
+    metadata: {
+      session_id: input.sessionId,
+      episode_id: input.segment.episode_id,
+      event_count: input.segment.event_count,
+    },
+  });
 
   const payload: Record<string, unknown> = {
     ...existingPayload,
@@ -215,9 +229,9 @@ export const buildEpisodeSummaryPayload = (input: {
     memory_subtype: "episode",
     layer: "episode",
     ...(input.scope.workspaceId ? { workspace_id: input.scope.workspaceId } : {}),
-    ...(input.scope.actorId ? { actor_id: input.scope.actorId } : {}),
+    origin: existingPayload.origin ?? operationOrigin,
+    ...(input.existing ? { last_operation_origin: operationOrigin } : {}),
     entities: redactedEntities.map((entity) => entity.text.toLowerCase()),
-    source: "system",
     confidence: 1.0,
     importance: input.draft.importance,
     content_hash: contentHash(redactedContent.text),
@@ -314,7 +328,8 @@ export const updateEpisodeSummary = async (input: {
       ...(input.segment.workstream_key ? { workstream_key: input.segment.workstream_key } : {}),
       memory_subtype: "episode",
       kind: "summary",
-      source: "system",
+      origin_interface: "daemon",
+      origin_agent_type: "daemon",
     },
   });
   const existing = await findExistingEpisodeSummary(input.segment.episode_id, input.scope, destination.name);
@@ -345,6 +360,7 @@ export const updateEpisodeSummary = async (input: {
     scope: input.scope,
     now,
     existing,
+    config: input.config,
     redactionOptions: {
       enabled: true,
       redactPii: false,

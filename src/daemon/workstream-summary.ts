@@ -24,6 +24,7 @@ import {
   redactStorageText,
   type RedactionSummary,
 } from "../privacy/redaction.js";
+import { buildOperationOrigin, type OperationOrigin } from "../provenance/origin.js";
 
 export { buildWorkstreamSummaryMessages } from "../prompts/index.js";
 
@@ -178,6 +179,8 @@ export const buildWorkstreamSummaryPayload = (input: {
   sourceEpisodeIds: string[];
   repo?: string | null;
   redactionOptions: { enabled: boolean; redactPii: boolean };
+  config?: BikkyConfig;
+  origin?: OperationOrigin;
 }): WorkstreamSummaryPayloadResult => {
   const redactedContent = redactStorageText(input.draft.content, input.redactionOptions);
   const redactedDecisions = input.draft.current_decisions.map((decision) => redactStorageText(decision, input.redactionOptions));
@@ -192,6 +195,17 @@ export const buildWorkstreamSummaryPayload = (input: {
     ...redactedEntities,
   ]);
   const existingPayload = input.existing?.payload ?? {};
+  const operationOrigin = input.origin ?? buildOperationOrigin({
+    interface: "daemon",
+    action: input.existing ? "update" : "create",
+    subsystem: "workstream_summary",
+    config: input.config,
+    metadata: {
+      workstream_key: input.workstreamKey,
+      source_episode_count: input.sourceEpisodeIds.length,
+      ...(input.repo ? { repo: input.repo } : {}),
+    },
+  });
 
   const payload: Record<string, unknown> = {
     ...existingPayload,
@@ -202,10 +216,10 @@ export const buildWorkstreamSummaryPayload = (input: {
     memory_subtype: "workstream",
     layer: "workstream",
     ...(input.scope.workspaceId ? { workspace_id: input.scope.workspaceId } : {}),
-    ...(input.scope.actorId ? { actor_id: input.scope.actorId } : {}),
     ...(input.repo ? { repo: input.repo } : {}),
+    origin: existingPayload.origin ?? operationOrigin,
+    ...(input.existing ? { last_operation_origin: operationOrigin } : {}),
     entities: redactedEntities.map((entity) => entity.text.toLowerCase()),
-    source: "system",
     confidence: 1.0,
     importance: input.draft.importance,
     content_hash: contentHash(redactedContent.text),
@@ -303,7 +317,8 @@ export const updateWorkstreamSummaries = async (input: {
           workstream_key: workstreamKey,
           memory_subtype: "workstream",
           kind: "summary",
-          source: "system",
+          origin_interface: "daemon",
+          origin_agent_type: "daemon",
         },
       }).name;
     const episodes = await loadEpisodeSummaries(workstreamKey, input.scope, destination);
@@ -330,6 +345,7 @@ export const updateWorkstreamSummaries = async (input: {
       existing,
       sourceEpisodeIds: episodes.map((episode) => episode.payload?.episode_id ?? episode.id).filter(Boolean) as string[],
       repo: null,
+      config: input.config,
       redactionOptions: {
         enabled: true,
         redactPii: false,

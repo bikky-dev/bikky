@@ -20,7 +20,7 @@ import {
   redactStorageText,
   type RedactionSummary,
 } from "../privacy/redaction.js";
-import { resolveActorIdentity } from "../provenance/actor.js";
+import { buildOperationOrigin, type OperationOrigin } from "../provenance/origin.js";
 
 export interface WorkspaceScope {
   workspaceId?: string;
@@ -153,6 +153,8 @@ export const buildSessionSummaryPayload = (input: {
   existing?: ExistingSummary | null;
   eventCount: number;
   redactionOptions: { enabled: boolean; redactPii: boolean };
+  config?: BikkyConfig;
+  origin?: OperationOrigin;
 }): SessionSummaryPayloadResult => {
   const redactedContent = redactStorageText(input.draft.content, input.redactionOptions);
   const redactedTasks = input.draft.tasks_completed.map((task) => redactStorageText(task, input.redactionOptions));
@@ -165,6 +167,16 @@ export const buildSessionSummaryPayload = (input: {
     ...redactedEntities,
   ]);
   const existingPayload = input.existing?.payload ?? {};
+  const operationOrigin = input.origin ?? buildOperationOrigin({
+    interface: "daemon",
+    action: input.existing ? "update" : "create",
+    subsystem: "session_summary",
+    config: input.config,
+    metadata: {
+      session_id: input.sessionId,
+      event_count: input.eventCount,
+    },
+  });
 
   const payload: Record<string, unknown> = {
     ...existingPayload,
@@ -175,9 +187,9 @@ export const buildSessionSummaryPayload = (input: {
     memory_subtype: "session_index",
     layer: "episode",
     ...(input.scope.workspaceId ? { workspace_id: input.scope.workspaceId } : {}),
-    ...(input.scope.actorId ? { actor_id: input.scope.actorId } : {}),
+    origin: existingPayload.origin ?? operationOrigin,
+    ...(input.existing ? { last_operation_origin: operationOrigin } : {}),
     entities: redactedEntities.map((entity) => entity.text.toLowerCase()),
-    source: "system",
     confidence: 1.0,
     importance: input.draft.importance,
     content_hash: contentHash(redactedContent.text),
@@ -226,8 +238,7 @@ export const updateSessionSummary = async (input: {
   }
 
   const config = input.config ?? loadConfig();
-  const actor = resolveActorIdentity({ config });
-  const scope: WorkspaceScope = actor.actor_id ? { actorId: actor.actor_id } : {};
+  const scope: WorkspaceScope = {};
   const segments = segmentTranscriptIntoEpisodes({
     sessionId: input.sessionId,
     transcript: input.transcript,
@@ -261,7 +272,8 @@ export const updateSessionSummary = async (input: {
         ...(result.workstreamKey ? { workstream_key: result.workstreamKey } : {}),
         kind: "summary",
         memory_subtype: "session_index",
-        source: "system",
+        origin_interface: "daemon",
+        origin_agent_type: "daemon",
       },
     }).name;
     const bucket = episodeResultsByDestination.get(destination) ?? [];

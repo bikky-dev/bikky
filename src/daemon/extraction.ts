@@ -1,6 +1,6 @@
 /**
  * Events-based memory extraction — reads supported coding-agent transcripts,
- * extracts facts via LLM, and stores them in Qdrant with source: "system".
+ * extracts facts via LLM, and stores them in Qdrant with daemon origin metadata.
  *
  * Uses a JSON file for extraction state (high-water byte offsets) instead of SQLite.
  * Copilot session detection uses lock files. Claude Code detection uses
@@ -40,7 +40,7 @@ import {
 import { shouldSummarizeEvents, updateSessionSummary } from "./session-summary.js";
 import { redactStorageText } from "../privacy/redaction.js";
 import { compareSubtype, hasTypedToken, verifyGrounding, verifyVolatilityCoherence } from "./extraction-rules.js";
-import { resolveActorIdentity } from "../provenance/actor.js";
+import { buildOperationOrigin } from "../provenance/origin.js";
 import {
   discoverClaudeTranscriptMappings,
   discoverCopilotTranscriptMappings,
@@ -521,9 +521,6 @@ const storeFacts = async (
     extracted_by_prompt: `${EXTRACTION_PROMPT_DESCRIPTOR.id}@${EXTRACTION_PROMPT_DESCRIPTOR.version}`,
   };
   if (source) baseMeta.extraction_source = source;
-  const actor = resolveActorIdentity({ config });
-  if (actor.actor_label) baseMeta.actor_label = actor.actor_label;
-  if (actor.source) baseMeta.actor_source = actor.source;
   let stored = 0;
 
   for (const fact of facts) {
@@ -543,7 +540,6 @@ const storeFacts = async (
         ...(fact.branch ? { branch: fact.branch } : {}),
         ...(fact.task_key ? { task_key: fact.task_key } : {}),
         ...(fact.workstream_key ? { workstream_key: fact.workstream_key } : {}),
-        ...(actor.actor_id ? { actor_id: actor.actor_id } : {}),
         category: fact.category,
       },
     };
@@ -554,7 +550,17 @@ const storeFacts = async (
       if (dedup.action === "skip") {
         // Reinforce existing fact
         if (dedup.existingId) {
-          await qdrant.reinforceFact(dedup.existingId, dedup.existingCount || 1, dedup.destination);
+          await qdrant.reinforceFact(dedup.existingId, dedup.existingCount || 1, dedup.destination, buildOperationOrigin({
+            interface: "daemon",
+            action: "reinforce",
+            subsystem: "extraction",
+            config,
+            metadata: {
+              session_id: sessionId,
+              ...(source ? { transcript_source: source } : {}),
+              dedup_action: dedup.action,
+            },
+          }));
         }
         continue;
       }
@@ -680,7 +686,6 @@ const storeFacts = async (
         domain: DEFAULT_CAPTURE_CONTEXT.domain,
         memory_subtype: effectiveSubtype,
         entities: sanitizedFact.entities,
-        source: "system",
         kind: "fact",
         confidence: effectiveConfidence,
         importance: fact.importance,
@@ -698,14 +703,32 @@ const storeFacts = async (
         task_key: fact.task_key,
         workstream_key: fact.workstream_key,
         metadata: factMeta,
+        origin: buildOperationOrigin({
+          interface: "daemon",
+          action: "create",
+          subsystem: "extraction",
+          config,
+          metadata: {
+            session_id: sessionId,
+            ...(source ? { transcript_source: source } : {}),
+            capture_policy_version: CAPTURE_POLICY_VERSION,
+          },
+        }),
       };
-      if (actor.actor_id) {
-        storePayload.actor_id = actor.actor_id;
-      }
 
       if (dedup.action === "supersede" && dedup.existingId) {
         const newId = await qdrant.storeFact(storePayload, routeInput);
-        await qdrant.supersedeFact(dedup.existingId, newId, dedup.destination);
+        await qdrant.supersedeFact(dedup.existingId, newId, dedup.destination, buildOperationOrigin({
+          interface: "daemon",
+          action: "supersede",
+          subsystem: "extraction",
+          config,
+          metadata: {
+            session_id: sessionId,
+            new_fact_id: newId,
+            ...(source ? { transcript_source: source } : {}),
+          },
+        }));
         stored++;
       } else {
         await qdrant.storeFact(storePayload, routeInput);

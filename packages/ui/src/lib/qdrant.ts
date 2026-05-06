@@ -4,6 +4,7 @@
  */
 
 import { getDefaultDestination, getDestinationByName, getEffectiveDestinations, type UIDestination } from "./config.js";
+import type { OperationOrigin } from "./origin.js";
 
 // --- Types ---
 
@@ -13,8 +14,12 @@ export interface FactPayload {
   domain?: string;
   kind?: string;
   memory_subtype?: string | null;
+  origin?: OperationOrigin;
+  last_operation_origin?: OperationOrigin;
+  /** @deprecated Origin is canonical for new writes. */
   actor_id?: string;
   entities: string[];
+  /** @deprecated Origin is canonical for new writes. */
   source?: string;
   confidence: number;
   importance?: number;
@@ -214,6 +219,9 @@ export function buildFilter(opts: {
   entity?: string;
   source?: string;
   actorId?: string;
+  originUserId?: string;
+  originAgentId?: string;
+  originInterface?: string;
   since?: string;
   until?: string;
   excludeSuperseded?: boolean;
@@ -238,8 +246,27 @@ export function buildFilter(opts: {
     );
   }
   if (opts.entity) must.push({ key: "entities", match: { value: opts.entity.toLowerCase() } });
-  if (opts.source) must.push({ key: "source", match: sourceFilterValue(opts.source) });
-  if (opts.actorId) must.push({ key: "actor_id", match: { value: opts.actorId } });
+  if (opts.source) {
+    must.push({
+      should: [
+        { key: "origin.agent.type", match: sourceFilterValue(opts.source) },
+        { key: "origin.interface", match: sourceFilterValue(opts.source) },
+        { key: "source", match: sourceFilterValue(opts.source) },
+      ],
+    });
+  }
+  if (opts.actorId) {
+    must.push({
+      should: [
+        { key: "origin.user.id", match: { value: opts.actorId } },
+        { key: "origin.agent.id", match: { value: opts.actorId } },
+        { key: "actor_id", match: { value: opts.actorId } },
+      ],
+    });
+  }
+  if (opts.originUserId) must.push({ key: "origin.user.id", match: { value: opts.originUserId } });
+  if (opts.originAgentId) must.push({ key: "origin.agent.id", match: { value: opts.originAgentId } });
+  if (opts.originInterface) must.push({ key: "origin.interface", match: { value: opts.originInterface } });
   if (opts.since) must.push({ key: "created_at", range: { gte: opts.since } });
   if (opts.until) must.push({ key: "created_at", range: { lte: opts.until } });
   // Phase 5a entity_type sidecar points are not user-facing facts; opt-in to exclude.
