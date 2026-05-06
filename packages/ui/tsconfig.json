@@ -9,6 +9,7 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "declaration": true,
+    "types": ["node"],
     "lib": ["ESNext"]
   },
   "include": ["src"]
