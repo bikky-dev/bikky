@@ -28,6 +28,10 @@ const {
   getActiveConfigEnvOverrides,
   inspectConfigFile,
   validateConfigObject,
+  getBikkyDir,
+  getConfigPath,
+  getLogDir,
+  getStateDir,
 } = await import("./config.js");
 
 // ---------------------------------------------------------------------------
@@ -151,6 +155,47 @@ describe("config", () => {
 
     it("STATE_DIR is state inside BIKKY_DIR", () => {
       assert.strictEqual(STATE_DIR, path.join(BIKKY_DIR, "state"));
+    });
+
+    it("getBikkyDir() re-reads BIKKY_HOME on every call (issue #130)", () => {
+      // The legacy const exports cache the env var at module load. The getter
+      // form must re-evaluate so tests (and dynamic config moves) actually
+      // sandbox writes.
+      const original = process.env.BIKKY_HOME;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-home-dynamic-"));
+      try {
+        process.env.BIKKY_HOME = tmp;
+        assert.strictEqual(getBikkyDir(), tmp);
+        assert.strictEqual(getConfigPath(), path.join(tmp, "config.json"));
+        assert.strictEqual(getLogDir(), path.join(tmp, "logs"));
+        assert.strictEqual(getStateDir(), path.join(tmp, "state"));
+      } finally {
+        if (original === undefined) delete process.env.BIKKY_HOME;
+        else process.env.BIKKY_HOME = original;
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it("saveConfig() writes to the live BIKKY_HOME, not the cached one (issue #130)", () => {
+      // Critical regression: even if the test runner has loaded config.ts
+      // before BIKKY_HOME was set, saveConfig() must honour the env var at
+      // call time so it cannot clobber the user's real ~/.bikky/config.json.
+      const original = process.env.BIKKY_HOME;
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-home-savesafe-"));
+      try {
+        process.env.BIKKY_HOME = tmp;
+        const cfg = loadConfig();
+        saveConfig(cfg);
+        assert.ok(fs.existsSync(path.join(tmp, "config.json")));
+        // And the cached CONFIG_PATH (set at module load) must not have been written.
+        // It points at TEST_BIKKY_HOME — different dir than `tmp`.
+        assert.notStrictEqual(path.join(tmp, "config.json"), CONFIG_PATH);
+      } finally {
+        if (original === undefined) delete process.env.BIKKY_HOME;
+        else process.env.BIKKY_HOME = original;
+        fs.rmSync(tmp, { recursive: true, force: true });
+        resetConfig();
+      }
     });
   });
 

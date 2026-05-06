@@ -7,6 +7,7 @@ import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 import {
   QdrantClient,
@@ -15,13 +16,18 @@ import {
   createQdrantClient,
   QdrantNotConfiguredError,
 } from "./qdrant.js";
-import { CONFIG_PATH, _resetConfig } from "./config.js";
+
+// Sandbox the bikky config dir to a tempdir so tests can never clobber the
+// developer's real ~/.bikky/config.json (root cause of issue #130).
+const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-ui-qdrant-"));
+process.env.BIKKY_HOME = TEST_BIKKY_HOME;
+const CONFIG_PATH = path.join(TEST_BIKKY_HOME, "config.json");
+
+const { _resetConfig } = await import("./config.js");
 
 const realFetch = globalThis.fetch;
 const ENV_KEYS = ["QDRANT_URL", "QDRANT_API_KEY", "BIKKY_COLLECTION"];
 const savedEnv: Record<string, string | undefined> = {};
-let savedConfig: string | null = null;
-let configExisted = false;
 
 interface FetchCall { url: string; init: RequestInit }
 
@@ -198,10 +204,7 @@ describe("ui/lib/qdrant", () => {
   describe("createQdrantClient / isQdrantConfigured", () => {
     before(() => {
       for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
-      if (fs.existsSync(CONFIG_PATH)) {
-        configExisted = true;
-        savedConfig = fs.readFileSync(CONFIG_PATH, "utf-8");
-      }
+      fs.mkdirSync(TEST_BIKKY_HOME, { recursive: true });
     });
 
     after(() => {
@@ -209,8 +212,7 @@ describe("ui/lib/qdrant", () => {
         if (savedEnv[k] === undefined) delete process.env[k];
         else process.env[k] = savedEnv[k];
       }
-      if (savedConfig !== null) fs.writeFileSync(CONFIG_PATH, savedConfig);
-      else if (!configExisted && fs.existsSync(CONFIG_PATH)) fs.unlinkSync(CONFIG_PATH);
+      fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
       _resetConfig();
     });
 
