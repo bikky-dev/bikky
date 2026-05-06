@@ -60,7 +60,7 @@
     "@aws-sdk/client-bedrock-runtime": "^3.1006.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "pino": "^10.3.1",
-    "zod": "^3.24.0"
+    "zod": "^4.4.1"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
