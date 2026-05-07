@@ -166,6 +166,84 @@ function formatScopedFact(point: ScopedPoint, includeDestination: boolean): stri
   return includeDestination ? `[${point._destination.name}] ${formatted}` : formatted;
 }
 
+async function recordRecallTelemetry(args: {
+  ranked: ScopedPoint[];
+  redactedQuery: ReturnType<typeof redactStorageText>;
+  searchScope: ResolvedSearchScope;
+  searchedDestinations: string[];
+  failedDestinations: Array<{ destination: string; error: string }>;
+}): Promise<void> {
+  const now = nowISO();
+  const byDestination = new Map<string, { dest: Destination; points: ScopedPoint[] }>();
+  for (const point of args.ranked) {
+    const existing = byDestination.get(point._destination.name);
+    if (existing) {
+      existing.points.push(point);
+    } else {
+      byDestination.set(point._destination.name, { dest: point._destination, points: [point] });
+    }
+  }
+
+  for (const { dest, points } of byDestination.values()) {
+    const returnedFactIds = points.map((point) => point.id);
+    const recallOrigin = mcpOrigin({
+      action: "recall",
+      tool: "memory_recall",
+      metadata: {
+        destination: dest.name,
+        result_count: points.length,
+        search_scope: args.searchScope.name,
+      },
+    });
+
+    for (const point of points) {
+      const currentCount = point.payload.recall_count ?? 0;
+      try {
+        await qdrantSetPayload(dest, [point.id], {
+          recall_count: currentCount + 1,
+          last_recalled_at: now,
+          updated_at: now,
+          last_operation_origin: recallOrigin,
+        });
+      } catch (e) {
+        log("WARN", `Failed to update recall_count for ${point.id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    const entities = [...new Set(points.flatMap((point) => point.payload.entities ?? []))].slice(0, 25);
+    const eventContent = `Recall returned ${points.length} fact(s) from ${dest.name}: ${args.redactedQuery.text}`;
+    const redactedEvent = redactStorageText(eventContent);
+    const eventPayload: Record<string, unknown> = {
+      content: redactedEvent.text,
+      category: categoryForMemorySubtype("recall_event") ?? "system",
+      domain: "software_engineering",
+      kind: "telemetry",
+      memory_subtype: "recall_event",
+      layer: "memory_object",
+      entities,
+      origin: recallOrigin,
+      confidence: 1.0,
+      importance: 0.3,
+      content_hash: contentHash("recall_event", `${dest.name}:${returnedFactIds.join(",")}:${now}`),
+      recall_query: args.redactedQuery.text,
+      returned_fact_ids: returnedFactIds,
+      result_count: points.length,
+      search_scope: args.searchScope.name,
+      searched_destinations: args.searchedDestinations,
+      failed_destinations: args.failedDestinations.map((failure) => `${failure.destination}: ${failure.error}`),
+      created_at: now,
+      updated_at: now,
+    };
+    addRedactionPayload(eventPayload, redactedEvent);
+    try {
+      const eventVector = await embed(redactedEvent.text);
+      await qdrantUpsert(dest, newId(), eventVector, eventPayload);
+    } catch (e) {
+      log("WARN", `Failed to record recall_event: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+}
+
 function resolveSearchScopeOrError(args: {
   destination?: string;
   search_scope?: SearchScopeInput;
@@ -1237,6 +1315,14 @@ export function registerTools(mcp: McpServer): void {
         .map((r) => ({ ...r, _combinedScore: computeCombinedScore(r) }))
         .sort((a, b) => b._combinedScore - a._combinedScore)
         .slice(0, effectiveLimit);
+
+      await recordRecallTelemetry({
+        ranked,
+        redactedQuery,
+        searchScope,
+        searchedDestinations,
+        failedDestinations,
+      });
 
       const includeDestination = searchScope.destinations.length > 1 || searchScope.name === "all";
       const lines = ranked.map((r) => formatScopedFact(r, includeDestination));

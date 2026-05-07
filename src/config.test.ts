@@ -79,6 +79,10 @@ const ENV_KEYS = [
   "BIKKY_DAEMON_ENTITY_TYPING_ENABLED",
   "BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC",
   "BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN",
+  "BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_ENABLED",
+  "BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_INTERVAL_SEC",
+  "BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_LOW_CONFIDENCE_THRESHOLD",
+  "BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_MAX_SCOPES_PER_RUN",
   "BIKKY_USER_ID",
   "BIKKY_USER_NAME",
   "BIKKY_AGENT_ID",
@@ -272,6 +276,10 @@ describe("config", () => {
       assert.strictEqual(cfg.daemon.entity_typing_enabled, true);
       assert.strictEqual(cfg.daemon.entity_typing_interval_sec, 900);
       assert.strictEqual(cfg.daemon.entity_typing_max_entities_per_run, 5);
+      assert.strictEqual(cfg.daemon.memory_quality_rollups_enabled, true);
+      assert.strictEqual(cfg.daemon.memory_quality_rollups_interval_sec, 3600);
+      assert.strictEqual(cfg.daemon.memory_quality_rollups_low_confidence_threshold, 0.6);
+      assert.strictEqual(cfg.daemon.memory_quality_rollups_max_scopes_per_run, 100);
       assert.strictEqual(cfg.daemon.staleness_threshold_days, 30);
     });
 
@@ -490,6 +498,10 @@ describe("config", () => {
       process.env.BIKKY_DAEMON_ENTITY_TYPING_ENABLED = "0";
       process.env.BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC = "1200";
       process.env.BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN = "4";
+      process.env.BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_ENABLED = "false";
+      process.env.BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_INTERVAL_SEC = "1800";
+      process.env.BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_LOW_CONFIDENCE_THRESHOLD = "0.45";
+      process.env.BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_MAX_SCOPES_PER_RUN = "25";
 
       const cfg = loadConfig();
 
@@ -499,6 +511,10 @@ describe("config", () => {
       assert.strictEqual(cfg.daemon.entity_typing_enabled, false);
       assert.strictEqual(cfg.daemon.entity_typing_interval_sec, 1200);
       assert.strictEqual(cfg.daemon.entity_typing_max_entities_per_run, 4);
+      assert.strictEqual(cfg.daemon.memory_quality_rollups_enabled, false);
+      assert.strictEqual(cfg.daemon.memory_quality_rollups_interval_sec, 1800);
+      assert.strictEqual(cfg.daemon.memory_quality_rollups_low_confidence_threshold, 0.45);
+      assert.strictEqual(cfg.daemon.memory_quality_rollups_max_scopes_per_run, 25);
     });
 
     it("BIKKY_USER_* env vars override user identity", () => {
@@ -719,6 +735,8 @@ describe("config", () => {
           consolidation_enabled: "yes",
           relation_inference_interval_sec: -1,
           entity_typing_enabled: "yes",
+          memory_quality_rollups_low_confidence_threshold: 2,
+          memory_quality_rollups_max_scopes_per_run: 0,
         },
       });
 
@@ -729,6 +747,8 @@ describe("config", () => {
       assert.ok(issues.some((issue) => issue.path === "daemon.consolidation_enabled"));
       assert.ok(issues.some((issue) => issue.path === "daemon.relation_inference_interval_sec"));
       assert.ok(issues.some((issue) => issue.path === "daemon.entity_typing_enabled"));
+      assert.ok(issues.some((issue) => issue.path === "daemon.memory_quality_rollups_low_confidence_threshold"));
+      assert.ok(issues.some((issue) => issue.path === "daemon.memory_quality_rollups_max_scopes_per_run"));
     });
 
     it("accepts named search scopes as default_search_scope targets", () => {

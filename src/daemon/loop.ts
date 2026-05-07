@@ -14,6 +14,7 @@ import { tick as extractionTick, setLogger as setExtractionLogger } from "./extr
 import { tick as consolidationTick, setLogger as setConsolidationLogger } from "./consolidation.js";
 import { tick as relationsTick, setLogger as setRelationsLogger } from "./relations.js";
 import { tick as entityTypingTick, setLogger as setEntityTypingLogger } from "./entity-typing.js";
+import { tick as qualityRollupsTick, setLogger as setQualityRollupsLogger } from "./quality-rollups.js";
 import { scanStaleFacts, setLogger as setStalenessLogger } from "./staleness.js";
 import { inspectWatcherPaths, formatIssue } from "./watcher-health.js";
 
@@ -42,6 +43,7 @@ export async function startDaemon(): Promise<void> {
   setConsolidationLogger(log);
   setRelationsLogger(log);
   setEntityTypingLogger(log);
+  setQualityRollupsLogger(log);
   setStalenessLogger(log);
 
   // Initialize LLM client from config
@@ -115,6 +117,12 @@ export async function startDaemon(): Promise<void> {
       await entityTypingTick(cfg);
     } catch (e) {
       log("ERROR", `Entity typing tick failed: ${(e as Error).message}`);
+    }
+
+    try {
+      await qualityRollupsTick(cfg);
+    } catch (e) {
+      log("ERROR", `Memory quality rollups tick failed: ${(e as Error).message}`);
     }
 
     // Staleness scans every 1000 ticks (~83 min at 5s interval)

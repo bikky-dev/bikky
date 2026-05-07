@@ -6,7 +6,7 @@ import type { LogFn } from "./qdrant.js";
 
 export const MAINTENANCE_STATE_PATH = join(STATE_DIR, "maintenance-state.json");
 
-export type MaintenanceJobName = "relation_inference" | "entity_typing";
+export type MaintenanceJobName = "relation_inference" | "entity_typing" | "memory_quality_rollups";
 
 export interface MaintenanceRunSummary {
   job: MaintenanceJobName;
@@ -44,6 +44,7 @@ export const defaultMaintenanceState = (): MaintenanceState => ({
   jobs: {
     relation_inference: defaultJobState(),
     entity_typing: defaultJobState(),
+    memory_quality_rollups: defaultJobState(),
   },
 });
 
@@ -76,6 +77,7 @@ export const readMaintenanceState = (log: LogFn = () => {}): MaintenanceState =>
       jobs: {
         relation_inference: coerceJobState(jobs.relation_inference),
         entity_typing: coerceJobState(jobs.entity_typing),
+        memory_quality_rollups: coerceJobState(jobs.memory_quality_rollups),
       },
     };
   } catch (e) {
