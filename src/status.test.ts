@@ -227,6 +227,20 @@ describe("status diagnostics", () => {
           recent_attempts: {},
           last_summary: null,
         },
+        memory_quality_rollups: {
+          last_run_at: "2026-04-27T11:00:00.000Z",
+          cursor_updated_at: "2026-04-27T11:00:00.000Z",
+          recent_attempts: {},
+          last_summary: {
+            job: "memory_quality_rollups",
+            ran_at: "2026-04-27T11:00:00.000Z",
+            status: "success",
+            candidates_seen: 7,
+            llm_calls: 0,
+            accepted: 4,
+            deterministic: 4,
+          },
+        },
       },
     }));
 
@@ -234,7 +248,9 @@ describe("status diagnostics", () => {
 
     assert.equal(report.maintenance.status, "ok");
     assert.equal(report.maintenance.relation_inference.last_summary?.llm_calls, 2);
+    assert.equal(report.maintenance.memory_quality_rollups.last_summary?.accepted, 4);
     assert.match(formatStatusReport(report), /Maint:/);
     assert.match(formatStatusReport(report), /relations: success/);
+    assert.match(formatStatusReport(report), /quality rollups: success/);
   });
 });

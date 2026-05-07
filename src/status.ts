@@ -98,6 +98,7 @@ export interface MaintenanceStatusReport {
   state_path: string;
   relation_inference: MaintenanceJobStatus;
   entity_typing: MaintenanceJobStatus;
+  memory_quality_rollups: MaintenanceJobStatus;
 }
 
 export interface UiStatusReport {
@@ -366,13 +367,18 @@ function collectMaintenanceStatus(): MaintenanceStatusReport {
       last_summary: job.last_summary,
     };
   };
-  const summaries = [state.jobs.relation_inference.last_summary, state.jobs.entity_typing.last_summary];
+  const summaries = [
+    state.jobs.relation_inference.last_summary,
+    state.jobs.entity_typing.last_summary,
+    state.jobs.memory_quality_rollups.last_summary,
+  ];
   const hasError = summaries.some((summary) => summary?.status === "error");
   return {
     status: hasError ? "warn" : "ok",
     state_path: MAINTENANCE_STATE_PATH,
     relation_inference: jobStatus("relation_inference"),
     entity_typing: jobStatus("entity_typing"),
+    memory_quality_rollups: jobStatus("memory_quality_rollups"),
   };
 }
 
@@ -512,6 +518,7 @@ export function formatStatusReport(report: BikkyStatusReport): string {
   lines.push(`Daemon:   ${icon(report.daemon.status)} ${report.daemon.running ? `running (PID ${report.daemon.pid})` : "stopped"}`);
   lines.push(`Maint:    ${icon(report.maintenance.status)} ${maintenanceJobSummary("relations", report.maintenance.relation_inference)}`);
   lines.push(`          ${maintenanceJobSummary("entity typing", report.maintenance.entity_typing)}`);
+  lines.push(`          ${maintenanceJobSummary("quality rollups", report.maintenance.memory_quality_rollups)}`);
   lines.push(`UI:       ${icon(report.ui.status)} ${report.ui.checked ? report.ui.url : "not checked"}${report.ui.error ? ` — ${report.ui.error}` : ""}`);
   lines.push(`MCP:      ${icon(report.mcp.status)} ${report.mcp.message}`);
 

@@ -47,6 +47,10 @@ const cfg = (extra: Partial<BikkyConfig> = {}): BikkyConfig => ({
     entity_typing_enabled: true,
     entity_typing_interval_sec: 900,
     entity_typing_max_entities_per_run: 5,
+    memory_quality_rollups_enabled: true,
+    memory_quality_rollups_interval_sec: 3600,
+    memory_quality_rollups_low_confidence_threshold: 0.6,
+    memory_quality_rollups_max_scopes_per_run: 100,
     staleness_threshold_days: 30,
   },
   identity: {

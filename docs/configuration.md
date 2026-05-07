@@ -379,6 +379,10 @@ You normally do not need to tune these. `bikky setup` starts the daemon and regi
 | `daemon.consolidation_enabled`       | `true`  | Consolidate summaries into durable patterns      |
 | `daemon.relation_inference_enabled`  | `true`  | Infer entity relationships                       |
 | `daemon.entity_typing_enabled`       | `true`  | Classify entities for UI/graph filtering         |
+| `daemon.memory_quality_rollups_enabled` | `true` | Aggregate recall, feedback, stale, and confidence quality signals |
+| `daemon.memory_quality_rollups_interval_sec` | `3600` | Seconds between memory quality rollup runs |
+| `daemon.memory_quality_rollups_low_confidence_threshold` | `0.6` | Effective confidence below this value is counted as low-confidence |
+| `daemon.memory_quality_rollups_max_scopes_per_run` | `100` | Maximum rollup scopes written per destination per run |
 | `daemon.staleness_threshold_days`    | `30`    | Days before a fact is flagged as stale           |
 
 #### Watcher settings

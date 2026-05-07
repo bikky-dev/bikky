@@ -29,6 +29,8 @@ export type OriginAction =
   | "correct"
   | "reinforce"
   | "supersede"
+  | "recall"
+  | "aggregate"
   | "feedback";
 
 export type OriginMetadataValue = string | number | boolean | null;

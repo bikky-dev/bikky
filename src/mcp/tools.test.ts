@@ -446,6 +446,44 @@ describe("mcp/tools", () => {
     assert.equal((payloadUpdate.body?.payload as Record<string, unknown>).verification_count, 5);
   });
 
+  it("writes recall telemetry and updates recall counters in the result destination", async () => {
+    const calls = installStorageMock({
+      searchResults: [
+        point("work-fact", {
+          recall_count: 1,
+          updated_at: "2026-01-01T00:00:00.000Z",
+        }),
+      ],
+    });
+    const handlers = collectTools();
+
+    const result = await handlers.get("memory_recall")!({
+      query: "where does bikky store memories?",
+      search_scope: "work",
+      output_format: "json",
+    });
+
+    const body = parseToolJson(result);
+    assert.equal(body.result_count, 1);
+
+    const payloadUpdate = calls.find((call) => call.method === "POST" && call.url.endsWith("/points/payload"));
+    assert.ok(payloadUpdate);
+    assert.equal(payloadUpdate.destination, "work");
+    assert.deepEqual(payloadUpdate.body?.points, ["work-fact"]);
+    assert.equal((payloadUpdate.body?.payload as Record<string, unknown>).recall_count, 2);
+    assert.equal(typeof (payloadUpdate.body?.payload as Record<string, unknown>).last_recalled_at, "string");
+
+    const recallUpsert = calls.find((call) => call.method === "PUT" && call.url.endsWith("/points"));
+    assert.ok(recallUpsert);
+    assert.equal(recallUpsert.destination, "work");
+    const payload = ((recallUpsert.body?.points as Array<{ payload: Record<string, unknown> }>)[0]?.payload);
+    assert.equal(payload?.kind, "telemetry");
+    assert.equal(payload?.memory_subtype, "recall_event");
+    assert.deepEqual(payload?.returned_fact_ids, ["work-fact"]);
+    assert.equal(payload?.result_count, 1);
+    assert.equal(payload?.search_scope, "work");
+  });
+
   it("writes useful feedback telemetry in the same destination as the source fact", async () => {
     const calls = installStorageMock({
       pointsByDestination: {

@@ -104,6 +104,10 @@ export interface DaemonConfig {
   entity_typing_enabled: boolean;
   entity_typing_interval_sec: number;
   entity_typing_max_entities_per_run: number;
+  memory_quality_rollups_enabled: boolean;
+  memory_quality_rollups_interval_sec: number;
+  memory_quality_rollups_low_confidence_threshold: number;
+  memory_quality_rollups_max_scopes_per_run: number;
   staleness_threshold_days: number;
 }
 
@@ -262,6 +266,10 @@ const DEFAULTS: BikkyConfig = {
     entity_typing_enabled: true,
     entity_typing_interval_sec: 900,
     entity_typing_max_entities_per_run: 5,
+    memory_quality_rollups_enabled: true,
+    memory_quality_rollups_interval_sec: 3600,
+    memory_quality_rollups_low_confidence_threshold: 0.6,
+    memory_quality_rollups_max_scopes_per_run: 100,
     staleness_threshold_days: 30,
   },
   identity: {
@@ -313,6 +321,10 @@ export const CONFIG_ENV_KEYS = [
   "BIKKY_DAEMON_ENTITY_TYPING_ENABLED",
   "BIKKY_DAEMON_ENTITY_TYPING_INTERVAL_SEC",
   "BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN",
+  "BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_ENABLED",
+  "BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_INTERVAL_SEC",
+  "BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_LOW_CONFIDENCE_THRESHOLD",
+  "BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_MAX_SCOPES_PER_RUN",
   "BIKKY_USER_ID",
   "BIKKY_USER_NAME",
   "BIKKY_AGENT_ID",
@@ -366,6 +378,10 @@ const daemonConfigFileSchema = z.object({
   entity_typing_enabled: z.boolean().optional(),
   entity_typing_interval_sec: nonNegativeInt.optional(),
   entity_typing_max_entities_per_run: nonNegativeInt.optional(),
+  memory_quality_rollups_enabled: z.boolean().optional(),
+  memory_quality_rollups_interval_sec: nonNegativeInt.optional(),
+  memory_quality_rollups_low_confidence_threshold: z.number().min(0).max(1).optional(),
+  memory_quality_rollups_max_scopes_per_run: positiveInt.optional(),
   staleness_threshold_days: nonNegativeInt.optional(),
 }).passthrough();
 
@@ -866,6 +882,19 @@ export function loadConfig(): BikkyConfig {
   if (entityTypingInterval !== null) config.daemon.entity_typing_interval_sec = entityTypingInterval;
   const entityTypingMax = positiveInt(process.env.BIKKY_DAEMON_ENTITY_TYPING_MAX_ENTITIES_PER_RUN);
   if (entityTypingMax !== null) config.daemon.entity_typing_max_entities_per_run = entityTypingMax;
+  const qualityRollupsEnabled = booleanEnv(process.env.BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_ENABLED);
+  if (qualityRollupsEnabled !== null) config.daemon.memory_quality_rollups_enabled = qualityRollupsEnabled;
+  const qualityRollupsInterval = positiveInt(process.env.BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_INTERVAL_SEC);
+  if (qualityRollupsInterval !== null) config.daemon.memory_quality_rollups_interval_sec = qualityRollupsInterval;
+  const qualityRollupsThresholdRaw = process.env.BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_LOW_CONFIDENCE_THRESHOLD;
+  if (qualityRollupsThresholdRaw) {
+    const threshold = Number.parseFloat(qualityRollupsThresholdRaw);
+    if (Number.isFinite(threshold) && threshold >= 0 && threshold <= 1) {
+      config.daemon.memory_quality_rollups_low_confidence_threshold = threshold;
+    }
+  }
+  const qualityRollupsMaxScopes = positiveInt(process.env.BIKKY_DAEMON_MEMORY_QUALITY_ROLLUPS_MAX_SCOPES_PER_RUN);
+  if (qualityRollupsMaxScopes !== null) config.daemon.memory_quality_rollups_max_scopes_per_run = qualityRollupsMaxScopes;
   if (process.env.BIKKY_USER_ID) config.identity.user_id = process.env.BIKKY_USER_ID;
   if (process.env.BIKKY_USER_NAME) config.identity.user_name = process.env.BIKKY_USER_NAME;
   if (process.env.BIKKY_ACTOR_ID) config.identity.actor_id = process.env.BIKKY_ACTOR_ID;

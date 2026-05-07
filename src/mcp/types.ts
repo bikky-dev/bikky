@@ -104,8 +104,13 @@ export interface FactPayload {
   verification_count?: number;
   useful_count?: number;
   not_useful_count?: number;
+  useful_feedback_count?: number;
+  not_useful_feedback_count?: number;
+  last_useful_at?: string;
   last_used_at?: string;
   last_feedback_at?: string;
+  recall_count?: number;
+  last_recalled_at?: string;
   superseded_by: string | null;
   superseded_at: string | null;
   created_at: string;
@@ -161,9 +166,26 @@ export interface FactPayload {
   event_session_id?: string;
   recall_query?: string;
   returned_fact_ids?: string[];
+  result_count?: number;
+  search_scope?: string;
+  searched_destinations?: string[];
+  failed_destinations?: string[];
+  target_fact_id?: string;
   feedback_note?: string;
+  feedback_kind?: string;
   outcome?: string;
   outcome_summary?: string;
+  scope_type?: string;
+  scope_value?: string;
+  rollup_type?: string;
+  rollup_generated_at?: string;
+  rollup_window_start?: string;
+  rollup_window_end?: string;
+  active_fact_count?: number;
+  misleading_count?: number;
+  wrong_count?: number;
+  stale_count?: number;
+  low_confidence_count?: number;
 }
 
 // ---------------------------------------------------------------------------
