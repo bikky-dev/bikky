@@ -223,6 +223,9 @@ describe("ui/routes/memory", () => {
       assert.equal(body.count, 1);
       assert.equal(body.results[0].score, 0.99);
       assert.equal(body.results[0].content, "Bikky uses Qdrant");
+      assert.equal(body.results[0].usefulness_score, null);
+      assert.equal(body.results[0].usefulness_rated_count, 0);
+      assert.equal(body.results[0].needs_review, false);
 
       const search = log.calls.find((c) => c.path.endsWith("/points/search"));
       assert.ok(search);
@@ -285,6 +288,24 @@ describe("ui/routes/memory", () => {
         ["perso.q.test", "work.q.test"],
       );
     });
+
+    it("sorts fetched search candidates by usefulness", async () => {
+      installMock({
+        qdrantHandler: () => ({
+          result: [
+            { ...sampleFact({ content: "Low usefulness", useful_count: 1, wrong_count: 2 }), score: 0.99 },
+            { ...sampleFact({ content: "High usefulness", useful_count: 10, wrong_count: 2 }), id: "22222222-2222-2222-2222-222222222222", score: 0.7 },
+          ],
+        }),
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/search?q=bikky&sort=usefulness_desc"));
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { results: Array<{ content: string }> };
+      assert.deepEqual(body.results.map((row) => row.content), ["High usefulness", "Low usefulness"]);
+    });
   });
 
   describe("GET /browse", () => {
@@ -306,6 +327,79 @@ describe("ui/routes/memory", () => {
 
       const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
       assert.deepEqual(scroll!.body.order_by, { key: "created_at", direction: "desc" });
+    });
+
+    it("computes usefulness fields for browse results", async () => {
+      installMock({
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/count")) return { result: { count: 1 } };
+          return { result: { points: [sampleFact({ useful_count: 3, misleading_count: 1 })], next_page_offset: null } };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/browse"));
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { results: Array<Record<string, unknown>> };
+      assert.equal(body.results[0]!.useful_count, 3);
+      assert.equal(body.results[0]!.misleading_count, 1);
+      assert.equal(body.results[0]!.usefulness_rated_count, 4);
+      assert.equal(typeof body.results[0]!.usefulness_score, "number");
+      assert.equal(body.results[0]!.needs_review, true);
+    });
+
+    it("sorts and paginates a bounded usefulness browse scan", async () => {
+      const log = installMock({
+        qdrantHandler: () => ({
+          result: {
+            points: [
+              sampleFact({ content: "Unrated", created_at: "2024-01-03T00:00:00Z" }),
+              sampleFact({ content: "Low usefulness", useful_count: 1, wrong_count: 2, created_at: "2024-01-02T00:00:00Z" }),
+              { ...sampleFact({ content: "High usefulness", useful_count: 10, wrong_count: 2, created_at: "2024-01-01T00:00:00Z" }), id: "22222222-2222-2222-2222-222222222222" },
+            ],
+            next_page_offset: null,
+          },
+        }),
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/browse?sort=usefulness_desc&usefulness=positive&limit=1"));
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { results: Array<{ content: string }>; count: number; nextOffset: number | null };
+      assert.equal(body.count, 2);
+      assert.equal(body.nextOffset, 1);
+      assert.deepEqual(body.results.map((row) => row.content), ["High usefulness"]);
+
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.equal(scroll!.body.limit, 5000);
+      assert.deepEqual(scroll!.body.order_by, { key: "created_at", direction: "desc" });
+      assert.equal(log.calls.some((c) => c.path.endsWith("/points/count")), false);
+    });
+
+    it("filters usefulness browse results that need review", async () => {
+      installMock({
+        qdrantHandler: () => ({
+          result: {
+            points: [
+              sampleFact({ content: "Clean useful", useful_count: 2 }),
+              { ...sampleFact({ content: "Wrong memory", wrong_count: 1 }), id: "22222222-2222-2222-2222-222222222222" },
+            ],
+            next_page_offset: null,
+          },
+        }),
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/browse?usefulness=needs_review"));
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { results: Array<{ content: string; needs_review: boolean }>; count: number };
+      assert.equal(body.count, 1);
+      assert.deepEqual(body.results.map((row) => ({ content: row.content, needs_review: row.needs_review })), [
+        { content: "Wrong memory", needs_review: true },
+      ]);
     });
 
     it("forwards offset for pagination", async () => {

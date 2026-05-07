@@ -101,6 +101,20 @@ function newId(): string {
   return crypto.randomUUID();
 }
 
+type OutcomeCounterField = "useful_count" | "misleading_count" | "wrong_count" | "irrelevant_count";
+
+function outcomeCounterField(outcome: "useful" | "misleading" | "wrong" | "irrelevant"): OutcomeCounterField {
+  if (outcome === "useful") return "useful_count";
+  if (outcome === "misleading") return "misleading_count";
+  if (outcome === "wrong") return "wrong_count";
+  return "irrelevant_count";
+}
+
+function payloadCounter(payload: FactPayload, field: OutcomeCounterField): number {
+  const value = payload[field];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 // Build a RoutingInput from the standard memory-tool fields.
 function routingInput(args: {
   destination?: string;
@@ -1842,7 +1856,9 @@ export function registerTools(mcp: McpServer): void {
       try {
         const located = await locatePoint(fact_id);
         if (!located) return notFoundResult(fact_id);
-        const { dest } = located;
+        const { dest, point } = located;
+        const counterField = outcomeCounterField(outcome);
+        const counterValue = payloadCounter(point.payload, counterField) + 1;
         const feedbackOrigin = mcpOrigin({
           action: "feedback",
           tool: "memory_report_outcome",
@@ -1850,6 +1866,7 @@ export function registerTools(mcp: McpServer): void {
           metadata: { destination: dest.name, fact_id },
         });
         await qdrantSetPayload(dest, [fact_id], {
+          [counterField]: counterValue,
           updated_at: now,
           last_operation_origin: feedbackOrigin,
         });
@@ -1886,6 +1903,7 @@ export function registerTools(mcp: McpServer): void {
             fact_id,
             destination: dest.name,
             outcome,
+            [counterField]: counterValue,
             event_id: eventId,
           }) }],
         };
