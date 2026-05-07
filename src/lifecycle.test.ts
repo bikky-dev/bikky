@@ -1,42 +1,49 @@
 /**
  * Tests for daemon lifecycle PID-file management.
  *
- * Backs up and restores the real PID file at ~/.bikky/state/daemon.pid so
- * we don't clobber an actual running daemon during the test run.
+ * Uses BIKKY_HOME to keep PID-file reads/writes in an isolated tempdir so tests
+ * never touch a user's real ~/.bikky/state/daemon.pid.
  */
 
 import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
-import { getDaemonStatus, killDaemon } from "./lifecycle.js";
-import { PID_PATH } from "./config.js";
+const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-lifecycle-"));
+process.env.BIKKY_HOME = TEST_BIKKY_HOME;
 
-let backup: string | null = null;
+const { getDaemonStatus, killDaemon } = await import("./lifecycle.js");
+const { getPidPath } = await import("./config.js");
+
+function writePidFile(contents: string): string {
+  const pidPath = getPidPath();
+  fs.mkdirSync(path.dirname(pidPath), { recursive: true });
+  fs.writeFileSync(pidPath, contents);
+  return pidPath;
+}
 
 describe("lifecycle (PID file)", () => {
   before(() => {
-    if (fs.existsSync(PID_PATH)) {
-      backup = fs.readFileSync(PID_PATH, "utf-8");
-    }
+    fs.mkdirSync(TEST_BIKKY_HOME, { recursive: true });
   });
 
   after(() => {
-    if (backup !== null) {
-      fs.mkdirSync(path.dirname(PID_PATH), { recursive: true });
-      fs.writeFileSync(PID_PATH, backup);
-    } else if (fs.existsSync(PID_PATH)) {
-      fs.unlinkSync(PID_PATH);
-    }
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
   });
 
   beforeEach(() => {
-    if (fs.existsSync(PID_PATH)) fs.unlinkSync(PID_PATH);
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
+    fs.mkdirSync(TEST_BIKKY_HOME, { recursive: true });
   });
 
   afterEach(() => {
-    if (fs.existsSync(PID_PATH)) fs.unlinkSync(PID_PATH);
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
+  });
+
+  it("uses BIKKY_HOME for PID file operations", () => {
+    assert.equal(getPidPath(), path.join(TEST_BIKKY_HOME, "state", "daemon.pid"));
   });
 
   it("returns running:false when no PID file exists", () => {
@@ -45,8 +52,7 @@ describe("lifecycle (PID file)", () => {
   });
 
   it("returns running:true when PID belongs to a live process", () => {
-    fs.mkdirSync(path.dirname(PID_PATH), { recursive: true });
-    fs.writeFileSync(PID_PATH, String(process.pid));
+    writePidFile(String(process.pid));
 
     const status = getDaemonStatus();
     assert.equal(status.running, true);
@@ -55,17 +61,15 @@ describe("lifecycle (PID file)", () => {
 
   it("returns running:false and cleans up a stale PID file", () => {
     // PID 999999 is virtually guaranteed not to exist
-    fs.mkdirSync(path.dirname(PID_PATH), { recursive: true });
-    fs.writeFileSync(PID_PATH, "999999");
+    const pidPath = writePidFile("999999");
 
     const status = getDaemonStatus();
     assert.deepEqual(status, { running: false, pid: null });
-    assert.ok(!fs.existsSync(PID_PATH), "stale PID file should be removed");
+    assert.ok(!fs.existsSync(pidPath), "stale PID file should be removed");
   });
 
   it("treats unparseable PID file as 'no daemon'", () => {
-    fs.mkdirSync(path.dirname(PID_PATH), { recursive: true });
-    fs.writeFileSync(PID_PATH, "not-a-number\n");
+    writePidFile("not-a-number\n");
 
     const status = getDaemonStatus();
     assert.equal(status.running, false);
@@ -77,11 +81,10 @@ describe("lifecycle (PID file)", () => {
   });
 
   it("killDaemon removes the PID file even for a stale entry", () => {
-    fs.mkdirSync(path.dirname(PID_PATH), { recursive: true });
-    fs.writeFileSync(PID_PATH, "999999");
+    const pidPath = writePidFile("999999");
 
     const result = killDaemon();
     assert.equal(result, true);
-    assert.ok(!fs.existsSync(PID_PATH));
+    assert.ok(!fs.existsSync(pidPath));
   });
 });

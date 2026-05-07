@@ -8,15 +8,16 @@
 
 import fs from "node:fs";
 import { spawn } from "node:child_process";
-import { PID_PATH, STATE_DIR } from "./config.js";
+import { getPidPath, getStateDir } from "./config.js";
 
 // ---------------------------------------------------------------------------
 // PID file helpers
 // ---------------------------------------------------------------------------
 
 function readPid(): number | null {
+  const pidPath = getPidPath();
   try {
-    const raw = fs.readFileSync(PID_PATH, "utf-8").trim();
+    const raw = fs.readFileSync(pidPath, "utf-8").trim();
     const pid = parseInt(raw, 10);
     return Number.isFinite(pid) ? pid : null;
   } catch {
@@ -25,13 +26,14 @@ function readPid(): number | null {
 }
 
 function writePid(pid: number): void {
-  fs.mkdirSync(STATE_DIR, { recursive: true });
-  fs.writeFileSync(PID_PATH, String(pid) + "\n");
+  fs.mkdirSync(getStateDir(), { recursive: true });
+  fs.writeFileSync(getPidPath(), String(pid) + "\n");
 }
 
 function removePid(): void {
+  const pidPath = getPidPath();
   try {
-    fs.unlinkSync(PID_PATH);
+    fs.unlinkSync(pidPath);
   } catch {
     // already gone
   }
