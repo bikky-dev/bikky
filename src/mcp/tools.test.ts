@@ -597,6 +597,11 @@ describe("mcp/tools", () => {
     assert.equal(body.status, "outcome_recorded");
     assert.equal(body.destination, "work");
     assert.equal(body.outcome, "misleading");
+    assert.equal(body.misleading_count, 1);
+
+    const payloadUpdate = calls.find((call) => call.method === "POST" && call.url.endsWith("/points/payload"));
+    assert.ok(payloadUpdate);
+    assert.equal((payloadUpdate.body?.payload as Record<string, unknown>).misleading_count, 1);
 
     const outcomeUpsert = calls.find((call) => call.method === "PUT" && call.url.endsWith("/points"));
     assert.ok(outcomeUpsert);
@@ -607,4 +612,35 @@ describe("mcp/tools", () => {
     assert.equal(payload.target_fact_id, "work-fact");
     assert.equal(payload.outcome, "misleading");
   });
+
+  for (const { outcome, field } of [
+    { outcome: "useful", field: "useful_count" },
+    { outcome: "misleading", field: "misleading_count" },
+    { outcome: "wrong", field: "wrong_count" },
+    { outcome: "irrelevant", field: "irrelevant_count" },
+  ] as const) {
+    it(`increments ${field} on the source fact for outcome=${outcome}`, async () => {
+      const calls = installStorageMock({
+        pointsByDestination: {
+          work: {
+            "work-fact": point("work-fact", { [field]: 2 }),
+          },
+        },
+      });
+      const handlers = collectTools();
+
+      const result = await handlers.get("memory_report_outcome")!({
+        fact_id: "work-fact",
+        outcome,
+      });
+
+      const body = parseToolJson(result);
+      assert.equal(body.status, "outcome_recorded");
+      assert.equal(body[field], 3);
+
+      const payloadUpdate = calls.find((call) => call.method === "POST" && call.url.endsWith("/points/payload"));
+      assert.ok(payloadUpdate);
+      assert.equal((payloadUpdate.body?.payload as Record<string, unknown>)[field], 3);
+    });
+  }
 });

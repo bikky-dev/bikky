@@ -106,6 +106,9 @@ export interface FactPayload {
   not_useful_count?: number;
   useful_feedback_count?: number;
   not_useful_feedback_count?: number;
+  misleading_count?: number;
+  wrong_count?: number;
+  irrelevant_count?: number;
   last_useful_at?: string;
   last_used_at?: string;
   last_feedback_at?: string;
@@ -182,8 +185,6 @@ export interface FactPayload {
   rollup_window_start?: string;
   rollup_window_end?: string;
   active_fact_count?: number;
-  misleading_count?: number;
-  wrong_count?: number;
   stale_count?: number;
   low_confidence_count?: number;
 }

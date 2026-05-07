@@ -9,6 +9,16 @@ import { getEffectiveDestinations, getDefaultDestination, loadConfig } from "../
 import { embed, isEmbeddingAvailable } from "../lib/embed.js";
 import { addRedactionPayload, combineRedactions, redactStorageText } from "../lib/redaction.js";
 import { buildOperationOrigin } from "../lib/origin.js";
+import {
+  compareUsefulness,
+  isUsefulnessSort,
+  matchesUsefulnessFilter,
+  parseUsefulnessFilter,
+  usefulnessMetrics,
+  type UsefulnessFilter,
+  type UsefulnessMetrics,
+  type UsefulnessSort,
+} from "../lib/usefulness.js";
 
 export const memoryRoutes = new Hono();
 
@@ -68,10 +78,16 @@ const MEMORY_SUBTYPE_VALUES = [
   "aggregate_rollup",
 ] as const;
 
-function formatPoint(p: QdrantPoint, destination?: string): Record<string, unknown> & { id: string; score: number | null } {
-  const out: Record<string, unknown> = { id: p.id, score: p.score ?? null, ...p.payload };
+type FormattedPoint = Record<string, unknown> & UsefulnessMetrics & {
+  id: string;
+  score: number | null;
+  created_at?: string;
+};
+
+function formatPoint(p: QdrantPoint, destination?: string): FormattedPoint {
+  const out: Record<string, unknown> = { id: p.id, score: p.score ?? null, ...p.payload, ...usefulnessMetrics(p.payload) };
   if (destination) out._destination = destination;
-  return out as Record<string, unknown> & { id: string; score: number | null };
+  return out as FormattedPoint;
 }
 
 // --- Query helpers ---
@@ -80,6 +96,11 @@ function parseLimit(raw: string | undefined, def: number, max: number): number {
   const n = parseInt(raw || String(def), 10);
   if (!Number.isFinite(n) || n <= 0) return def;
   return Math.min(n, max);
+}
+
+function parseNumericOffset(raw: string | undefined): number {
+  const n = parseInt(raw || "0", 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 function parseList(raw: string | undefined): string[] {
@@ -94,6 +115,15 @@ function ontologyFilters(category: string | undefined, memorySubtype: string | u
     return { categories, memorySubtypes };
   }
   return { category: categories[0], memorySubtype: memorySubtypes[0] };
+}
+
+function applyUsefulnessFilter(results: FormattedPoint[], filter: UsefulnessFilter | null): FormattedPoint[] {
+  if (filter === null) return results;
+  return results.filter((point) => matchesUsefulnessFilter(point, filter));
+}
+
+function sortUsefulnessResults(results: FormattedPoint[], sort: UsefulnessSort): FormattedPoint[] {
+  return [...results].sort((a, b) => compareUsefulness(a, b, sort));
 }
 
 // --- TTL cache (module-scope, per-process) ---
@@ -123,6 +153,7 @@ const GRAPH_MAX_MIN_WEIGHT = 20;
 const GRAPH_MAX_FACT_ENTITIES_FOR_CO_OCCURRENCE = 20;
 const KEYWORD_SEARCH_PAGE_SIZE = 100;
 const KEYWORD_SEARCH_SCAN_LIMIT = 5_000;
+const USEFULNESS_BROWSE_SCAN_LIMIT = 5_000;
 
 const keywordValueText = (value: unknown): string[] => {
   if (value === undefined || value === null || value === "") return [];
@@ -197,6 +228,10 @@ memoryRoutes.get("/search", async (c) => {
 
   const dests = targetsFor(c);
   const all = isAllDestinations(c);
+  const usefulnessFilter = parseUsefulnessFilter(c.req.query("usefulness"));
+  const requestedSort = c.req.query("sort");
+  const usefulnessSort = isUsefulnessSort(requestedSort) ? requestedSort : null;
+  const hasUsefulnessPostProcessing = usefulnessFilter !== null || usefulnessSort !== null;
   const filter = buildFilter({
     ...ontologyFilters(c.req.query("category"), c.req.query("memory_subtype")),
     domain: c.req.query("domain"),
@@ -208,37 +243,40 @@ memoryRoutes.get("/search", async (c) => {
   });
 
   const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 100);
+  const candidateLimit = hasUsefulnessPostProcessing ? 100 : limit;
   const hasFilter = filter.must.length > 0 || (filter.should?.length ?? 0) > 0 || (filter.must_not?.length ?? 0) > 0;
 
   if (!isEmbeddingAvailable()) {
     const perDest = await Promise.all(
-      dests.map((d) => keywordSearch(clientFor(d), q, filter, limit, all ? d.name : undefined)),
+      dests.map((d) => keywordSearch(clientFor(d), q, filter, candidateLimit, all ? d.name : undefined)),
     );
-    const results = perDest.flatMap((r) => r.results).slice(0, limit);
-    const count = perDest.reduce((sum, r) => sum + r.count, 0);
-    return c.json({ results, count });
+    let results = applyUsefulnessFilter(perDest.flatMap((r) => r.results), usefulnessFilter);
+    if (usefulnessSort) results = sortUsefulnessResults(results, usefulnessSort);
+    const count = hasUsefulnessPostProcessing ? results.length : perDest.reduce((sum, r) => sum + r.count, 0);
+    return c.json({ results: results.slice(0, limit), count });
   }
 
   const vector = await embed(q);
   const perDest = await Promise.all(
     dests.map(async (d) => {
-      const points = await clientFor(d).search(vector, hasFilter ? filter : undefined, limit);
+      const points = await clientFor(d).search(vector, hasFilter ? filter : undefined, candidateLimit);
       return points.map((p) => formatPoint(p, all ? d.name : undefined));
     }),
   );
   // Merge by score desc, dedupe by id, slice to limit
   const seen = new Set<string>();
-  const merged = perDest
+  let merged = perDest
     .flat()
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
     .filter((p) => {
       if (seen.has(p.id)) return false;
       seen.add(p.id);
       return true;
-    })
-    .slice(0, limit);
+    });
+  merged = applyUsefulnessFilter(merged, usefulnessFilter);
+  if (usefulnessSort) merged = sortUsefulnessResults(merged, usefulnessSort);
 
-  return c.json({ results: merged, count: merged.length });
+  return c.json({ results: merged.slice(0, limit), count: merged.length });
 });
 
 // GET /api/memory/browse?...&destination=...
@@ -262,11 +300,40 @@ memoryRoutes.get("/browse", async (c) => {
   const offset = c.req.query("offset") || undefined;
 
   const sort = c.req.query("sort");
+  const usefulnessFilter = parseUsefulnessFilter(c.req.query("usefulness"));
+  const usefulnessSort = isUsefulnessSort(sort) ? sort : null;
   const orderBy = sort === "oldest"
     ? { key: "created_at", direction: "asc" as const }
     : sort === "newest"
       ? { key: "created_at", direction: "desc" as const }
       : undefined;
+
+  if (usefulnessFilter !== null || usefulnessSort !== null) {
+    const numericOffset = parseNumericOffset(offset);
+    const perDest = await Promise.all(
+      dests.map(async (d) => {
+        const { points } = await clientFor(d).scroll(
+          filter,
+          USEFULNESS_BROWSE_SCAN_LIMIT,
+          undefined,
+          { key: "created_at", direction: "desc" },
+        );
+        return points.map((p) => formatPoint(p, all ? d.name : undefined));
+      }),
+    );
+    let results = applyUsefulnessFilter(perDest.flat(), usefulnessFilter);
+    if (usefulnessSort) {
+      results = sortUsefulnessResults(results, usefulnessSort);
+    } else if (sort === "oldest") {
+      results = [...results].sort((a, b) => String(a.created_at ?? "").localeCompare(String(b.created_at ?? "")));
+    } else {
+      results = [...results].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+    }
+    const count = results.length;
+    const page = results.slice(numericOffset, numericOffset + limit);
+    const nextOffset = numericOffset + limit < count ? numericOffset + limit : null;
+    return c.json({ results: page, count, nextOffset });
+  }
 
   // Pagination across destinations is hard. For "all", we fetch the first
   // `limit` from each then concat — not perfectly ordered, but matches the

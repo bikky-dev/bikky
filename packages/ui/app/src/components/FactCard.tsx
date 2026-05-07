@@ -20,6 +20,15 @@ export interface Fact {
   relation_type?: string;
   to_entity?: string;
   score?: number | null;
+  usefulness_score?: number | null;
+  usefulness_percent?: number | null;
+  usefulness_rated_count?: number;
+  useful_count?: number;
+  not_useful_count?: number;
+  misleading_count?: number;
+  wrong_count?: number;
+  irrelevant_count?: number;
+  needs_review?: boolean;
   session_id?: string;
   workstream_key?: string;
   task_key?: string;
@@ -50,6 +59,12 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
         {fact._destination && (
           <Badge label={`📍 ${fact._destination}`} color="indigo" />
         )}
+        {fact.usefulness_percent != null ? (
+          <Badge label={`Useful ${fact.usefulness_percent}%`} color="green" />
+        ) : (
+          <Badge label="Unrated" color="zinc" />
+        )}
+        {fact.needs_review && <Badge label="Needs review" color="red" />}
         {fact.kind && fact.kind !== "fact" && (
           <Badge label={`Kind: ${ontologyLabel(fact.kind)}`} color={KIND_COLORS[fact.kind]} />
         )}
@@ -67,6 +82,7 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
       <div className="mt-2 flex items-center gap-3 text-xs text-zinc-500">
         <span>{relativeTime(fact.created_at)}</span>
         <span>{Math.round(fact.confidence * 100)}% conf</span>
+        {(fact.usefulness_rated_count ?? 0) > 0 && <span>{signalBreakdown(fact)}</span>}
         {fact.score != null && <span>score {fact.score.toFixed(3)}</span>}
         {fact.workstream_key && <ProvChip label="ws" value={fact.workstream_key} />}
         {fact.task_key && <ProvChip label="task" value={fact.task_key} />}
@@ -78,6 +94,17 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
       </div>
     </button>
   );
+}
+
+function signalBreakdown(fact: Fact): string {
+  const parts = [
+    `${fact.useful_count ?? 0} useful`,
+    `${fact.misleading_count ?? 0} misleading`,
+    `${fact.wrong_count ?? 0} wrong`,
+  ];
+  if ((fact.not_useful_count ?? 0) > 0) parts.push(`${fact.not_useful_count} not useful`);
+  if ((fact.irrelevant_count ?? 0) > 0) parts.push(`${fact.irrelevant_count} irrelevant`);
+  return parts.join(" · ");
 }
 
 function ProvChip({ label, value }: { label: string; value: string }) {

@@ -30,6 +30,9 @@ export interface StructuredFact {
   verification_count?: number;
   useful_count?: number;
   not_useful_count?: number;
+  misleading_count?: number;
+  wrong_count?: number;
+  irrelevant_count?: number;
   redaction?: FactPayload["redaction"];
   metadata?: FactPayload["metadata"];
   workstream_key?: string | null;
@@ -284,6 +287,9 @@ export function formatFact(point: QdrantPoint): string {
   if ((p.verification_count ?? 0) > 0) parts.push(`verified: ${p.verification_count}x`);
   if ((p.useful_count ?? 0) > 0) parts.push(`useful: ${p.useful_count}x`);
   if ((p.not_useful_count ?? 0) > 0) parts.push(`not useful: ${p.not_useful_count}x`);
+  if ((p.misleading_count ?? 0) > 0) parts.push(`misleading: ${p.misleading_count}x`);
+  if ((p.wrong_count ?? 0) > 0) parts.push(`wrong: ${p.wrong_count}x`);
+  if ((p.irrelevant_count ?? 0) > 0) parts.push(`irrelevant: ${p.irrelevant_count}x`);
   if (p.redaction?.redacted) parts.push(`redacted: ${p.redaction.summary}`);
   if (p.metadata && Object.keys(p.metadata).length > 0) {
     const metaPairs = Object.entries(p.metadata).map(([k, v]) => `${k}=${v}`).join(", ");
@@ -334,6 +340,9 @@ export function structuredFact(point: QdrantPoint): StructuredFact {
     ...(p.verification_count !== undefined ? { verification_count: p.verification_count } : {}),
     ...(p.useful_count !== undefined ? { useful_count: p.useful_count } : {}),
     ...(p.not_useful_count !== undefined ? { not_useful_count: p.not_useful_count } : {}),
+    ...(p.misleading_count !== undefined ? { misleading_count: p.misleading_count } : {}),
+    ...(p.wrong_count !== undefined ? { wrong_count: p.wrong_count } : {}),
+    ...(p.irrelevant_count !== undefined ? { irrelevant_count: p.irrelevant_count } : {}),
     ...(p.redaction ? { redaction: p.redaction } : {}),
     ...(p.metadata && Object.keys(p.metadata).length > 0 ? { metadata: p.metadata } : {}),
     ...(p.workstream_key ? { workstream_key: p.workstream_key } : {}),

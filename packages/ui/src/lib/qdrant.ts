@@ -28,6 +28,13 @@ export interface FactPayload {
   last_reinforced_at: string;
   last_verified_at?: string;
   verification_count?: number;
+  useful_count?: number;
+  not_useful_count?: number;
+  useful_feedback_count?: number;
+  not_useful_feedback_count?: number;
+  misleading_count?: number;
+  wrong_count?: number;
+  irrelevant_count?: number;
   superseded_by: string | null;
   superseded_at: string | null;
   created_at: string;

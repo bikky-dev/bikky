@@ -15,7 +15,17 @@ import {
 const SORT_OPTIONS = [
   { value: "newest", label: "Newest first" },
   { value: "oldest", label: "Oldest first" },
+  { value: "usefulness_desc", label: "Most useful" },
+  { value: "usefulness_asc", label: "Least useful" },
   { value: "", label: "Relevance / default" },
+];
+
+const USEFULNESS_FILTER_OPTIONS = [
+  { value: "", label: "All usefulness" },
+  { value: "positive", label: "Has useful feedback" },
+  { value: "needs_review", label: "Needs review" },
+  { value: "no_useful", label: "No useful signal" },
+  { value: "unrated", label: "Unrated" },
 ];
 
 const DATE_PRESETS: { label: string; days: number }[] = [
@@ -87,6 +97,7 @@ export default function Memory() {
   const [memorySubtypes, setMemorySubtypes] = useState<string[]>(initialSubtypes);
   const [entity, setEntity] = useState(searchParams.get("entity") ?? "");
   const [sort, setSort] = useState(searchParams.get("sort") ?? "newest");
+  const [usefulness, setUsefulness] = useState(searchParams.get("usefulness") ?? "");
   const [since, setSince] = useState(searchParams.get("since") ?? "");
   const [until, setUntil] = useState(searchParams.get("until") ?? "");
   const [browseRevision, setBrowseRevision] = useState(0);
@@ -116,10 +127,11 @@ export default function Memory() {
     if (memorySubtypes.length) p.memory_subtype = memorySubtypes.join(",");
     if (entity) p.entity = entity;
     if (sort) p.sort = sort;
+    if (usefulness) p.usefulness = usefulness;
     if (since) p.since = since;
     if (until) p.until = until;
     return p;
-  }, [query, categories, memorySubtypes, entity, sort, since, until]);
+  }, [query, categories, memorySubtypes, entity, sort, usefulness, since, until]);
 
   const fetchResults = useCallback(
     async (append = false, offset = 0) => {
@@ -132,6 +144,8 @@ export default function Memory() {
           if (categories.length) params.set("category", categories.join(","));
           if (memorySubtypes.length) params.set("memory_subtype", memorySubtypes.join(","));
           if (entity) params.set("entity", entity);
+          if (sort) params.set("sort", sort);
+          if (usefulness) params.set("usefulness", usefulness);
           params.set("limit", String(append ? results.length + PAGE_SIZE : PAGE_SIZE));
 
           const data = await apiFetch<SearchResponse>(`/api/memory/search?${params}`);
@@ -147,6 +161,7 @@ export default function Memory() {
           if (memorySubtypes.length) params.set("memory_subtype", memorySubtypes.join(","));
           if (entity) params.set("entity", entity);
           if (sort) params.set("sort", sort);
+          if (usefulness) params.set("usefulness", usefulness);
           if (since) params.set("since", new Date(since).toISOString());
           if (until) params.set("until", new Date(until + "T23:59:59").toISOString());
           params.set("limit", String(PAGE_SIZE));
@@ -163,7 +178,7 @@ export default function Memory() {
         setLoading(false);
       }
     },
-    [query, categories, memorySubtypes, entity, sort, since, until, results],
+    [query, categories, memorySubtypes, entity, sort, usefulness, since, until, results],
   );
 
   // Initial load and filter changes
@@ -171,7 +186,7 @@ export default function Memory() {
     fetchResults();
     setSearchParams(buildParams(), { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categories, memorySubtypes, entity, sort, since, until, browseRevision, destination]);
+  }, [categories, memorySubtypes, entity, sort, usefulness, since, until, browseRevision, destination]);
 
   const handleSearch = () => {
     setSearchParams(buildParams(), { replace: true });
@@ -209,6 +224,7 @@ export default function Memory() {
   const clearAllFilters = () => {
     clearOntologyFilters();
     setEntity("");
+    setUsefulness("");
     setSince("");
     setUntil("");
   };
@@ -221,6 +237,7 @@ export default function Memory() {
 
   const categoryCount = (value: string) => stats?.byCategory?.[value] ?? 0;
   const subtypeCount = (value: string) => stats?.bySubtype?.[value] ?? 0;
+  const usefulnessLabel = USEFULNESS_FILTER_OPTIONS.find((option) => option.value === usefulness)?.label ?? usefulness;
   const activeFilters: ActiveFilter[] = [
     ...categories.map((category) => ({
       key: `category:${category}`,
@@ -235,6 +252,7 @@ export default function Memory() {
       onClear: () => setMemorySubtypes((current) => current.filter((item) => item !== subtype)),
     })),
     entity ? { key: "entity", label: "Entity", value: entity, onClear: () => setEntity("") } : null,
+    usefulness ? { key: "usefulness", label: "Usefulness", value: usefulnessLabel, onClear: () => setUsefulness("") } : null,
     since ? { key: "since", label: "From", value: since, onClear: () => setSince("") } : null,
     until ? { key: "until", label: "Until", value: until, onClear: () => setUntil("") } : null,
   ].filter((filter): filter is ActiveFilter => filter !== null);
@@ -363,6 +381,11 @@ export default function Memory() {
             ))}
           </select>
         </div>
+        <select value={usefulness} onChange={(e) => setUsefulness(e.target.value)} className={selectCls}>
+          {USEFULNESS_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
         <div className="flex items-center gap-1.5 text-sm text-zinc-400">
           <span>From</span>
           <input
