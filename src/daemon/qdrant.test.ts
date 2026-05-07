@@ -11,8 +11,11 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { resetConfig, saveConfig, CONFIG_DEFAULTS } from "../config.js";
-import {
+const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-daemon-qdrant-"));
+process.env.BIKKY_HOME = TEST_BIKKY_HOME;
+
+const { resetConfig, saveConfig, CONFIG_DEFAULTS, getConfigPath } = await import("../config.js");
+const {
   init,
   isReady,
   setLogger,
@@ -20,15 +23,14 @@ import {
   storeFact,
   dedupCheck,
   reinforceFact,
-} from "./qdrant.js";
+} = await import("./qdrant.js");
 import type { StoreFact } from "./qdrant.js";
 
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 
-let savedConfig: string | null = null;
-const configPath = path.join(os.homedir(), ".bikky", "config.json");
+const configPath = path.join(TEST_BIKKY_HOME, "config.json");
 const realFetch = globalThis.fetch;
 
 // Env vars that override config — must be cleared for null-credential tests
@@ -37,9 +39,7 @@ const savedQdrantEnv: Record<string, string | undefined> = {};
 
 describe("daemon/qdrant", () => {
   before(() => {
-    if (fs.existsSync(configPath)) {
-      savedConfig = fs.readFileSync(configPath, "utf-8");
-    }
+    assert.equal(getConfigPath(), configPath);
     // Save env vars
     for (const key of QDRANT_ENV_KEYS) {
       savedQdrantEnv[key] = process.env[key];
@@ -55,15 +55,14 @@ describe("daemon/qdrant", () => {
         process.env[key] = savedQdrantEnv[key];
       }
     }
-    // Restore config
-    if (savedConfig !== null) {
-      fs.writeFileSync(configPath, savedConfig);
-    }
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
     globalThis.fetch = realFetch;
     resetConfig();
   });
 
   beforeEach(() => {
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
+    fs.mkdirSync(TEST_BIKKY_HOME, { recursive: true });
     // Clear qdrant env vars so saveConfig controls the values
     for (const key of QDRANT_ENV_KEYS) {
       delete process.env[key];
@@ -71,10 +70,6 @@ describe("daemon/qdrant", () => {
     globalThis.fetch = realFetch;
     resetConfig();
   });
-
-  // Restore config after all tests in this file
-  // Note: this runs once since we only save the original once
-
   // ── isReady ──────────────────────────────────────────────────────────────
 
   describe("isReady", () => {
