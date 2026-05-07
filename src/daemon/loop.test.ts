@@ -4,19 +4,22 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { CONFIG_DEFAULTS, resetConfig, saveConfig } from "../config.js";
 import { QDRANT_INDEXES } from "../mcp/taxonomy.js";
-import { startDaemon, stopDaemon } from "./loop.js";
+
+const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-daemon-loop-"));
+process.env.BIKKY_HOME = TEST_BIKKY_HOME;
+
+const { CONFIG_DEFAULTS, resetConfig, saveConfig, getConfigPath } = await import("../config.js");
+const { startDaemon, stopDaemon } = await import("./loop.js");
 
 interface FetchCall {
   input: string | URL | Request;
   init?: RequestInit;
 }
 
-const configPath = path.join(os.homedir(), ".bikky", "config.json");
+const configPath = path.join(TEST_BIKKY_HOME, "config.json");
 const qdrantEnvKeys = ["QDRANT_URL", "QDRANT_API_KEY"] as const;
 
-let savedConfig: string | null = null;
 const savedQdrantEnv: Record<string, string | undefined> = {};
 let savedFetch: typeof fetch;
 let calls: FetchCall[] = [];
@@ -24,9 +27,7 @@ let calls: FetchCall[] = [];
 describe("daemon loop", () => {
   before(() => {
     savedFetch = globalThis.fetch;
-    if (fs.existsSync(configPath)) {
-      savedConfig = fs.readFileSync(configPath, "utf-8");
-    }
+    assert.equal(getConfigPath(), configPath);
     for (const key of qdrantEnvKeys) {
       savedQdrantEnv[key] = process.env[key];
     }
@@ -42,16 +43,14 @@ describe("daemon loop", () => {
         process.env[key] = savedQdrantEnv[key];
       }
     }
-    if (savedConfig !== null) {
-      fs.writeFileSync(configPath, savedConfig);
-    } else if (fs.existsSync(configPath)) {
-      fs.rmSync(configPath);
-    }
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
     resetConfig();
   });
 
   beforeEach(() => {
     stopDaemon();
+    fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
+    fs.mkdirSync(TEST_BIKKY_HOME, { recursive: true });
     calls = [];
     for (const key of qdrantEnvKeys) {
       delete process.env[key];
