@@ -115,7 +115,7 @@ export default function Dashboard() {
         <StatCard
           label="Active Memories"
           value={activeMemoryCount.toLocaleString()}
-          sub={quality.rollupCount > 0 ? "excludes telemetry rollups" : undefined}
+          sub={quality.rollupCount > 0 ? "actual memories only" : undefined}
         />
         <StatCard label="Total Stored" value={total} sub={`${superseded} superseded`} />
         <StatCard label="Categories" value={BROWSABLE_CATEGORY_OPTIONS.length} />
@@ -125,13 +125,13 @@ export default function Dashboard() {
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5 mb-8">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-sm font-medium text-zinc-300">Memory quality signals</h3>
+            <h3 className="text-sm font-medium text-zinc-300">Memory quality</h3>
             <p className="mt-1 text-xs text-zinc-500">
-              Destination-level rollups are summarized here instead of appearing as memory rows.
+              Shows usefulness, review, freshness, and confidence signals for your memories.
             </p>
           </div>
           <Badge
-            label={quality.rollupCount > 0 ? `${quality.rollupCount} rollups` : "Rollups pending"}
+            label={quality.rollupCount > 0 ? "Signals ready" : "No signals yet"}
             color={quality.rollupCount > 0 ? "green" : "zinc"}
           />
         </div>
