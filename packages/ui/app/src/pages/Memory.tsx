@@ -79,6 +79,8 @@ interface SearchResponse {
 
 const PAGE_SIZE = 20;
 
+const formatPercent = (value: number | null): string => value === null ? "—" : `${value}%`;
+
 interface ActiveFilter {
   key: string;
   label: string;
@@ -237,6 +239,7 @@ export default function Memory() {
 
   const categoryCount = (value: string) => stats?.byCategory?.[value] ?? 0;
   const subtypeCount = (value: string) => stats?.bySubtype?.[value] ?? 0;
+  const activeMemoryCount = stats?.quality.rollupCount ? stats.quality.activeFactCount : stats?.active;
   const usefulnessLabel = USEFULNESS_FILTER_OPTIONS.find((option) => option.value === usefulness)?.label ?? usefulness;
   const activeFilters: ActiveFilter[] = [
     ...categories.map((category) => ({
@@ -265,12 +268,21 @@ export default function Memory() {
           <div className="flex items-center gap-4 text-sm text-zinc-400">
             <span className="flex items-center gap-1.5">
               <Database size={14} />
-              {stats.active.toLocaleString()} active
+              {(activeMemoryCount ?? stats.active).toLocaleString()} active
             </span>
             <span>{stats.superseded.toLocaleString()} superseded</span>
           </div>
         )}
       </div>
+
+      {stats?.quality.rollupCount ? (
+        <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-4">
+          <QualitySignal label="Useful score" value={formatPercent(stats.quality.usefulPercent)} />
+          <QualitySignal label="Needs review" value={formatPercent(stats.quality.needsReviewPercent)} />
+          <QualitySignal label="Stale" value={formatPercent(stats.quality.stalePercent)} />
+          <QualitySignal label="Low confidence" value={formatPercent(stats.quality.lowConfidencePercent)} />
+        </div>
+      ) : null}
 
       {/* Search bar */}
       <div className="flex gap-2 mb-4">
@@ -486,6 +498,15 @@ export default function Memory() {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+function QualitySignal({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-zinc-800 bg-zinc-900/60 px-3 py-2">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">{label}</p>
+      <p className="mt-0.5 text-sm font-semibold text-zinc-200">{value}</p>
     </div>
   );
 }

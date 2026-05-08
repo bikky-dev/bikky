@@ -84,6 +84,23 @@ type FormattedPoint = Record<string, unknown> & UsefulnessMetrics & {
   created_at?: string;
 };
 
+interface QualityStats {
+  rollupCount: number;
+  activeFactCount: number;
+  recallCount: number;
+  usefulCount: number;
+  misleadingCount: number;
+  wrongCount: number;
+  staleCount: number;
+  lowConfidenceCount: number;
+  usefulPercent: number | null;
+  stalePercent: number | null;
+  lowConfidencePercent: number | null;
+  needsReviewCount: number;
+  needsReviewPercent: number | null;
+  latestGeneratedAt: string | null;
+}
+
 function formatPoint(p: QdrantPoint, destination?: string): FormattedPoint {
   const out: Record<string, unknown> = { id: p.id, score: p.score ?? null, ...p.payload, ...usefulnessMetrics(p.payload) };
   if (destination) out._destination = destination;
@@ -154,6 +171,95 @@ const GRAPH_MAX_FACT_ENTITIES_FOR_CO_OCCURRENCE = 20;
 const KEYWORD_SEARCH_PAGE_SIZE = 100;
 const KEYWORD_SEARCH_SCAN_LIMIT = 5_000;
 const USEFULNESS_BROWSE_SCAN_LIMIT = 5_000;
+
+const numberPayloadValue = (value: unknown): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : 0;
+
+const percent = (numerator: number, denominator: number): number | null =>
+  denominator > 0 ? Math.round((numerator / denominator) * 100) : null;
+
+async function qualityStatsForDestination(qdrant: QdrantClient): Promise<QualityStats> {
+  const filter = buildFilter({
+    kind: "telemetry",
+    memorySubtype: "aggregate_rollup",
+    excludeEntityType: true,
+  });
+  filter.must.push({ key: "scope_type", match: { value: "destination" } });
+
+  const { points } = await qdrant.scroll(filter, 100);
+  const totals = {
+    activeFactCount: 0,
+    recallCount: 0,
+    usefulCount: 0,
+    misleadingCount: 0,
+    wrongCount: 0,
+    staleCount: 0,
+    lowConfidenceCount: 0,
+  };
+  let latestGeneratedAt: string | null = null;
+
+  for (const point of points) {
+    const payload = point.payload;
+    totals.activeFactCount += numberPayloadValue(payload.active_fact_count);
+    totals.recallCount += numberPayloadValue(payload.recall_count);
+    totals.usefulCount += numberPayloadValue(payload.useful_count);
+    totals.misleadingCount += numberPayloadValue(payload.misleading_count);
+    totals.wrongCount += numberPayloadValue(payload.wrong_count);
+    totals.staleCount += numberPayloadValue(payload.stale_count);
+    totals.lowConfidenceCount += numberPayloadValue(payload.low_confidence_count);
+    const generatedAt = typeof payload.rollup_generated_at === "string" ? payload.rollup_generated_at : null;
+    if (generatedAt && (!latestGeneratedAt || generatedAt > latestGeneratedAt)) latestGeneratedAt = generatedAt;
+  }
+
+  const ratedCount = totals.usefulCount + totals.misleadingCount + totals.wrongCount;
+  const needsReviewCount = totals.misleadingCount + totals.wrongCount;
+  return {
+    rollupCount: points.length,
+    ...totals,
+    needsReviewCount,
+    usefulPercent: percent(totals.usefulCount, ratedCount),
+    stalePercent: percent(totals.staleCount, totals.activeFactCount),
+    lowConfidencePercent: percent(totals.lowConfidenceCount, totals.activeFactCount),
+    needsReviewPercent: percent(needsReviewCount, ratedCount),
+    latestGeneratedAt,
+  };
+}
+
+const sumQualityStats = (items: QualityStats[]): QualityStats => {
+  const totals = items.reduce((acc, item) => ({
+    rollupCount: acc.rollupCount + item.rollupCount,
+    activeFactCount: acc.activeFactCount + item.activeFactCount,
+    recallCount: acc.recallCount + item.recallCount,
+    usefulCount: acc.usefulCount + item.usefulCount,
+    misleadingCount: acc.misleadingCount + item.misleadingCount,
+    wrongCount: acc.wrongCount + item.wrongCount,
+    staleCount: acc.staleCount + item.staleCount,
+    lowConfidenceCount: acc.lowConfidenceCount + item.lowConfidenceCount,
+    latestGeneratedAt: item.latestGeneratedAt && (!acc.latestGeneratedAt || item.latestGeneratedAt > acc.latestGeneratedAt)
+      ? item.latestGeneratedAt
+      : acc.latestGeneratedAt,
+  }), {
+    rollupCount: 0,
+    activeFactCount: 0,
+    recallCount: 0,
+    usefulCount: 0,
+    misleadingCount: 0,
+    wrongCount: 0,
+    staleCount: 0,
+    lowConfidenceCount: 0,
+    latestGeneratedAt: null as string | null,
+  });
+  const ratedCount = totals.usefulCount + totals.misleadingCount + totals.wrongCount;
+  const needsReviewCount = totals.misleadingCount + totals.wrongCount;
+  return {
+    ...totals,
+    needsReviewCount,
+    usefulPercent: percent(totals.usefulCount, ratedCount),
+    stalePercent: percent(totals.staleCount, totals.activeFactCount),
+    lowConfidencePercent: percent(totals.lowConfidenceCount, totals.activeFactCount),
+    needsReviewPercent: percent(needsReviewCount, ratedCount),
+  };
+};
 
 const keywordValueText = (value: unknown): string[] => {
   if (value === undefined || value === null || value === "") return [];
@@ -240,6 +346,7 @@ memoryRoutes.get("/search", async (c) => {
     source: c.req.query("source"),
     actorId: c.req.query("actor_id"),
     excludeEntityType: true,
+    excludeTelemetry: true,
   });
 
   const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 100);
@@ -294,6 +401,7 @@ memoryRoutes.get("/browse", async (c) => {
     since: c.req.query("since"),
     until: c.req.query("until"),
     excludeEntityType: true,
+    excludeTelemetry: true,
   });
 
   const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 100);
@@ -943,14 +1051,15 @@ memoryRoutes.get("/stats", async (c) => {
     const safeCount = async (filter?: QdrantFilter) => {
       try { return await qdrant.count(filter); } catch { return 0; }
     };
-    const [info, catCounts, kindCounts, subtypeCounts, allCount] = await Promise.all([
+    const [info, catCounts, kindCounts, subtypeCounts, allCount, quality] = await Promise.all([
       qdrant.collectionInfo(),
       Promise.all(CATEGORY_VALUES.map(async (cat) => [cat, await safeCount(buildFilter({ ...statsFilter, category: cat }))] as const)),
       Promise.all(KIND_VALUES.map(async (k) => [k, await safeCount(buildFilter({ source, kind: k }))] as const)),
       Promise.all(MEMORY_SUBTYPE_VALUES.map(async (subtype) => [subtype, await safeCount(buildFilter({ ...statsFilter, memorySubtype: subtype }))] as const)),
       safeCount(buildFilter(statsFilter)),
+      qualityStatsForDestination(qdrant),
     ]);
-    return { info, catCounts, kindCounts, subtypeCounts, allCount };
+    return { info, catCounts, kindCounts, subtypeCounts, allCount, quality };
   }));
 
   // Sum across destinations
@@ -968,6 +1077,7 @@ memoryRoutes.get("/stats", async (c) => {
     byCategory: sumPairs(perDest.map((r) => r.catCounts)),
     byKind: sumPairs(perDest.map((r) => r.kindCounts)),
     bySubtype: sumPairs(perDest.map((r) => r.subtypeCounts)),
+    quality: sumQualityStats(perDest.map((r) => r.quality)),
   };
   cacheSet(cacheKey, payload, STATS_TTL_MS);
   return c.json(payload);

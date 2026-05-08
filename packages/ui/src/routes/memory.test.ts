@@ -60,7 +60,14 @@ function installMock(opts: {
     const call: QdrantCall = { method, url, host: parsed.host, path: parsed.pathname, body };
     calls.push(call);
 
-    const result = opts.qdrantHandler ? opts.qdrantHandler(call) : { result: [] };
+    let result = opts.qdrantHandler ? opts.qdrantHandler(call) : { result: [] };
+    if (call.path.endsWith("/points/scroll") && typeof result === "object" && result !== null) {
+      const record = result as Record<string, any>;
+      const payload = typeof record.result === "object" && record.result !== null ? record.result : {};
+      if (!Array.isArray(payload.points)) {
+        result = { ...record, result: { ...payload, points: [], next_page_offset: null } };
+      }
+    }
     return new Response(JSON.stringify(result), { status: 200 });
   }) as typeof fetch;
 
@@ -109,6 +116,37 @@ const sampleEntityType = (name: string, type: string, overrides: Record<string, 
     entity_type_confidence: 0.82,
     entity_type_reasoning: `${name} is classified as ${type}`,
     classified_at: "2024-01-02T00:00:00Z",
+    ...overrides,
+  },
+});
+
+const sampleQualityRollup = (overrides: Record<string, unknown> = {}) => ({
+  id: "rollup-destination-test",
+  payload: {
+    content: "Memory quality rollup for destination:test",
+    category: "system",
+    domain: "software_engineering",
+    kind: "telemetry",
+    memory_subtype: "aggregate_rollup",
+    scope_type: "destination",
+    scope_value: "test",
+    active_fact_count: 20,
+    recall_count: 15,
+    useful_count: 8,
+    misleading_count: 1,
+    wrong_count: 1,
+    stale_count: 4,
+    low_confidence_count: 2,
+    rollup_generated_at: "2024-02-01T00:00:00Z",
+    entities: [],
+    confidence: 1,
+    superseded_by: null,
+    superseded_at: null,
+    created_at: "2024-02-01T00:00:00Z",
+    updated_at: "2024-02-01T00:00:00Z",
+    content_hash: "rollup-h",
+    reinforcement_count: 1,
+    last_reinforced_at: "2024-02-01T00:00:00Z",
     ...overrides,
   },
 });
@@ -265,6 +303,18 @@ describe("ui/routes/memory", () => {
       assert.equal(search!.body.limit, 100);
     });
 
+    it("excludes telemetry from default search filters", async () => {
+      const log = installMock({ qdrantHandler: () => ({ result: [] }) });
+      const app = buildApp();
+
+      await app.fetch(new Request("http://localhost/api/memory/search?q=quality"));
+      const search = log.calls.find((c) => c.path.endsWith("/points/search"));
+      assert.ok(search);
+      assert.ok(search!.body.filter.must_not.some((cond: any) =>
+        cond.key === "kind" && cond.match?.value === "telemetry",
+      ));
+    });
+
     it("fans out destination=all searches and tags merged results", async () => {
       writeMultiDestinationConfig();
       const log = installMock({
@@ -327,6 +377,9 @@ describe("ui/routes/memory", () => {
 
       const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
       assert.deepEqual(scroll!.body.order_by, { key: "created_at", direction: "desc" });
+      assert.ok(scroll!.body.filter.must_not.some((cond: any) =>
+        cond.key === "kind" && cond.match?.value === "telemetry",
+      ));
     });
 
     it("computes usefulness fields for browse results", async () => {
@@ -930,6 +983,9 @@ describe("ui/routes/memory", () => {
             if (must.length === 0) return { result: { count: 90 } };
             return { result: { count: 10 } };
           }
+          if (c.path.endsWith("/points/scroll")) {
+            return { result: { points: [sampleQualityRollup()], next_page_offset: null } };
+          }
           return { result: {} };
         },
       });
@@ -944,6 +1000,14 @@ describe("ui/routes/memory", () => {
         byCategory: Record<string, number>;
         byKind: Record<string, number>;
         bySubtype: Record<string, number>;
+        quality: {
+          rollupCount: number;
+          activeFactCount: number;
+          usefulPercent: number | null;
+          needsReviewPercent: number | null;
+          stalePercent: number | null;
+          lowConfidencePercent: number | null;
+        };
       };
       assert.equal(body.total, 100);
       assert.equal(body.active, 90);
@@ -951,6 +1015,12 @@ describe("ui/routes/memory", () => {
       assert.equal(body.byCategory.engineering, 10);
       assert.equal(body.byKind.fact, 10);
       assert.equal(body.bySubtype.codebase_map, 10);
+      assert.equal(body.quality.rollupCount, 1);
+      assert.equal(body.quality.activeFactCount, 20);
+      assert.equal(body.quality.usefulPercent, 80);
+      assert.equal(body.quality.needsReviewPercent, 20);
+      assert.equal(body.quality.stalePercent, 20);
+      assert.equal(body.quality.lowConfidencePercent, 10);
     });
 
     it("scopes category and subtype counts to source and kind filters", async () => {

@@ -9,6 +9,22 @@ const stats: MemoryStats = {
   byCategory: { engineering: 2 },
   byKind: { fact: 2 },
   bySubtype: {},
+  quality: {
+    rollupCount: 1,
+    activeFactCount: 2,
+    recallCount: 4,
+    usefulCount: 3,
+    misleadingCount: 1,
+    wrongCount: 0,
+    staleCount: 0,
+    lowConfidenceCount: 0,
+    usefulPercent: 75,
+    stalePercent: 0,
+    lowConfidencePercent: 0,
+    needsReviewCount: 1,
+    needsReviewPercent: 25,
+    latestGeneratedAt: "2024-01-01T00:00:00Z",
+  },
 };
 
 describe("statsCache", () => {
@@ -71,4 +87,3 @@ describe("statsCache", () => {
     ]);
   });
 });
-

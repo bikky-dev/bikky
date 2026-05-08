@@ -19,6 +19,8 @@ function StatCard({ label, value, sub }: { label: string; value: string | number
   );
 }
 
+const formatPercent = (value: number | null): string => value === null ? "—" : `${value}%`;
+
 function CategoryBar({ category, count, max }: { category: string; count: number; max: number }) {
   const pct = max > 0 ? (count / max) * 100 : 0;
   const color = CATEGORY_COLORS[category] ?? "zinc";
@@ -95,12 +97,14 @@ export default function Dashboard() {
     );
   }
 
-  const { active, superseded, total, byCategory, byKind, bySubtype } = stats.data;
+  const { active, superseded, total, byCategory, byKind, bySubtype, quality } = stats.data;
   const categoryCounts = BROWSABLE_CATEGORY_OPTIONS.map((category) => [category.value, byCategory[category.value] ?? 0] as const);
   const browsableSubtypes = BROWSABLE_CATEGORY_OPTIONS.flatMap((category) => BROWSABLE_SUBTYPES_BY_CATEGORY[category.value] ?? []);
   const maxCat = Math.max(...categoryCounts.map(([, count]) => count), 1);
   const subtypeTotal = browsableSubtypes.reduce((sum, subtype) => sum + (bySubtype?.[subtype.value] ?? 0), 0);
   const activeSubtypeCount = browsableSubtypes.filter((subtype) => (bySubtype?.[subtype.value] ?? 0) > 0).length;
+  const activeMemoryCount = quality.rollupCount > 0 ? quality.activeFactCount : active;
+  const ratedSignalCount = quality.usefulCount + quality.misleadingCount + quality.wrongCount;
 
   return (
     <div>
@@ -108,10 +112,51 @@ export default function Dashboard() {
 
       {/* Stats row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Active Facts" value={active} />
+        <StatCard
+          label="Active Memories"
+          value={activeMemoryCount.toLocaleString()}
+          sub={quality.rollupCount > 0 ? "excludes telemetry rollups" : undefined}
+        />
         <StatCard label="Total Stored" value={total} sub={`${superseded} superseded`} />
         <StatCard label="Categories" value={BROWSABLE_CATEGORY_OPTIONS.length} />
         <StatCard label="Subtypes" value={activeSubtypeCount} sub={`${subtypeTotal.toLocaleString()} typed memories`} />
+      </div>
+
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5 mb-8">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-medium text-zinc-300">Memory quality signals</h3>
+            <p className="mt-1 text-xs text-zinc-500">
+              Destination-level rollups are summarized here instead of appearing as memory rows.
+            </p>
+          </div>
+          <Badge
+            label={quality.rollupCount > 0 ? `${quality.rollupCount} rollups` : "Rollups pending"}
+            color={quality.rollupCount > 0 ? "green" : "zinc"}
+          />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard
+            label="Useful score"
+            value={formatPercent(quality.usefulPercent)}
+            sub={`${quality.usefulCount.toLocaleString()} useful / ${ratedSignalCount.toLocaleString()} rated`}
+          />
+          <StatCard
+            label="Needs review"
+            value={formatPercent(quality.needsReviewPercent)}
+            sub={`${quality.needsReviewCount.toLocaleString()} misleading or wrong`}
+          />
+          <StatCard
+            label="Stale"
+            value={formatPercent(quality.stalePercent)}
+            sub={`${quality.staleCount.toLocaleString()} of ${quality.activeFactCount.toLocaleString()} active`}
+          />
+          <StatCard
+            label="Low confidence"
+            value={formatPercent(quality.lowConfidencePercent)}
+            sub={`${quality.lowConfidenceCount.toLocaleString()} of ${quality.activeFactCount.toLocaleString()} active`}
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">

@@ -8,6 +8,22 @@ export interface MemoryStats {
   byCategory: Record<string, number>;
   byKind: Record<string, number>;
   bySubtype: Record<string, number>;
+  quality: {
+    rollupCount: number;
+    activeFactCount: number;
+    recallCount: number;
+    usefulCount: number;
+    misleadingCount: number;
+    wrongCount: number;
+    staleCount: number;
+    lowConfidenceCount: number;
+    usefulPercent: number | null;
+    stalePercent: number | null;
+    lowConfidencePercent: number | null;
+    needsReviewCount: number;
+    needsReviewPercent: number | null;
+    latestGeneratedAt: string | null;
+  };
 }
 
 export interface MemoryStatsFilters {

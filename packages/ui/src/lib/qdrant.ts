@@ -52,6 +52,14 @@ export interface FactPayload {
   tasks_completed?: string[];
   decisions_made?: string[];
   distilled_from?: string[];
+  rollup_type?: string;
+  rollup_generated_at?: string;
+  scope_type?: string;
+  scope_value?: string;
+  active_fact_count?: number;
+  recall_count?: number;
+  stale_count?: number;
+  low_confidence_count?: number;
 }
 
 export interface QdrantPoint {
@@ -124,6 +132,16 @@ const MEMORY_SUBTYPE_FILTER_ALIASES: Record<string, FilterCondition[]> = {
     { key: "kind", match: { value: "distilled" } },
   ],
 };
+
+const TELEMETRY_MEMORY_SUBTYPES = new Set([
+  "recall_event",
+  "feedback_event",
+  "outcome_event",
+  "aggregate_rollup",
+]);
+
+const includesTelemetrySubtype = (subtypes: readonly string[] | undefined): boolean =>
+  Boolean(subtypes?.some((subtype) => TELEMETRY_MEMORY_SUBTYPES.has(subtype)));
 
 const categoryFilterConditions = (categories: string[]): FilterCondition[] => {
   return categories.map((category) => ({ key: "category", match: categoryFilterValue(category) }));
@@ -233,6 +251,7 @@ export function buildFilter(opts: {
   until?: string;
   excludeSuperseded?: boolean;
   excludeEntityType?: boolean;
+  excludeTelemetry?: boolean;
 }): QdrantFilter {
   const must: FilterCondition[] = [];
   const should: FilterCondition[] = [];
@@ -279,6 +298,14 @@ export function buildFilter(opts: {
   // Phase 5a entity_type sidecar points are not user-facing facts; opt-in to exclude.
   if (opts.excludeEntityType === true && opts.kind !== "entity_type") {
     must_not.push({ key: "kind", match: { value: "entity_type" } });
+  }
+  if (
+    opts.excludeTelemetry === true &&
+    opts.kind !== "telemetry" &&
+    !includesTelemetrySubtype(opts.memorySubtype ? [opts.memorySubtype] : undefined) &&
+    !includesTelemetrySubtype(opts.memorySubtypes)
+  ) {
+    must_not.push({ key: "kind", match: { value: "telemetry" } });
   }
   const filter: QdrantFilter = { must };
   if (should.length > 0) filter.should = should;
