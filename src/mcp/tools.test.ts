@@ -11,6 +11,8 @@ process.env.BIKKY_HOME = TEST_BIKKY_HOME;
 const { registerTools } = await import("./tools.js");
 const {
   CONFIG_DEFAULTS,
+  getEffectiveDestinations,
+  loadConfig,
   resetConfig,
   saveConfig,
 } = await import("../config.js");
@@ -20,6 +22,7 @@ const {
   setReady,
   setSetupError,
 } = await import("./api.js");
+const { clearSessionDestinationOverride, setSessionDestinationOverride } = await import("../session-destination-override.js");
 
 const realFetch = globalThis.fetch;
 
@@ -184,6 +187,7 @@ describe("mcp/tools", () => {
 
   beforeEach(() => {
     configureDestinations();
+    clearSessionDestinationOverride();
     setSetupError(null);
     setReady(true);
     globalThis.fetch = realFetch;
@@ -199,6 +203,9 @@ describe("mcp/tools", () => {
       "memory_recall",
       "memory_entity",
       "memory_relations",
+      "memory_set_session_destination",
+      "memory_get_session_destination",
+      "memory_clear_session_destination",
     ]) {
       assert.equal(handlers.has(name), true, `expected ${name} to be registered`);
     }
@@ -231,6 +238,7 @@ describe("mcp/tools", () => {
     const result = await handlers.get("memory_search_scopes")!();
     const body = parseToolJson(result) as {
       default_search_scope: string;
+      session_destination_override: Record<string, unknown>;
       scopes: Array<{ name: string; destinations: "routed" | "all" | string[] }>;
     };
 
@@ -239,6 +247,37 @@ describe("mcp/tools", () => {
     assert.ok(body.scopes.some((scope) => scope.name === "all" && scope.destinations === "all"));
     assert.ok(body.scopes.some((scope) => scope.name === "perso" && destinationList(scope.destinations) === "perso"));
     assert.ok(body.scopes.some((scope) => scope.name === "personal-only" && destinationList(scope.destinations) === "perso"));
+    assert.equal(body.session_destination_override.active, false);
+  });
+
+  it("sets, reports, and clears a session destination override", async () => {
+    const handlers = collectTools();
+
+    const setResult = await handlers.get("memory_set_session_destination")!({ destination: "work" });
+    const setBody = parseToolJson(setResult);
+    assert.equal(setBody.status, "session_destination_set");
+    assert.equal(((setBody.session_destination_override as Record<string, unknown>).destination), "work");
+
+    const getResult = await handlers.get("memory_get_session_destination")!();
+    const getBody = parseToolJson(getResult);
+    assert.equal(getBody.status, "session_destination_active");
+    assert.equal(((getBody.session_destination_override as Record<string, unknown>).active), true);
+
+    const clearResult = await handlers.get("memory_clear_session_destination")!();
+    const clearBody = parseToolJson(clearResult);
+    assert.equal(clearBody.status, "session_destination_cleared");
+    assert.equal(((clearBody.session_destination_override as Record<string, unknown>).active), false);
+  });
+
+  it("rejects unknown session destination overrides", async () => {
+    const handlers = collectTools();
+
+    const result = await handlers.get("memory_set_session_destination")!({ destination: "ghost" });
+    const body = parseToolJson(result);
+
+    assert.equal(result.isError, true);
+    assert.equal(body.status, "destination_not_found");
+    assert.deepEqual(body.available_destinations, ["perso", "work"]);
   });
 
   it("rejects ambiguous recall destination and search_scope before embedding", async () => {
@@ -302,6 +341,41 @@ describe("mcp/tools", () => {
     assert.match(String(points[0]!.payload.content), /\[REDACTED:secret\]/);
     assert.deepEqual(points[0]!.payload.entities, ["bikky"]);
     assert.equal((points[0]!.payload.redaction as Record<string, unknown>).redacted, true);
+  });
+
+  it("uses the session destination override for MCP writes unless a call has an explicit destination", async () => {
+    const calls = installStorageMock();
+    setSessionDestinationOverride("work", getEffectiveDestinations(loadConfig()));
+    const handlers = collectTools();
+
+    const routedResult = await handlers.get("memory_store")!({
+      content: "Bikky would normally route to perso.",
+      category: "engineering",
+      entities: ["bikky"],
+      domain: "software_engineering",
+      kind: "fact",
+      source: "agent",
+      confidence: 0.9,
+    });
+    const routedBody = parseToolJson(routedResult);
+    assert.equal(routedBody.destination, "work");
+
+    const explicitResult = await handlers.get("memory_store")!({
+      content: "Bikky explicit destination still wins.",
+      category: "engineering",
+      entities: ["bikky"],
+      domain: "software_engineering",
+      kind: "fact",
+      source: "agent",
+      confidence: 0.9,
+      destination: "perso",
+    });
+    const explicitBody = parseToolJson(explicitResult);
+    assert.equal(explicitBody.destination, "perso");
+
+    const upserts = calls.filter((call) => call.method === "PUT" && call.url.endsWith("/points"));
+    assert.equal(upserts[0]?.destination, "work");
+    assert.equal(upserts[1]?.destination, "perso");
   });
 
   it("reinforces exact memory_store matches without embedding", async () => {

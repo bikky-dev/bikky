@@ -16,6 +16,7 @@ import type { InitEmbeddingInput } from "../llm/index.js";
 import { type QdrantLogLevel } from "../lib/qdrant-client.js";
 import { QdrantPool } from "../lib/qdrant-pool.js";
 import { buildResolver, type RoutingInput } from "../routing.js";
+import { applySessionDestinationOverride } from "../session-destination-override.js";
 import {
   DEFAULT_DOMAIN,
   QDRANT_INDEXES,
@@ -229,7 +230,7 @@ const fallbackDestination = (): Destination => {
 
 const resolveDestination = (input: RoutingInput = {}): Destination => {
   if (!resolver) return fallbackDestination();
-  return resolver(input);
+  return resolver(applySessionDestinationOverride(input, destinations));
 };
 
 const destinationFromRef = (ref?: DestinationRef): Destination => {
