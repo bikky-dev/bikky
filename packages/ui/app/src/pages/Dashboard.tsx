@@ -130,10 +130,6 @@ export default function Dashboard() {
               Shows usefulness, review, freshness, and confidence signals for your memories.
             </p>
           </div>
-          <Badge
-            label={quality.rollupCount > 0 ? "Signals ready" : "No signals yet"}
-            color={quality.rollupCount > 0 ? "green" : "zinc"}
-          />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
