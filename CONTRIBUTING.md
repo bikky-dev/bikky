@@ -40,6 +40,9 @@ We use the Node.js built-in test runner ([`node:test`](https://nodejs.org/api/te
 # Core (CLI, daemon, MCP server) — 300+ tests
 npm test
 
+# Opt-in integration suites (*.itest.ts)
+npm run test:integration
+
 # UI server + libraries — 50+ tests
 cd packages/ui && npm test
 ```
@@ -85,16 +88,18 @@ Good references for new tests:
 | Mocking `globalThis.fetch`       | `src/mcp/api.test.ts`, `packages/ui/src/lib/qdrant.test.ts` |
 | Hono route via `app.fetch`       | `packages/ui/src/routes/memory.test.ts` |
 
-### Integration tests (opt-in, real Qdrant)
+### Integration tests (opt-in)
 
-The default `npm test` mocks every external call. We also ship one **opt-in** end-to-end smoke test that talks to a real Qdrant instance (Cloud, local Docker, or self-hosted) and a real embedding provider — it's the only thing that catches filter-shape rejections, payload-index mismatches, vector-dimension drift, and whether the dedup similarity thresholds (`THRESHOLD_DUPLICATE`, `THRESHOLD_RELATED`) actually correspond to near-duplicates against your embedding model.
+The default `npm test` mocks every external call. Opt-in integration suites live in `*.itest.ts` and run through `npm run test:integration`; they may exercise multiple modules together with mocked network calls, or talk to real backing services when the test explicitly documents that requirement.
+
+Real Qdrant + embedding integration smoke tests should use a throwaway collection and require `BIKKY_INTEGRATION=1`:
 
 ```bash
 # Uses your existing ~/.bikky/config.json + QDRANT_URL (and QDRANT_API_KEY if your Qdrant requires it).
 BIKKY_INTEGRATION=1 npm run test:integration
 ```
 
-What it does:
+What a real-Qdrant smoke should do:
 
 1. Creates a throwaway collection named `bikky-it-<short-uuid>` with the real payload indexes.
 2. Exercises `memory_store` (insert, exact-dup, near-duplicate paraphrase), `memory_recall`, `memory_entity`, and `memory_forget` against live Qdrant + your real embeddings.

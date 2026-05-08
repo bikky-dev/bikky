@@ -359,6 +359,14 @@ Matching details:
 - Read/search tools also accept `search_scope`; call `memory_search_scopes` or `get_setup_status` to see available scopes and descriptions.
 - All destinations share one embedding provider, so every destination collection must use the same vector dimensions.
 
+Temporary session write override:
+
+- Use the MCP tool `memory_set_session_destination({ "destination": "client-a" })` when new memories from the current local MCP/daemon session should be forced into one configured destination.
+- The override is stored in `~/.bikky/state/session-destination-override.json` (or `BIKKY_HOME/state/session-destination-override.json`) and persists until `memory_clear_session_destination()` is called.
+- Precedence is explicit per-call `destination`, then the session write override, then normal destination routing rules, then default/first fallback.
+- `memory_get_session_destination()`, `memory_search_scopes`, and `get_setup_status` report the current override. If the configured destination is later removed or renamed, Bikky reports the stale override as invalid and ignores it for routing until it is reset or cleared.
+- The override affects new writes and daemon-captured memories. Read tools still use `search_scope` / explicit read destinations so recall can remain narrow or fan out across stores as needed.
+
 Migrating from `workspace_id` pre-v0.4:
 
 - Existing top-level `qdrant_url`, `qdrant_api_key`, and `collection` configs still work as a single synthesized destination.

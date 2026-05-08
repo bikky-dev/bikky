@@ -61,7 +61,7 @@ import {
 } from "./api.js";
 import { DestinationNotFoundError, type RoutingInput } from "../routing.js";
 import type { Destination } from "../config.js";
-import { saveConfig, loadConfig, EXTRACTION_HEALTH_PATH } from "../config.js";
+import { saveConfig, loadConfig, getEffectiveDestinations, EXTRACTION_HEALTH_PATH } from "../config.js";
 import {
   availableSearchScopes,
   resolveSearchScope,
@@ -77,6 +77,12 @@ import {
   combineRedactions,
   redactStorageText,
 } from "../privacy/redaction.js";
+import {
+  clearSessionDestinationOverride,
+  getSessionDestinationOverrideStatus,
+  setSessionDestinationOverride,
+  type SessionDestinationOverrideStatus,
+} from "../session-destination-override.js";
 
 // ---------------------------------------------------------------------------
 // Runtime state
@@ -157,6 +163,36 @@ function resolveDestOrError(input: RoutingInput): { dest: Destination; error?: n
       },
     };
   }
+}
+
+function destinationsForOverrideStatus(): Destination[] {
+  const activeDestinations = listDestinations();
+  if (activeDestinations.length > 0) return activeDestinations;
+  return getEffectiveDestinations(loadConfig());
+}
+
+function sessionDestinationStatusName(status: SessionDestinationOverrideStatus): string {
+  if (status.active) return "session_destination_active";
+  if (status.exists && !status.valid) return "session_destination_invalid";
+  return "session_destination_unset";
+}
+
+function destinationOverrideErrorResult(e: unknown): McpToolResult {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (e instanceof DestinationNotFoundError) {
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        status: "destination_not_found",
+        message: msg,
+        available_destinations: e.available,
+      }, null, 2) }],
+      isError: true,
+    };
+  }
+  return {
+    content: [{ type: "text", text: JSON.stringify({ status: "error", message: msg }, null, 2) }],
+    isError: true,
+  };
 }
 
 type ScopedPoint = QdrantPoint & {
@@ -521,6 +557,7 @@ export function registerTools(mcp: McpServer): void {
       status["destinations"] = destStatus;
       status["default_search_scope"] = cfg.default_search_scope;
       status["search_scopes"] = availableSearchScopes(cfg, dests);
+      status["session_destination_override"] = getSessionDestinationOverrideStatus(destinationsForOverrideStatus());
       status["search_scope_hint"] =
         "Read/search tools accept search_scope: 'routed', 'all', a destination name, a configured scope name, a comma-separated destination list, or an array of destination names. Use destination only when you want an exact single-destination override.";
 
@@ -610,11 +647,79 @@ export function registerTools(mcp: McpServer): void {
       return {
         content: [{ type: "text", text: JSON.stringify({
           default_search_scope: cfg.default_search_scope,
+          session_destination_override: getSessionDestinationOverrideStatus(destinationsForOverrideStatus()),
           scopes: availableSearchScopes(cfg, dests),
           usage: {
             search_scope: "Pass one scope name, 'routed', 'all', a destination name, a comma-separated destination list, or an array of destination names.",
             destination: "Use this older parameter only for an exact single-destination override. Do not combine it with search_scope.",
           },
+        }, null, 2) }],
+      };
+    },
+  );
+
+  // ── Session destination override ─────────────────────────────────────────
+
+  mcp.tool(
+    "memory_set_session_destination",
+    [
+      "Persist a session-level write destination override.",
+      "Use this when all new memories from this local MCP/daemon session should go to one configured Qdrant destination until explicitly cleared.",
+      "Explicit per-call destination values still take precedence.",
+    ].join(" "),
+    {
+      destination: z.string().min(1).describe("Configured Qdrant destination name to use for new memory writes until cleared."),
+    },
+    async ({ destination }): Promise<McpToolResult> => {
+      try {
+        const status = setSessionDestinationOverride(destination, destinationsForOverrideStatus());
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            status: "session_destination_set",
+            session_destination_override: status,
+          }, null, 2) }],
+        };
+      } catch (e) {
+        return destinationOverrideErrorResult(e);
+      }
+    },
+  );
+
+  mcp.tool(
+    "memory_get_session_destination",
+    [
+      "Read the current session-level write destination override.",
+      "Use this to confirm whether new MCP writes and daemon captures are being forced to a configured Qdrant destination.",
+      "Read-only.",
+    ].join(" "),
+    {},
+    async (): Promise<McpToolResult> => {
+      const status = getSessionDestinationOverrideStatus(destinationsForOverrideStatus());
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          status: sessionDestinationStatusName(status),
+          session_destination_override: status,
+        }, null, 2) }],
+      };
+    },
+  );
+
+  mcp.tool(
+    "memory_clear_session_destination",
+    [
+      "Clear the persisted session-level write destination override.",
+      "After this, new memory writes return to explicit destination, routing rules, default destination, then first destination fallback.",
+    ].join(" "),
+    {},
+    async (): Promise<McpToolResult> => {
+      const cleared = clearSessionDestinationOverride();
+      const status = getSessionDestinationOverrideStatus(destinationsForOverrideStatus());
+      return {
+        content: [{ type: "text", text: JSON.stringify({
+          status: "session_destination_cleared",
+          cleared: cleared.cleared,
+          path: cleared.path,
+          session_destination_override: status,
         }, null, 2) }],
       };
     },

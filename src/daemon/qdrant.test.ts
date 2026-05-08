@@ -14,7 +14,8 @@ import os from "node:os";
 const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-daemon-qdrant-"));
 process.env.BIKKY_HOME = TEST_BIKKY_HOME;
 
-const { resetConfig, saveConfig, CONFIG_DEFAULTS, getConfigPath } = await import("../config.js");
+const { resetConfig, saveConfig, CONFIG_DEFAULTS, getConfigPath, getEffectiveDestinations, loadConfig } = await import("../config.js");
+const { clearSessionDestinationOverride, setSessionDestinationOverride } = await import("../session-destination-override.js");
 const {
   init,
   isReady,
@@ -57,6 +58,7 @@ describe("daemon/qdrant", () => {
     }
     fs.rmSync(TEST_BIKKY_HOME, { recursive: true, force: true });
     globalThis.fetch = realFetch;
+    clearSessionDestinationOverride();
     resetConfig();
   });
 
@@ -395,6 +397,78 @@ describe("daemon/qdrant", () => {
       assert.equal(upsertUrls.length, 2);
       assert.ok(upsertUrls[0]?.startsWith("https://perso-qdrant.example.com:6333/collections/perso-memory/points"));
       assert.ok(upsertUrls[1]?.startsWith("https://work-qdrant.example.com:6333/collections/work-memory/points"));
+    });
+
+    it("uses the persisted session override before destination match routing", async () => {
+      const upsertUrls: string[] = [];
+      const scrollUrls: string[] = [];
+
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/v1/embeddings")) {
+          return new Response(JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }), { status: 200 });
+        }
+        if (url.includes("/points/scroll")) {
+          scrollUrls.push(url);
+          return new Response(JSON.stringify({ result: { points: [] } }), { status: 200 });
+        }
+        if (init?.method === "PUT" && url.includes("/collections/")) {
+          upsertUrls.push(url);
+        }
+        return new Response(JSON.stringify({ result: {} }), { status: 200 });
+      }) as typeof fetch;
+
+      saveConfig({
+        ...CONFIG_DEFAULTS,
+        qdrant_url: null,
+        qdrant_api_key: null,
+        embedding: {
+          ...CONFIG_DEFAULTS.embedding,
+          provider: "ollama",
+          model: "test-model",
+          base_url: "http://embed.test:11434",
+          dimensions: 3,
+        },
+        destinations: [
+          {
+            name: "perso",
+            qdrant_url: "https://perso-qdrant.example.com:6333",
+            qdrant_api_key: null,
+            collection: "perso-memory",
+            match: { content: ["[Bb]ikky"], entity: ["[Bb]ikky"] },
+          },
+          {
+            name: "work",
+            qdrant_url: "https://work-qdrant.example.com:6333",
+            qdrant_api_key: null,
+            collection: "work-memory",
+            default: true,
+          },
+        ],
+      });
+      resetConfig();
+      init();
+      setSessionDestinationOverride("work", getEffectiveDestinations(loadConfig()));
+
+      await storeFact({
+        content: "Bikky daemon routing should obey the session override.",
+        category: "engineering",
+        entities: ["bikky"],
+        content_hash: "bikky-override-hash",
+      });
+      const dedup = await dedupCheck(
+        "Bikky override fact",
+        "bikky-override-hash-2",
+        undefined,
+        undefined,
+        { content: "Bikky override fact", entities: ["bikky"] },
+      );
+
+      assert.equal(dedup.destination, "work");
+      assert.equal(upsertUrls.length, 1);
+      assert.ok(upsertUrls[0]?.startsWith("https://work-qdrant.example.com:6333/collections/work-memory/points"));
+      assert.equal(scrollUrls.some((url) => url.startsWith("https://work-qdrant.example.com:6333/")), true);
+      assert.equal(scrollUrls.some((url) => url.startsWith("https://perso-qdrant.example.com:6333/")), false);
     });
 
     it("keeps dedup follow-up mutations in the matched destination", async () => {

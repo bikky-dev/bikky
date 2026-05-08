@@ -42,6 +42,9 @@ export function getPidPath(): string {
 export function getExtractionHealthPath(): string {
   return path.join(getStateDir(), "extraction-health.json");
 }
+export function getSessionDestinationOverridePath(): string {
+  return path.join(getStateDir(), "session-destination-override.json");
+}
 
 // Legacy constant exports — captured at module load. Prefer the getter
 // functions above when you need fresh values (e.g. inside tests, or after

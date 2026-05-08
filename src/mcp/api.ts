@@ -23,6 +23,7 @@ import { createLogger } from "../logger.js";
 import { BIKKY_DIR, LOG_DIR, loadConfig, getEffectiveDestinations, type Destination } from "../config.js";
 import { QdrantPool } from "../lib/qdrant-pool.js";
 import { resolveDestination, buildResolver, type RoutingInput } from "../routing.js";
+import { applySessionDestinationOverride } from "../session-destination-override.js";
 import type { QdrantLogLevel } from "../lib/qdrant-client.js";
 
 // ---------------------------------------------------------------------------
@@ -119,12 +120,16 @@ export function anyCollectionReady(): boolean {
 
 /** Resolve a destination from caller input. Throws if not configured/found. */
 export function resolveDest(input: RoutingInput): Destination {
-  return resolveDestination(input, listDestinations());
+  const destinations = listDestinations();
+  return resolveDestination(applySessionDestinationOverride(input, destinations), destinations);
 }
 
 /** Build a resolver closure from the current pool's destinations. */
 export function makeResolver(): (input: RoutingInput) => Destination {
-  return buildResolver(listDestinations());
+  const destinations = listDestinations();
+  const resolve = buildResolver(destinations);
+  return (input: RoutingInput): Destination =>
+    resolve(applySessionDestinationOverride(input, destinations));
 }
 
 // ---------------------------------------------------------------------------
