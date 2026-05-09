@@ -282,7 +282,7 @@ Most users only need one Qdrant destination. Use `destinations[]` when you want 
 
 Each destination has its own Qdrant credentials and collection. Add `description` when you have more than one destination; MCP tools expose those descriptions so LLM clients can pick the right search scope.
 
-Writes still target one destination. A destination can include a `match` block with JavaScript `RegExp` strings for `cwd`, `entity`, `content`, or `metadata`. Destinations are evaluated in array order; the first destination with any matching pattern wins. If no pattern matches, bikky uses the destination marked `default: true`, or the first destination.
+Writes still target one destination. A destination can include a `match` block with JavaScript `RegExp` strings for `cwd`, `entity`, `content`, or `metadata`. For memory writes, `content` matching uses a flattened routing view of the full memory context: stored content, entities, repo, branch, task/workstream keys, metadata, origin, relation fields, and other stored payload fields. Destinations are evaluated in array order; the first destination with any matching pattern wins. If no pattern matches, bikky uses the destination marked `default: true`, or the first destination.
 
 Read tools (`memory_recall`, `memory_entity`, and `memory_relations`) can search one destination, the routed destination, or multiple destinations. Configure `default_search_scope` to control the default read behavior:
 
@@ -351,6 +351,7 @@ MCP clients can override this per call with `search_scope`. The value accepts `"
 Matching details:
 
 - `match.cwd`, `match.entity`, and `match.content` are lists of JavaScript `RegExp` strings.
+- On memory writes, `match.content` sees the full flattened memory context, so a pattern can match values such as `repo`, `branch`, `task_key`, origin fields, metadata values, or relation endpoints even when the visible memory text does not contain that term.
 - `match.metadata` maps metadata keys to lists of JavaScript `RegExp` strings matched against that key's value.
 - Matching uses OR logic across fields and within each list; any matching pattern selects the destination.
 - Put the most specific destinations first because first match wins.

@@ -397,6 +397,73 @@ describe("daemon/qdrant", () => {
       assert.ok(upsertUrls[1]?.startsWith("https://work-qdrant.example.com:6333/collections/work-memory/points"));
     });
 
+    it("routes stored facts using repo and metadata from the full memory context", async () => {
+      const upsertUrls: string[] = [];
+
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        const body = init?.body ? JSON.parse(String(init.body)) : null;
+        if (url.includes("/v1/embeddings")) {
+          return new Response(JSON.stringify({ data: [{ embedding: [0.1, 0.2, 0.3] }] }), { status: 200 });
+        }
+        if (init?.method === "PUT" && url.includes("/collections/")) {
+          assert.ok(body?.points, "expected Qdrant upsert points");
+          upsertUrls.push(url);
+        }
+        return new Response(JSON.stringify({ result: {} }), { status: 200 });
+      }) as typeof fetch;
+
+      saveConfig({
+        ...CONFIG_DEFAULTS,
+        qdrant_url: null,
+        qdrant_api_key: null,
+        embedding: {
+          ...CONFIG_DEFAULTS.embedding,
+          provider: "ollama",
+          model: "test-model",
+          base_url: "http://embed.test:11434",
+          dimensions: 3,
+        },
+        destinations: [
+          {
+            name: "perso",
+            qdrant_url: "https://perso-qdrant.example.com:6333",
+            qdrant_api_key: null,
+            collection: "perso-memory",
+            match: {
+              content: ["[Bb]ikky"],
+              entity: ["[Bb]ikky"],
+            },
+          },
+          {
+            name: "work",
+            qdrant_url: "https://work-qdrant.example.com:6333",
+            qdrant_api_key: null,
+            collection: "work-memory",
+            default: true,
+          },
+        ],
+      });
+      resetConfig();
+      init();
+
+      await storeFact({
+        content: "Dashboard quality signals should stay visible.",
+        category: "product",
+        entities: ["dashboard", "memory quality", "signals"],
+        repo: "bikky-dev/bikky",
+        metadata: { source_surface: "dashboard" },
+        content_hash: "repo-only-bikky-hash",
+      }, {
+        content: "daemon supplied routing context",
+        entities: ["dashboard"],
+        metadata: { source_surface: "daemon" },
+      });
+
+      assert.equal(upsertUrls.length, 1);
+      assert.ok(upsertUrls[0]?.startsWith("https://perso-qdrant.example.com:6333/collections/perso-memory/points"));
+    });
+
     it("keeps dedup follow-up mutations in the matched destination", async () => {
       const mutationUrls: string[] = [];
 

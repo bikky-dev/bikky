@@ -252,10 +252,8 @@ const routingInputForFact = (
   normalizedContent: string,
   normalizedEntities: string[],
   extraMetadata: Record<string, unknown> = {},
-): RoutingInput => ({
-  content: normalizedContent,
-  entities: normalizedEntities,
-  metadata: {
+): RoutingInput => {
+  const metadata = {
     ...(fact.metadata ?? {}),
     ...extraMetadata,
     category: fact.category,
@@ -271,8 +269,76 @@ const routingInputForFact = (
     ...(fact.repo ? { repo: fact.repo } : {}),
     ...(fact.branch ? { branch: fact.branch } : {}),
     ...(fact.surface ? { surface: fact.surface } : {}),
-  },
-});
+    ...(fact.issue_id ? { issue_id: fact.issue_id } : {}),
+    ...(fact.pr_id ? { pr_id: fact.pr_id } : {}),
+    ...(fact.source_event_ids ? { source_event_ids: fact.source_event_ids } : {}),
+    ...(fact.source_fact_ids ? { source_fact_ids: fact.source_fact_ids } : {}),
+    ...(fact.source_episode_ids ? { source_episode_ids: fact.source_episode_ids } : {}),
+    ...(fact.prompt_version ? { prompt_version: fact.prompt_version } : {}),
+    ...(fact.capture_policy_version ? { capture_policy_version: fact.capture_policy_version } : {}),
+    ...(fact.review_status ? { review_status: fact.review_status } : {}),
+    ...(fact.volatility ? { volatility: fact.volatility } : {}),
+    ...(fact.valid_from ? { valid_from: fact.valid_from } : {}),
+    ...(fact.expires_at ? { expires_at: fact.expires_at } : {}),
+    ...(fact.confidence_reason ? { confidence_reason: fact.confidence_reason } : {}),
+    ...(fact.relation ? {
+      from_entity: fact.relation.from,
+      relation_type: fact.relation.type,
+      to_entity: fact.relation.to,
+    } : {}),
+  };
+  return {
+    content: routingText([
+      normalizedContent,
+      normalizedEntities,
+      metadata,
+      fact.origin,
+      fact.last_operation_origin,
+      fact.relation,
+    ]),
+    entities: normalizedEntities,
+    metadata,
+  };
+};
+
+const appendRoutingText = (parts: string[], value: unknown): void => {
+  if (value === null || value === undefined) return;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    const text = String(value).trim();
+    if (text) parts.push(text);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) appendRoutingText(parts, item);
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [key, nested] of Object.entries(value)) {
+      appendRoutingText(parts, key);
+      appendRoutingText(parts, nested);
+    }
+  }
+};
+
+const routingText = (values: unknown[]): string => {
+  const parts: string[] = [];
+  for (const value of values) appendRoutingText(parts, value);
+  return Array.from(new Set(parts)).join("\n");
+};
+
+const mergeRoutingInputs = (base: RoutingInput, override?: RoutingInput): RoutingInput => {
+  if (!override) return base;
+  return {
+    destination: override.destination ?? base.destination,
+    cwd: override.cwd ?? base.cwd,
+    content: routingText([base.content, override.content]),
+    entities: Array.from(new Set([...(base.entities ?? []), ...(override.entities ?? [])])),
+    metadata: {
+      ...(base.metadata ?? {}),
+      ...(override.metadata ?? {}),
+    },
+  };
+};
 
 // ---------------------------------------------------------------------------
 // Init — reads credentials from loadConfig()
@@ -620,7 +686,7 @@ const storeFact = async (fact: StoreFact, routeInput?: RoutingInput): Promise<st
     payload.redaction = redaction;
   }
 
-  const destination = resolveDestination(routeInput ?? routingInputForFact(
+  const destination = resolveDestination(mergeRoutingInputs(routingInputForFact(
     fact,
     redactedContent.text,
     payload.entities,
@@ -630,7 +696,7 @@ const storeFact = async (fact: StoreFact, routeInput?: RoutingInput): Promise<st
       kind: normalizedKind,
       ...(normalizedSubtype ? { memory_subtype: normalizedSubtype } : {}),
     },
-  ));
+  ), routeInput));
   const vector = await embed(redactedContent.text);
 
   await qdrantRequest("PUT", `/collections/${destination.collection}/points`, {
