@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { DestinationMatch } from "../config.js";
 
 const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-mcp-tools-"));
 process.env.BIKKY_HOME = TEST_BIKKY_HOME;
@@ -82,6 +83,58 @@ function configureDestinations(): void {
         qdrant_url: "https://work.q.test",
         qdrant_api_key: "work-key",
         collection: "work_collection",
+      },
+    ],
+    default_search_scope: "all",
+    search_scopes: [
+      { name: "personal-only", destinations: ["perso"], description: "Only personal memories" },
+    ],
+  });
+  resetConfig();
+  initEmbedding({
+    provider: "ollama",
+    baseUrl: "http://embed.test",
+    model: "qwen-test",
+    dimensions: 3,
+    timeoutMs: 100,
+    retries: 0,
+  });
+  rebuildPool();
+}
+
+function configureWorkDefaultDestinations(persoMatch: DestinationMatch): void {
+  saveConfig({
+    ...CONFIG_DEFAULTS,
+    embedding: {
+      ...CONFIG_DEFAULTS.embedding,
+      provider: "ollama",
+      base_url: "http://embed.test",
+      model: "qwen-test",
+      dimensions: 3,
+      timeout_ms: 100,
+      retries: 0,
+    },
+    qdrant_client: {
+      ...CONFIG_DEFAULTS.qdrant_client,
+      timeout_ms: 100,
+      retries: 0,
+    },
+    destinations: [
+      {
+        name: "perso",
+        description: "Personal memories",
+        qdrant_url: "https://perso.q.test",
+        qdrant_api_key: "perso-key",
+        collection: "perso_collection",
+        match: persoMatch,
+      },
+      {
+        name: "work",
+        description: "Work memories",
+        qdrant_url: "https://work.q.test",
+        qdrant_api_key: "work-key",
+        collection: "work_collection",
+        default: true,
       },
     ],
     default_search_scope: "all",
@@ -302,6 +355,87 @@ describe("mcp/tools", () => {
     assert.match(String(points[0]!.payload.content), /\[REDACTED:secret\]/);
     assert.deepEqual(points[0]!.payload.entities, ["bikky"]);
     assert.equal((points[0]!.payload.redaction as Record<string, unknown>).redacted, true);
+  });
+
+  it("routes memory_store by repo from the full memory context", async () => {
+    configureWorkDefaultDestinations({ metadata: { repo: ["^bikky-dev/bikky$"] } });
+    const calls = installStorageMock();
+    const handlers = collectTools();
+
+    const result = await handlers.get("memory_store")!({
+      content: "Dashboard quality signals should stay visible.",
+      category: "product",
+      entities: ["dashboard", "memory quality", "signals"],
+      domain: "software_engineering",
+      kind: "fact",
+      repo: "bikky-dev/bikky",
+      metadata: { source_surface: "dashboard" },
+      confidence: 0.9,
+    });
+
+    const body = parseToolJson(result);
+    assert.equal(body.action, "inserted");
+    assert.equal(body.destination, "perso");
+
+    const scroll = calls.find((call) => call.method === "POST" && call.url.endsWith("/points/scroll"));
+    assert.ok(scroll);
+    assert.equal(scroll.destination, "perso");
+
+    const upsert = calls.find((call) => call.method === "PUT" && call.url.endsWith("/points"));
+    assert.ok(upsert);
+    assert.equal(upsert.destination, "perso");
+    const points = upsert.body?.points as Array<{ payload: Record<string, unknown> }>;
+    assert.equal(points[0]!.payload.repo, "bikky-dev/bikky");
+  });
+
+  it("honors an explicit memory_store destination over full-context matches", async () => {
+    configureWorkDefaultDestinations({ metadata: { repo: ["^bikky-dev/bikky$"] } });
+    const calls = installStorageMock();
+    const handlers = collectTools();
+
+    const result = await handlers.get("memory_store")!({
+      content: "Dashboard quality signals should stay visible.",
+      category: "product",
+      entities: ["dashboard", "memory quality", "signals"],
+      domain: "software_engineering",
+      kind: "fact",
+      repo: "bikky-dev/bikky",
+      destination: "work",
+      confidence: 0.9,
+    });
+
+    const body = parseToolJson(result);
+    assert.equal(body.action, "inserted");
+    assert.equal(body.destination, "work");
+
+    const upsert = calls.find((call) => call.method === "PUT" && call.url.endsWith("/points"));
+    assert.ok(upsert);
+    assert.equal(upsert.destination, "work");
+  });
+
+  it("routes summary and distilled writes by repo from the full memory context", async () => {
+    configureWorkDefaultDestinations({ metadata: { repo: ["^bikky-dev/bikky$"] } });
+    const calls = installStorageMock();
+    const handlers = collectTools();
+
+    const summary = await handlers.get("memory_session_summary")!({
+      content: "Quality score routing was repaired and still needs release validation.",
+      entities: ["quality scores", "routing"],
+      repo: "bikky-dev/bikky",
+    });
+    const distilled = await handlers.get("memory_distill")!({
+      content: "Repository-scoped routing should use the full memory context before falling back to defaults.",
+      entities: ["routing", "repositories"],
+      repo: "bikky-dev/bikky",
+    });
+
+    const summaryBody = parseToolJson(summary);
+    const distilledBody = parseToolJson(distilled);
+    assert.equal(summaryBody.destination, "perso");
+    assert.equal(distilledBody.destination, "perso");
+
+    const upserts = calls.filter((call) => call.method === "PUT" && call.url.endsWith("/points"));
+    assert.deepEqual(upserts.map((call) => call.destination), ["perso", "perso"]);
   });
 
   it("reinforces exact memory_store matches without embedding", async () => {
