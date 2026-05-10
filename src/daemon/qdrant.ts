@@ -32,6 +32,7 @@ import {
   type RedactionSummary,
 } from "../privacy/redaction.js";
 import { buildOperationOrigin, type OperationOrigin } from "../provenance/origin.js";
+import { buildMemoryRoutingInput, mergeRoutingInputs } from "../routing-context.js";
 
 // ---------------------------------------------------------------------------
 // Types (local)
@@ -287,57 +288,12 @@ const routingInputForFact = (
       to_entity: fact.relation.to,
     } : {}),
   };
-  return {
-    content: routingText([
-      normalizedContent,
-      normalizedEntities,
-      metadata,
-      fact.origin,
-      fact.last_operation_origin,
-      fact.relation,
-    ]),
+  return buildMemoryRoutingInput({
+    content: normalizedContent,
     entities: normalizedEntities,
     metadata,
-  };
-};
-
-const appendRoutingText = (parts: string[], value: unknown): void => {
-  if (value === null || value === undefined) return;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    const text = String(value).trim();
-    if (text) parts.push(text);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) appendRoutingText(parts, item);
-    return;
-  }
-  if (typeof value === "object") {
-    for (const [key, nested] of Object.entries(value)) {
-      appendRoutingText(parts, key);
-      appendRoutingText(parts, nested);
-    }
-  }
-};
-
-const routingText = (values: unknown[]): string => {
-  const parts: string[] = [];
-  for (const value of values) appendRoutingText(parts, value);
-  return Array.from(new Set(parts)).join("\n");
-};
-
-const mergeRoutingInputs = (base: RoutingInput, override?: RoutingInput): RoutingInput => {
-  if (!override) return base;
-  return {
-    destination: override.destination ?? base.destination,
-    cwd: override.cwd ?? base.cwd,
-    content: routingText([base.content, override.content]),
-    entities: Array.from(new Set([...(base.entities ?? []), ...(override.entities ?? [])])),
-    metadata: {
-      ...(base.metadata ?? {}),
-      ...(override.metadata ?? {}),
-    },
-  };
+    extraContent: [fact.origin, fact.last_operation_origin, fact.relation],
+  });
 };
 
 // ---------------------------------------------------------------------------

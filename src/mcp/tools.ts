@@ -77,6 +77,7 @@ import {
   combineRedactions,
   redactStorageText,
 } from "../privacy/redaction.js";
+import { buildMemoryRoutingInput } from "../routing-context.js";
 
 // ---------------------------------------------------------------------------
 // Runtime state
@@ -120,7 +121,7 @@ function routingInput(args: {
   destination?: string;
   content?: string;
   entities?: string[];
-  metadata?: Record<string, string>;
+  metadata?: Record<string, unknown>;
 }): RoutingInput {
   return {
     destination: args.destination,
@@ -129,6 +130,46 @@ function routingInput(args: {
     entities: args.entities,
     metadata: args.metadata,
   };
+}
+
+function compactMetadata(values: Record<string, unknown>): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined || value === null) continue;
+    metadata[key] = value;
+  }
+  return metadata;
+}
+
+function memoryWriteRoutingInput(args: {
+  tool: string;
+  destination?: string;
+  content: string;
+  entities: string[];
+  metadata?: Record<string, unknown>;
+  context?: Record<string, unknown>;
+  relation?: { from: string; type: string; to: string } | null;
+}): RoutingInput {
+  const relationMetadata = args.relation ? {
+    from_entity: args.relation.from,
+    relation_type: args.relation.type,
+    to_entity: args.relation.to,
+  } : {};
+  return buildMemoryRoutingInput({
+    destination: args.destination,
+    cwd: process.cwd(),
+    content: args.content,
+    entities: args.entities,
+    metadata: args.metadata,
+    context: compactMetadata({
+      origin_interface: "mcp",
+      origin_action: "create",
+      origin_tool: args.tool,
+      ...(args.context ?? {}),
+      ...relationMetadata,
+    }),
+    extraContent: args.relation ? [args.relation] : [],
+  });
 }
 
 // Resolve a destination from a routing input, returning either the destination
@@ -829,14 +870,6 @@ export function registerTools(mcp: McpServer): void {
       if (guard) return guard;
       lastStoreTime = Date.now();
       const now = nowISO();
-      const resolved = resolveDestOrError(routingInput({
-        destination,
-        content,
-        entities,
-        metadata,
-      }));
-      if (resolved.error) return resolved.error;
-      const dest = resolved.dest;
       const normalizedKind = normalizeKind(kind);
       let normalizedSubtype: string | null = null;
       try {
@@ -878,6 +911,30 @@ export function registerTools(mcp: McpServer): void {
         type: redactedRelation.type.text,
         to: redactedRelation.to.text,
       } : null;
+      const resolved = resolveDestOrError(memoryWriteRoutingInput({
+        tool: "memory_store",
+        destination,
+        content: redactedContent.text,
+        entities: normalizedEntities,
+        metadata,
+        relation: sanitizedRelation,
+        context: {
+          category: normalizedCategory,
+          domain: normalizedDomain,
+          kind: normalizedKind,
+          memory_subtype: normalizedSubtype,
+          layer: normalizedLayer,
+          episode_id,
+          workstream_key,
+          task_key,
+          repo,
+          branch,
+          review_status,
+          supersedes,
+        },
+      }));
+      if (resolved.error) return resolved.error;
+      const dest = resolved.dest;
       const createOrigin = mcpOrigin({
         action: "create",
         tool: "memory_store",
@@ -1942,16 +1999,28 @@ export function registerTools(mcp: McpServer): void {
       lastStoreTime = Date.now();
       const now = nowISO();
       try {
-        const resolved = resolveDestOrError(routingInput({
+        const normalizedEntities = (entities ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean);
+        const redactedContent = redactStorageText(content);
+        const resolved = resolveDestOrError(memoryWriteRoutingInput({
+          tool: "memory_session_summary",
           destination,
-          content,
-          entities: entities ?? [],
+          content: redactedContent.text,
+          entities: normalizedEntities,
+          context: {
+            category: categoryForMemorySubtype("session_index") ?? "system",
+            domain: "software_engineering",
+            kind: "summary",
+            memory_subtype: "session_index",
+            layer: layerForMemorySubtype("session_index") ?? "episode",
+            episode_id,
+            workstream_key,
+            task_key,
+            repo,
+          },
         }));
         if (resolved.error) return resolved.error;
         const dest = resolved.dest;
-        const normalizedEntities = (entities ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean);
         const summaryId = newId();
-        const redactedContent = redactStorageText(content);
         const vector = await embed(redactedContent.text);
         const origin = mcpOrigin({
           action: "create",
@@ -2034,16 +2103,27 @@ export function registerTools(mcp: McpServer): void {
       lastStoreTime = Date.now();
       const now = nowISO();
       try {
-        const resolved = resolveDestOrError(routingInput({
+        const normalizedEntities = entities.map((e) => e.trim().toLowerCase()).filter(Boolean);
+        const redactedContent = redactStorageText(content);
+        const resolved = resolveDestOrError(memoryWriteRoutingInput({
+          tool: "memory_distill",
           destination,
-          content,
-          entities,
+          content: redactedContent.text,
+          entities: normalizedEntities,
+          context: {
+            category: categoryForMemorySubtype("convention") ?? "engineering",
+            domain: "software_engineering",
+            kind: "distilled",
+            memory_subtype: "convention",
+            layer: layerForMemorySubtype("convention") ?? "domain",
+            task_key,
+            repo,
+            supersedes,
+          },
         }));
         if (resolved.error) return resolved.error;
         const dest = resolved.dest;
-        const normalizedEntities = entities.map((e) => e.trim().toLowerCase()).filter(Boolean);
         const distilledId = newId();
-        const redactedContent = redactStorageText(content);
         const vector = await embed(redactedContent.text);
         const origin = mcpOrigin({
           action: "create",
