@@ -277,6 +277,11 @@ describe("daemon/quality-rollups", () => {
 
     const result = await aggregateMemoryQualitySignals({
       ...CONFIG_DEFAULTS,
+      identity: {
+        ...CONFIG_DEFAULTS.identity,
+        user_id: "git:saber:60dc9feaec8b",
+        user_name: "Saber",
+      },
       daemon: {
         ...CONFIG_DEFAULTS.daemon,
         memory_quality_rollups_max_scopes_per_run: 10,
@@ -288,9 +293,11 @@ describe("daemon/quality-rollups", () => {
     assert.equal(result.rollups_upserted > 0, true);
     assert.equal(upserts.length, result.rollups_upserted);
 
-    const firstPayload = ((upserts[0]?.points as Array<{ payload: Record<string, unknown> }>)[0]?.payload);
+    const firstPayload = upsertPayloads(upserts)[0];
     assert.equal(firstPayload?.kind, "telemetry");
     assert.equal(firstPayload?.memory_subtype, "aggregate_rollup");
+    assert.equal(firstPayload?.origin?.user?.name, "Saber");
+    assert.equal(firstPayload?.origin?.user?.source, "config");
     assert.equal(firstPayload?.rollup_type, "latest");
     assert.equal(firstPayload?.active_fact_count, 1);
   });
@@ -519,7 +526,7 @@ const depsWithScrollResponses = (
 
 const upsertPayloads = (
   upserts: Array<Record<string, unknown>>,
-): Array<Record<string, unknown> & { origin?: { metadata?: Record<string, unknown> } }> => upserts.flatMap((upsert) =>
+): Array<Record<string, unknown> & { origin?: { metadata?: Record<string, unknown>; user?: { name?: string; source?: string } } }> => upserts.flatMap((upsert) =>
   ((upsert.points as Array<{ payload: Record<string, unknown> }> | undefined) ?? [])
-    .map((point) => point.payload as Record<string, unknown> & { origin?: { metadata?: Record<string, unknown> } }),
+    .map((point) => point.payload as Record<string, unknown> & { origin?: { metadata?: Record<string, unknown>; user?: { name?: string; source?: string } } }),
 );

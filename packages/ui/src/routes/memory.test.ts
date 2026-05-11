@@ -230,14 +230,15 @@ describe("ui/routes/memory", () => {
       const search = log.calls.find((c) => c.path.endsWith("/points/search"));
       assert.ok(search);
       assert.equal(search!.body.limit, 5);
-      assert.deepEqual(search!.body.filter.must[0], {
+      assert.deepEqual(search!.body.filter.must[0], { is_null: { key: "superseded_by" } });
+      assert.deepEqual(search!.body.filter.must[1], {
         should: [
           { key: "origin.agent.type", match: { any: ["system", "daemon"] } },
           { key: "origin.interface", match: { any: ["system", "daemon"] } },
           { key: "source", match: { any: ["system", "daemon"] } },
         ],
       });
-      assert.deepEqual(search!.body.filter.must[1], {
+      assert.deepEqual(search!.body.filter.must[2], {
         should: [
           { key: "origin.user.id", match: { value: "agent-1" } },
           { key: "origin.agent.id", match: { value: "agent-1" } },
@@ -253,6 +254,12 @@ describe("ui/routes/memory", () => {
           key: "memory_subtype",
           match: { value: "codebase_map" },
         },
+      ]);
+      assert.deepEqual(search!.body.filter.must_not, [
+        { key: "kind", match: { value: "entity_type" } },
+        { key: "kind", match: { value: "telemetry" } },
+        { key: "category", match: { value: "system" } },
+        { key: "memory_subtype", match: { any: ["session_index", "episode", "workstream"] } },
       ]);
     });
 
@@ -327,6 +334,78 @@ describe("ui/routes/memory", () => {
 
       const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
       assert.deepEqual(scroll!.body.order_by, { key: "created_at", direction: "desc" });
+      assert.deepEqual(scroll!.body.filter.must, [
+        { is_null: { key: "superseded_by" } },
+      ]);
+      assert.deepEqual(scroll!.body.filter.must_not, [
+        { key: "kind", match: { value: "entity_type" } },
+        { key: "kind", match: { value: "telemetry" } },
+        { key: "category", match: { value: "system" } },
+        { key: "memory_subtype", match: { any: ["session_index", "episode", "workstream"] } },
+      ]);
+    });
+
+    it("allows explicit superseded archive browse requests", async () => {
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/count")) return { result: { count: 1 } };
+          return { result: { points: [sampleFact({ superseded_by: "replacement-id" })], next_page_offset: null } };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/browse?include_superseded=true"));
+
+      assert.equal(res.status, 200);
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.deepEqual(scroll!.body.filter.must, []);
+    });
+
+    it("allows explicit telemetry browse requests", async () => {
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/count")) return { result: { count: 1 } };
+          return {
+            result: {
+              points: [sampleFact({ kind: "telemetry", memory_subtype: "recall_event" })],
+              next_page_offset: null,
+            },
+          };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/browse?kind=telemetry"));
+
+      assert.equal(res.status, 200);
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.deepEqual(scroll!.body.filter.must_not, [
+        { key: "kind", match: { value: "entity_type" } },
+      ]);
+    });
+
+    it("allows explicit system lifecycle browse requests", async () => {
+      const log = installMock({
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/count")) return { result: { count: 1 } };
+          return {
+            result: {
+              points: [sampleFact({ category: "system", kind: "summary", memory_subtype: "session_index" })],
+              next_page_offset: null,
+            },
+          };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/browse?memory_subtype=session_index"));
+
+      assert.equal(res.status, 200);
+      const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
+      assert.deepEqual(scroll!.body.filter.must_not, [
+        { key: "kind", match: { value: "entity_type" } },
+        { key: "kind", match: { value: "telemetry" } },
+      ]);
     });
 
     it("computes usefulness fields for browse results", async () => {
@@ -435,7 +514,8 @@ describe("ui/routes/memory", () => {
       await app.fetch(new Request("http://localhost/api/memory/browse?category=engineering"));
       const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
       assert.ok(scroll);
-      assert.deepEqual(scroll!.body.filter.must[0], {
+      assert.deepEqual(scroll!.body.filter.must[0], { is_null: { key: "superseded_by" } });
+      assert.deepEqual(scroll!.body.filter.must[1], {
         key: "category",
         match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] },
       });
@@ -450,7 +530,9 @@ describe("ui/routes/memory", () => {
       await app.fetch(new Request("http://localhost/api/memory/browse?memory_subtype=convention"));
       const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
       assert.ok(scroll);
-      assert.deepEqual(scroll!.body.filter.must, []);
+      assert.deepEqual(scroll!.body.filter.must, [
+        { is_null: { key: "superseded_by" } },
+      ]);
       assert.deepEqual(scroll!.body.filter.should, [
         { key: "memory_subtype", match: { value: "convention" } },
         { key: "kind", match: { value: "distilled" } },
@@ -467,6 +549,7 @@ describe("ui/routes/memory", () => {
       const scroll = log.calls.find((c) => c.path.endsWith("/points/scroll"));
       assert.ok(scroll);
       assert.deepEqual(scroll!.body.filter.must, [
+        { is_null: { key: "superseded_by" } },
         { key: "entities", match: { value: "bikky" } },
       ]);
       assert.deepEqual(scroll!.body.filter.should, [
@@ -918,17 +1001,16 @@ describe("ui/routes/memory", () => {
 
   describe("GET /stats", () => {
     it("returns total/active/superseded counts and ontology breakdowns", async () => {
-      let pointsCount = 100;
       installMock({
         qdrantHandler: (c) => {
-          if (c.path === "/collections/test") {
-            return { result: { points_count: pointsCount, vectors_count: pointsCount } };
-          }
           if (c.path.endsWith("/points/count")) {
-            // Return a different count per filter to exercise the merge logic
             const must = c.body?.filter?.must ?? [];
+            if (must.some((cond: any) => cond.key === "category" && cond.match?.any?.includes("engineering"))) return { result: { count: 10 } };
+            if (must.some((cond: any) => cond.key === "kind" && cond.match?.value === "fact")) return { result: { count: 10 } };
+            if (must.some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "codebase_map")) return { result: { count: 10 } };
+            if (must.length === 1 && must.some((cond: any) => cond.is_null?.key === "superseded_by")) return { result: { count: 80 } };
             if (must.length === 0) return { result: { count: 90 } };
-            return { result: { count: 10 } };
+            return { result: { count: 0 } };
           }
           return { result: {} };
         },
@@ -945,12 +1027,38 @@ describe("ui/routes/memory", () => {
         byKind: Record<string, number>;
         bySubtype: Record<string, number>;
       };
-      assert.equal(body.total, 100);
-      assert.equal(body.active, 90);
-      assert.equal(body.superseded, 10);
+      assert.equal(body.total, 80);
+      assert.equal(body.active, 80);
+      assert.equal(body.superseded, 0);
       assert.equal(body.byCategory.engineering, 10);
       assert.equal(body.byKind.fact, 10);
+      assert.equal(body.byKind.telemetry, undefined);
       assert.equal(body.bySubtype.codebase_map, 10);
+      assert.equal(body.bySubtype.session_index, undefined);
+      assert.equal(body.bySubtype.aggregate_rollup, undefined);
+    });
+
+    it("allows explicit superseded archive stats requests", async () => {
+      installMock({
+        qdrantHandler: (c) => {
+          if (c.path.endsWith("/points/count")) {
+            const must = c.body?.filter?.must ?? [];
+            if (must.length === 1 && must.some((cond: any) => cond.is_null?.key === "superseded_by")) return { result: { count: 80 } };
+            if (must.length === 0) return { result: { count: 90 } };
+            return { result: { count: 0 } };
+          }
+          return { result: {} };
+        },
+      });
+      const app = buildApp();
+
+      const res = await app.fetch(new Request("http://localhost/api/memory/stats?include_superseded=true"));
+
+      assert.equal(res.status, 200);
+      const body = await res.json() as { total: number; active: number; superseded: number };
+      assert.equal(body.total, 90);
+      assert.equal(body.active, 80);
+      assert.equal(body.superseded, 10);
     });
 
     it("scopes category and subtype counts to source and kind filters", async () => {
@@ -989,6 +1097,7 @@ describe("ui/routes/memory", () => {
       );
       assert.ok(engineeringCount);
       assert.deepEqual(engineeringCount!.body.filter.must, [
+        { is_null: { key: "superseded_by" } },
         { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
         { key: "kind", match: { value: "fact" } },
         {
@@ -999,12 +1108,19 @@ describe("ui/routes/memory", () => {
           ],
         },
       ]);
+      assert.deepEqual(engineeringCount!.body.filter.must_not, [
+        { key: "kind", match: { value: "entity_type" } },
+        { key: "kind", match: { value: "telemetry" } },
+        { key: "category", match: { value: "system" } },
+        { key: "memory_subtype", match: { any: ["session_index", "episode", "workstream"] } },
+      ]);
 
       const subtypeCount = countCalls.find((c) =>
         (c.body?.filter?.must ?? []).some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "codebase_map"),
       );
       assert.ok(subtypeCount);
       assert.deepEqual(subtypeCount!.body.filter.must, [
+        { is_null: { key: "superseded_by" } },
         { key: "kind", match: { value: "fact" } },
         { key: "memory_subtype", match: { value: "codebase_map" } },
         {
@@ -1014,6 +1130,12 @@ describe("ui/routes/memory", () => {
             { key: "source", match: { any: ["system", "daemon"] } },
           ],
         },
+      ]);
+      assert.deepEqual(subtypeCount!.body.filter.must_not, [
+        { key: "kind", match: { value: "entity_type" } },
+        { key: "kind", match: { value: "telemetry" } },
+        { key: "category", match: { value: "system" } },
+        { key: "memory_subtype", match: { any: ["session_index", "episode", "workstream"] } },
       ]);
     });
 
@@ -1051,7 +1173,14 @@ describe("ui/routes/memory", () => {
         .find((c) => (c.body?.filter?.should ?? []).some((cond: any) => cond.key === "memory_subtype" && cond.match?.value === "convention"));
       assert.ok(conventionCount);
       assert.deepEqual(conventionCount!.body.filter.must, [
+        { is_null: { key: "superseded_by" } },
         { key: "kind", match: { value: "distilled" } },
+      ]);
+      assert.deepEqual(conventionCount!.body.filter.must_not, [
+        { key: "kind", match: { value: "entity_type" } },
+        { key: "kind", match: { value: "telemetry" } },
+        { key: "category", match: { value: "system" } },
+        { key: "memory_subtype", match: { any: ["session_index", "episode", "workstream"] } },
       ]);
       assert.deepEqual(conventionCount!.body.filter.should, [
         { key: "memory_subtype", match: { value: "convention" } },

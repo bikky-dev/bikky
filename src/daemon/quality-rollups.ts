@@ -396,7 +396,7 @@ const rollupId = (rollup: QualityRollup): string => stableUuid(
   `aggregate_rollup:${ROLLUP_TYPE}:${rollup.destination}:${rollup.scope_type}:${rollup.scope_value}`,
 );
 
-const rollupPayload = (rollup: QualityRollup): Record<string, unknown> => {
+const rollupPayload = (config: BikkyConfig, rollup: QualityRollup): Record<string, unknown> => {
   const content = rollupContent(rollup);
   return {
     content,
@@ -407,6 +407,7 @@ const rollupPayload = (rollup: QualityRollup): Record<string, unknown> => {
     layer: layerForMemorySubtype("aggregate_rollup") ?? "workspace",
     entities: rollup.scope_type === "entity" ? [rollup.scope_value.toLowerCase()] : [],
     origin: buildOperationOrigin({
+      config,
       interface: "daemon",
       action: "aggregate",
       subsystem: "memory_quality_rollups",
@@ -447,11 +448,12 @@ const rollupPayload = (rollup: QualityRollup): Record<string, unknown> => {
 };
 
 const upsertRollup = async (
+  config: BikkyConfig,
   deps: QualityRollupDeps,
   destination: Destination,
   rollup: QualityRollup,
 ): Promise<void> => {
-  const payload = rollupPayload(rollup);
+  const payload = rollupPayload(config, rollup);
   const vector = await deps.embed(String(payload.content));
   await deps.qdrantRequest("PUT", `/collections/${destination.collection}/points`, {
     points: [{ id: rollupId(rollup), vector, payload }],
@@ -484,7 +486,7 @@ export const aggregateMemoryQualitySignals = async (
     const selectedRollups = rollups.slice(0, maxScopes);
     scopesCapped ||= rollups.length > selectedRollups.length;
     for (const rollup of selectedRollups) {
-      await upsertRollup(deps, destination, rollup);
+      await upsertRollup(config, deps, destination, rollup);
       rollupsUpserted++;
     }
   }

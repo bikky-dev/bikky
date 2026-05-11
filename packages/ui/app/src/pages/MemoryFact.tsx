@@ -8,6 +8,13 @@ import { BROWSABLE_CATEGORY_OPTIONS, DOMAIN_OPTIONS, ontologyLabel } from "../li
 import Badge from "../components/Badge";
 import { EntityChip } from "../components/EntityChip";
 import type { Fact } from "../components/FactCard";
+import {
+  memoryLastOperationLabel,
+  memoryLastOperationUserName,
+  memoryOriginAgentLabel,
+  memoryOriginLabel,
+  memoryUserName,
+} from "../components/FactCard";
 
 export default function MemoryFact() {
   const { id } = useParams<{ id: string }>();
@@ -119,6 +126,8 @@ export default function MemoryFact() {
   const domainOptions = DOMAIN_OPTIONS.some((d) => d.value === editDomain) || !editDomain
     ? DOMAIN_OPTIONS
     : [{ value: editDomain, label: `Legacy: ${editDomain}` }, ...DOMAIN_OPTIONS];
+  const userName = memoryUserName(fact);
+  const origin = memoryOriginLabel(fact);
 
   return (
     <div>
@@ -228,6 +237,8 @@ export default function MemoryFact() {
               {fact.kind && <Badge label={`Kind: ${ontologyLabel(fact.kind)}`} color={KIND_COLORS[fact.kind]} size="md" />}
               {fact.memory_subtype && <Badge label={`Type: ${ontologyLabel(fact.memory_subtype)}`} color={CATEGORY_COLORS[fact.category]} size="md" />}
               {fact.domain && <Badge label={`Domain: ${ontologyLabel(fact.domain)}`} color={fact.domain === "personal_productivity" ? "green" : "zinc"} size="md" />}
+              {userName && <Badge label={`User: ${userName}`} color="blue" size="md" />}
+              {origin && <Badge label={`Origin: ${origin}`} color="indigo" size="md" />}
               {fact.source && <Badge label={`Source: ${ontologyLabel(fact.source)}`} size="md" />}
               {fact.actor_id && <Badge label={`Actor: ${fact.actor_id}`} color="zinc" size="md" />}
             </>
@@ -316,7 +327,20 @@ export default function MemoryFact() {
 }
 
 function ProvenanceSection({ fact }: { fact: Fact }) {
-  const fields: { label: string; value: string; render?: JSX.Element }[] = [];
+  const fields: { label: string; value: string; mono?: boolean; render?: JSX.Element }[] = [];
+  const userName = memoryUserName(fact);
+  const origin = memoryOriginLabel(fact);
+  const agent = memoryOriginAgentLabel(fact);
+  const lastOperation = memoryLastOperationLabel(fact);
+  const lastOperationUser = memoryLastOperationUserName(fact);
+
+  if (userName) fields.push({ label: "User", value: userName, mono: false });
+  if (origin) fields.push({ label: "Origin", value: origin });
+  if (agent) fields.push({ label: "Agent", value: agent, mono: false });
+  if (lastOperation) fields.push({ label: "Last operation", value: lastOperation });
+  if (lastOperationUser && lastOperationUser !== userName) {
+    fields.push({ label: "Last user", value: lastOperationUser, mono: false });
+  }
   if (fact.workstream_key) fields.push({ label: "Workstream", value: fact.workstream_key });
   if (fact.task_key) fields.push({ label: "Task", value: fact.task_key });
   if (fact.repo) {
@@ -349,7 +373,11 @@ function ProvenanceSection({ fact }: { fact: Fact }) {
         {fields.map((f) => (
           <div key={f.label}>
             <p className="text-xs text-zinc-500">{f.label}</p>
-            {f.render ?? <p className="text-zinc-300 font-mono text-xs break-all">{f.value}</p>}
+            {f.render ?? (
+              <p className={`text-zinc-300 text-xs break-all ${f.mono === false ? "" : "font-mono"}`}>
+                {f.value}
+              </p>
+            )}
           </div>
         ))}
       </div>

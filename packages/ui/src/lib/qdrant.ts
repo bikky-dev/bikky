@@ -125,6 +125,19 @@ const MEMORY_SUBTYPE_FILTER_ALIASES: Record<string, FilterCondition[]> = {
   ],
 };
 
+const TELEMETRY_SUBTYPES = new Set([
+  "recall_event",
+  "feedback_event",
+  "outcome_event",
+  "aggregate_rollup",
+]);
+
+const SYSTEM_SUBTYPES = new Set([
+  "session_index",
+  "episode",
+  "workstream",
+]);
+
 const categoryFilterConditions = (categories: string[]): FilterCondition[] => {
   return categories.map((category) => ({ key: "category", match: categoryFilterValue(category) }));
 };
@@ -233,6 +246,8 @@ export function buildFilter(opts: {
   until?: string;
   excludeSuperseded?: boolean;
   excludeEntityType?: boolean;
+  excludeTelemetry?: boolean;
+  excludeSystem?: boolean;
 }): QdrantFilter {
   const must: FilterCondition[] = [];
   const should: FilterCondition[] = [];
@@ -279,6 +294,21 @@ export function buildFilter(opts: {
   // Phase 5a entity_type sidecar points are not user-facing facts; opt-in to exclude.
   if (opts.excludeEntityType === true && opts.kind !== "entity_type") {
     must_not.push({ key: "kind", match: { value: "entity_type" } });
+  }
+  const explicitlyRequestsTelemetry = opts.kind === "telemetry"
+    || (opts.memorySubtype !== undefined && TELEMETRY_SUBTYPES.has(opts.memorySubtype))
+    || (opts.memorySubtypes ?? []).some((subtype) => TELEMETRY_SUBTYPES.has(subtype));
+  if (opts.excludeTelemetry === true && !explicitlyRequestsTelemetry) {
+    must_not.push({ key: "kind", match: { value: "telemetry" } });
+  }
+  const explicitlyRequestsSystem = opts.category === "system"
+    || (opts.categories ?? []).includes("system")
+    || (opts.memorySubtype !== undefined && SYSTEM_SUBTYPES.has(opts.memorySubtype))
+    || (opts.memorySubtypes ?? []).some((subtype) => SYSTEM_SUBTYPES.has(subtype))
+    || explicitlyRequestsTelemetry;
+  if (opts.excludeSystem === true && !explicitlyRequestsSystem) {
+    must_not.push({ key: "category", match: { value: "system" } });
+    must_not.push({ key: "memory_subtype", match: { any: Array.from(SYSTEM_SUBTYPES) } });
   }
   const filter: QdrantFilter = { must };
   if (should.length > 0) filter.should = should;
