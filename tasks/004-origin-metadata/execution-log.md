@@ -4,7 +4,7 @@
 
 | Phase | Step | State | Next | Blockers |
 |-------|------|-------|------|----------|
-| implement | Package memory UI filtering/provenance follow-up | in-progress | Stage and commit verified changes, then open PR for issue #150 | None |
+| implement | PR #151 opened for issue #150 | waiting-for-ci | Wait for GitHub checks, then request explicit approval before merging PR #151 into main | None |
 
 ## Implementation Progress
 
@@ -28,3 +28,4 @@
 - 2026-05-11 18:33 AEST — Follow-up requested to merge local Memory dashboard/list filtering, provenance display, and quality-rollup identity fixes. Created issue #150 for the focused PR.
 - 2026-05-11 18:38 AEST — Local verification passed: root `npm test`, UI `npm test`, and UI `npm run build`.
 - 2026-05-11 18:39 AEST — Code review found no material correctness, security, or logic issues in the local changes.
+- 2026-05-11 18:42 AEST — Created branch `feat/memory-dashboard-provenance`, committed `166e48d`, pushed it, and opened PR #151.
