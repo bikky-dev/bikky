@@ -5,6 +5,27 @@ interface CapturedRequest {
   url: URL;
 }
 
+interface BrowseResponse {
+  results: ReturnType<typeof memoryFact>[];
+  count: number;
+  nextOffset: number | null;
+}
+
+interface SearchResponse {
+  results: ReturnType<typeof memoryFact>[];
+  count: number;
+}
+
+interface MockErrorResponse {
+  status: number;
+  error: string;
+}
+
+interface MockMemoryApiOptions {
+  browse?: (url: URL) => BrowseResponse | MockErrorResponse;
+  search?: (url: URL) => SearchResponse | MockErrorResponse;
+}
+
 const categoryCounts = {
   engineering: 4,
   product: 3,
@@ -140,7 +161,158 @@ test("Memory filters are forwarded to browse and search API requests", async ({ 
   });
 });
 
-async function mockMemoryApi(page: Page, captured: CapturedRequest[]) {
+test("Memory restores URL filter state and clears individual active filters", async ({ page }) => {
+  const captured: CapturedRequest[] = [];
+  await mockMemoryApi(page, captured);
+
+  const expectedSince = new Date("2026-01-02").toISOString();
+  const expectedUntil = new Date("2026-01-09T23:59:59").toISOString();
+
+  await page.goto(
+    "/memory?category=product,human&memory_subtype=product_decision&entity=bikky-ui&usefulness=positive&since=2026-01-02&until=2026-01-09&sort=oldest",
+  );
+
+  await expect(page.getByRole("combobox", { name: "Sort memories" })).toHaveValue("oldest");
+  await expect(page.getByRole("combobox", { name: "Usefulness filter" })).toHaveValue("positive");
+  await expect(page.getByRole("textbox", { name: "Entity filter" })).toHaveValue("bikky-ui");
+  await expect(page.getByLabel("From date")).toHaveValue("2026-01-02");
+  await expect(page.getByLabel("Until date")).toHaveValue("2026-01-09");
+  await expectRequest(captured, "/api/memory/browse", {
+    category: "product,human",
+    memory_subtype: "product_decision",
+    entity: "bikky-ui",
+    usefulness: "positive",
+    since: expectedSince,
+    until: expectedUntil,
+    sort: "oldest",
+    destination: "all",
+  });
+
+  await page.getByRole("button", { name: "Clear Category filter Product (3)" }).click();
+  await expectRequest(captured, "/api/memory/browse", {
+    category: "human",
+    memory_subtype: "product_decision",
+    entity: "bikky-ui",
+    usefulness: "positive",
+    since: expectedSince,
+    until: expectedUntil,
+    sort: "oldest",
+    destination: "all",
+  });
+
+  await page.getByRole("button", { name: "Clear Subtype filter Product decision (2)" }).click();
+  await expectRequest(captured, "/api/memory/browse", {
+    category: "human",
+    memory_subtype: null,
+    entity: "bikky-ui",
+    usefulness: "positive",
+    since: expectedSince,
+    until: expectedUntil,
+    sort: "oldest",
+    destination: "all",
+  });
+
+  await page.getByRole("button", { name: "Clear Entity filter bikky-ui" }).click();
+  await expectRequest(captured, "/api/memory/browse", {
+    category: "human",
+    memory_subtype: null,
+    entity: null,
+    usefulness: "positive",
+    since: expectedSince,
+    until: expectedUntil,
+    sort: "oldest",
+    destination: "all",
+  });
+
+  await page.getByRole("button", { name: "Clear From filter 2026-01-02" }).click();
+  await expectRequest(captured, "/api/memory/browse", {
+    category: "human",
+    memory_subtype: null,
+    entity: null,
+    usefulness: "positive",
+    since: null,
+    until: expectedUntil,
+    sort: "oldest",
+    destination: "all",
+  });
+
+  await page.getByRole("button", { name: "Clear all" }).click();
+  await expectRequest(captured, "/api/memory/browse", {
+    category: null,
+    memory_subtype: null,
+    entity: null,
+    usefulness: null,
+    since: null,
+    until: null,
+    sort: "oldest",
+    destination: "all",
+  });
+});
+
+test("Memory browse appends results when loading more", async ({ page }) => {
+  const captured: CapturedRequest[] = [];
+  await mockMemoryApi(page, captured, {
+    browse: (url) => {
+      const offset = url.searchParams.get("offset");
+      return {
+        results: [memoryFact(offset === "20" ? "browse-page-2" : "browse-page-1", url)],
+        count: 2,
+        nextOffset: offset === "20" ? null : 20,
+      };
+    },
+  });
+
+  await page.goto("/memory?sort=newest");
+
+  await expect(page.getByText("Mock browse-page-1 memory for /api/memory/browse")).toBeVisible();
+  await expect(page.getByText("Showing 1 of 2 facts")).toBeVisible();
+
+  await page.getByRole("button", { name: "Load more" }).click();
+
+  await expectRequest(captured, "/api/memory/browse", {
+    offset: "20",
+    limit: "20",
+    sort: "newest",
+    destination: "all",
+  });
+  await expect(page.getByText("Mock browse-page-1 memory for /api/memory/browse")).toBeVisible();
+  await expect(page.getByText("Mock browse-page-2 memory for /api/memory/browse")).toBeVisible();
+  await expect(page.getByText("Showing 2 of 2 facts")).toBeVisible();
+});
+
+test("Memory shows empty and error states", async ({ page }) => {
+  const captured: CapturedRequest[] = [];
+  let failBrowse = false;
+  await mockMemoryApi(page, captured, {
+    browse: (url) => {
+      if (failBrowse) return { status: 503, error: "Qdrant is unavailable" };
+      return { results: [], count: 0, nextOffset: null };
+    },
+  });
+
+  await page.goto("/memory?category=product");
+  await expect(page.getByText("No facts found")).toBeVisible();
+  await expect(page.getByText("Try adjusting your search or filters")).toBeVisible();
+  await expectRequest(captured, "/api/memory/browse", {
+    category: "product",
+    destination: "all",
+  });
+
+  failBrowse = true;
+  await page.goto("/memory?category=human");
+
+  await expect(page.getByText("Qdrant is unavailable")).toBeVisible();
+  await expectRequest(captured, "/api/memory/browse", {
+    category: "human",
+    destination: "all",
+  });
+});
+
+async function mockMemoryApi(
+  page: Page,
+  captured: CapturedRequest[],
+  options: MockMemoryApiOptions = {},
+) {
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     captured.push({ path: url.pathname, url });
@@ -176,26 +348,28 @@ async function mockMemoryApi(page: Page, captured: CapturedRequest[]) {
     }
 
     if (url.pathname === "/api/memory/search") {
+      const response = options.search?.(url) ?? {
+        results: [memoryFact("search-result", url)],
+        count: 1,
+      };
       await route.fulfill({
-        status: 200,
+        status: "status" in response ? response.status : 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          results: [memoryFact("search-result", url)],
-          count: 1,
-        }),
+        body: JSON.stringify(responseBody(response)),
       });
       return;
     }
 
     if (url.pathname === "/api/memory/browse") {
+      const response = options.browse?.(url) ?? {
+        results: [memoryFact("browse-result", url)],
+        count: 1,
+        nextOffset: null,
+      };
       await route.fulfill({
-        status: 200,
+        status: "status" in response ? response.status : 200,
         contentType: "application/json",
-        body: JSON.stringify({
-          results: [memoryFact("browse-result", url)],
-          count: 1,
-          nextOffset: null,
-        }),
+        body: JSON.stringify(responseBody(response)),
       });
       return;
     }
@@ -208,15 +382,20 @@ async function mockMemoryApi(page: Page, captured: CapturedRequest[]) {
   });
 }
 
+function responseBody(response: BrowseResponse | SearchResponse | MockErrorResponse) {
+  return "status" in response ? { error: response.error } : response;
+}
+
 function memoryFact(id: string, requestUrl: URL) {
+  const entity = requestUrl.searchParams.get("entity");
   return {
     id,
-    content: `Mock memory for ${requestUrl.pathname}`,
+    content: `Mock ${id} memory for ${requestUrl.pathname}`,
     category: requestUrl.searchParams.get("category")?.split(",")[0] || "engineering",
     domain: "software_engineering",
     kind: "fact",
     memory_subtype: requestUrl.searchParams.get("memory_subtype"),
-    entities: requestUrl.searchParams.get("entity") ? [requestUrl.searchParams.get("entity")] : ["bikky-ui"],
+    entities: entity ? [entity] : ["bikky-ui"],
     confidence: 0.91,
     created_at: "2026-01-10T00:00:00.000Z",
     updated_at: "2026-01-10T00:00:00.000Z",
