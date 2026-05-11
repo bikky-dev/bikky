@@ -267,7 +267,7 @@ export default function Memory() {
               <Database size={14} />
               {stats.active.toLocaleString()} active
             </span>
-            <span>{stats.superseded.toLocaleString()} superseded</span>
+            {stats.superseded > 0 && <span>{stats.superseded.toLocaleString()} superseded</span>}
           </div>
         )}
       </div>

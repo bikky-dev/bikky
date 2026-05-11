@@ -7,15 +7,19 @@ export interface Fact {
   id: string;
   content: string;
   category: string;
+  user_name?: string;
   domain?: string;
   kind?: string;
   memory_subtype?: string | null;
   actor_id?: string;
   entities: string[];
   source?: string;
+  origin?: OperationOrigin | null;
+  last_operation_origin?: OperationOrigin | null;
   confidence: number;
   created_at: string;
   updated_at?: string;
+  metadata?: Record<string, unknown>;
   from_entity?: string;
   relation_type?: string;
   to_entity?: string;
@@ -38,12 +42,34 @@ export interface Fact {
   _destination?: string;
 }
 
+interface OriginIdentity {
+  type?: string | null;
+  id?: string | null;
+  name?: string | null;
+  source?: string | null;
+}
+
+interface OperationOrigin {
+  user?: OriginIdentity | null;
+  agent?: OriginIdentity | null;
+  interface?: string | null;
+  operation?: {
+    action?: string | null;
+    tool?: string | null;
+    route?: string | null;
+    subsystem?: string | null;
+  } | null;
+}
+
 interface FactCardProps {
   fact: Fact;
   onClick?: () => void;
 }
 
 export default function FactCard({ fact, onClick }: FactCardProps) {
+  const userName = memoryUserName(fact);
+  const origin = memoryOriginLabel(fact);
+
   return (
     <button
       type="button"
@@ -82,6 +108,8 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
       <div className="mt-2 flex items-center gap-3 text-xs text-zinc-500">
         <span>{relativeTime(fact.created_at)}</span>
         <span>{Math.round(fact.confidence * 100)}% conf</span>
+        {userName && <ProvChip label="user" value={userName} />}
+        {origin && <ProvChip label="origin" value={origin} />}
         {(fact.usefulness_rated_count ?? 0) > 0 && <span>{signalBreakdown(fact)}</span>}
         {fact.score != null && <span>score {fact.score.toFixed(3)}</span>}
         {fact.workstream_key && <ProvChip label="ws" value={fact.workstream_key} />}
@@ -94,6 +122,47 @@ export default function FactCard({ fact, onClick }: FactCardProps) {
       </div>
     </button>
   );
+}
+
+export function memoryUserName(fact: Fact): string | null {
+  return nonEmpty(fact.user_name)
+    ?? identityLabel(fact.origin?.user)
+    ?? nonEmpty(fact.metadata?.actor_label)
+    ?? identityLabel(fact.last_operation_origin?.user);
+}
+
+export function memoryOriginAgentLabel(fact: Fact): string | null {
+  return identityLabel(fact.origin?.agent);
+}
+
+export function memoryOriginLabel(fact: Fact): string | null {
+  return operationLabel(fact.origin) ?? nonEmpty(fact.source);
+}
+
+export function memoryLastOperationUserName(fact: Fact): string | null {
+  return identityLabel(fact.last_operation_origin?.user);
+}
+
+export function memoryLastOperationLabel(fact: Fact): string | null {
+  return operationLabel(fact.last_operation_origin);
+}
+
+function operationLabel(origin: OperationOrigin | null | undefined): string | null {
+  const surface = nonEmpty(origin?.interface) ?? nonEmpty(origin?.agent?.type);
+  const target = nonEmpty(origin?.operation?.subsystem) ?? nonEmpty(origin?.operation?.tool);
+  const action = nonEmpty(origin?.operation?.action);
+  const parts = [surface, target, action].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join("/") : null;
+}
+
+function identityLabel(identity: OriginIdentity | null | undefined): string | null {
+  return nonEmpty(identity?.name) ?? nonEmpty(identity?.id);
+}
+
+function nonEmpty(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function signalBreakdown(fact: Fact): string {

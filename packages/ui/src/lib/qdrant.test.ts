@@ -112,6 +112,39 @@ describe("ui/lib/qdrant", () => {
         { key: "created_at", range: { lte: "2024-12-31" } },
       ]);
     });
+
+    it("excludes telemetry by default while preserving explicit telemetry requests", () => {
+      const defaultFilter = buildFilter({ excludeTelemetry: true });
+      assert.deepEqual(defaultFilter.must_not, [
+        { key: "kind", match: { value: "telemetry" } },
+      ]);
+
+      const telemetryKind = buildFilter({ kind: "telemetry", excludeTelemetry: true });
+      assert.equal(telemetryKind.must_not, undefined);
+
+      const telemetrySubtype = buildFilter({ memorySubtype: "recall_event", excludeTelemetry: true });
+      assert.equal(telemetrySubtype.must_not, undefined);
+    });
+
+    it("excludes system lifecycle metadata by default while preserving explicit system requests", () => {
+      const defaultFilter = buildFilter({ excludeSystem: true });
+      assert.deepEqual(defaultFilter.must_not, [
+        { key: "category", match: { value: "system" } },
+        { key: "memory_subtype", match: { any: ["session_index", "episode", "workstream"] } },
+      ]);
+
+      const systemCategory = buildFilter({ category: "system", excludeSystem: true });
+      assert.equal(systemCategory.must_not, undefined);
+
+      const sessionIndexSubtype = buildFilter({ memorySubtype: "session_index", excludeSystem: true });
+      assert.equal(sessionIndexSubtype.must_not, undefined);
+
+      const summaryKind = buildFilter({ kind: "summary", excludeSystem: true });
+      assert.deepEqual(summaryKind.must_not, [
+        { key: "category", match: { value: "system" } },
+        { key: "memory_subtype", match: { any: ["session_index", "episode", "workstream"] } },
+      ]);
+    });
   });
 
   describe("QdrantClient", () => {

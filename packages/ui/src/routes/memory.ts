@@ -155,6 +155,36 @@ const KEYWORD_SEARCH_PAGE_SIZE = 100;
 const KEYWORD_SEARCH_SCAN_LIMIT = 5_000;
 const USEFULNESS_BROWSE_SCAN_LIMIT = 5_000;
 
+const userFacingFilterDefaults = {
+  excludeSuperseded: true,
+  excludeEntityType: true,
+  excludeTelemetry: true,
+  excludeSystem: true,
+} as const;
+
+const userFacingFilterOptions = (c: Context) => ({
+  ...userFacingFilterDefaults,
+  excludeSuperseded: c.req.query("include_superseded") !== "true",
+});
+
+const TELEMETRY_MEMORY_SUBTYPE_VALUES = new Set([
+  "recall_event",
+  "feedback_event",
+  "outcome_event",
+  "aggregate_rollup",
+]);
+
+const SYSTEM_MEMORY_SUBTYPE_VALUES = new Set([
+  "session_index",
+  "episode",
+  "workstream",
+]);
+
+const INTERNAL_MEMORY_SUBTYPE_VALUES = new Set([
+  ...TELEMETRY_MEMORY_SUBTYPE_VALUES,
+  ...SYSTEM_MEMORY_SUBTYPE_VALUES,
+]);
+
 const keywordValueText = (value: unknown): string[] => {
   if (value === undefined || value === null || value === "") return [];
   if (Array.isArray(value)) return value.flatMap(keywordValueText);
@@ -239,7 +269,7 @@ memoryRoutes.get("/search", async (c) => {
     entity: c.req.query("entity"),
     source: c.req.query("source"),
     actorId: c.req.query("actor_id"),
-    excludeEntityType: true,
+    ...userFacingFilterOptions(c),
   });
 
   const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 100);
@@ -293,7 +323,7 @@ memoryRoutes.get("/browse", async (c) => {
     actorId: c.req.query("actor_id"),
     since: c.req.query("since"),
     until: c.req.query("until"),
-    excludeEntityType: true,
+    ...userFacingFilterOptions(c),
   });
 
   const limit = Math.min(parseInt(c.req.query("limit") || "20", 10), 100);
@@ -929,8 +959,9 @@ memoryRoutes.get("/stats", async (c) => {
   const kind = c.req.query("kind") || undefined;
   const source = c.req.query("source") || undefined;
   const statsFilter = { kind, source };
+  const includeSuperseded = c.req.query("include_superseded") === "true";
   const destQuery = c.req.query("destination") || "_default";
-  const cacheKey = `stats:dest=${destQuery}:kind=${kind ?? ""}:source=${source ?? ""}`;
+  const cacheKey = `stats:dest=${destQuery}:kind=${kind ?? ""}:source=${source ?? ""}:include_superseded=${includeSuperseded ? "true" : "false"}`;
   if (!refresh) {
     const hit = cacheGet<unknown>(cacheKey);
     if (hit) return c.json(hit);
@@ -943,14 +974,21 @@ memoryRoutes.get("/stats", async (c) => {
     const safeCount = async (filter?: QdrantFilter) => {
       try { return await qdrant.count(filter); } catch { return 0; }
     };
-    const [info, catCounts, kindCounts, subtypeCounts, allCount] = await Promise.all([
-      qdrant.collectionInfo(),
-      Promise.all(CATEGORY_VALUES.map(async (cat) => [cat, await safeCount(buildFilter({ ...statsFilter, category: cat }))] as const)),
-      Promise.all(KIND_VALUES.map(async (k) => [k, await safeCount(buildFilter({ source, kind: k }))] as const)),
-      Promise.all(MEMORY_SUBTYPE_VALUES.map(async (subtype) => [subtype, await safeCount(buildFilter({ ...statsFilter, memorySubtype: subtype }))] as const)),
-      safeCount(buildFilter(statsFilter)),
+    const filterOptions = userFacingFilterOptions(c);
+    const baseStatsFilter = { ...statsFilter, ...filterOptions };
+    const visibleCategoryValues = CATEGORY_VALUES.filter((cat) => cat !== "system");
+    const visibleKindValues = kind === "telemetry" ? KIND_VALUES : KIND_VALUES.filter((k) => k !== "telemetry");
+    const visibleSubtypeValues = kind === "telemetry"
+      ? MEMORY_SUBTYPE_VALUES.filter((subtype) => TELEMETRY_MEMORY_SUBTYPE_VALUES.has(subtype))
+      : MEMORY_SUBTYPE_VALUES.filter((subtype) => !INTERNAL_MEMORY_SUBTYPE_VALUES.has(subtype));
+    const [catCounts, kindCounts, subtypeCounts, totalCount, activeCount] = await Promise.all([
+      Promise.all(visibleCategoryValues.map(async (cat) => [cat, await safeCount(buildFilter({ ...baseStatsFilter, category: cat }))] as const)),
+      Promise.all(visibleKindValues.map(async (k) => [k, await safeCount(buildFilter({ source, kind: k, ...filterOptions }))] as const)),
+      Promise.all(visibleSubtypeValues.map(async (subtype) => [subtype, await safeCount(buildFilter({ ...baseStatsFilter, memorySubtype: subtype }))] as const)),
+      safeCount(buildFilter(baseStatsFilter)),
+      safeCount(buildFilter({ ...baseStatsFilter, excludeSuperseded: true })),
     ]);
-    return { info, catCounts, kindCounts, subtypeCounts, allCount };
+    return { catCounts, kindCounts, subtypeCounts, totalCount, activeCount };
   }));
 
   // Sum across destinations
@@ -959,8 +997,8 @@ memoryRoutes.get("/stats", async (c) => {
     for (const list of lists) for (const [k, v] of list) out[k] = (out[k] ?? 0) + v;
     return out;
   };
-  const total = perDest.reduce((s, r) => s + r.info.points_count, 0);
-  const active = perDest.reduce((s, r) => s + r.allCount, 0);
+  const total = perDest.reduce((s, r) => s + r.totalCount, 0);
+  const active = perDest.reduce((s, r) => s + r.activeCount, 0);
   const payload = {
     total,
     active,

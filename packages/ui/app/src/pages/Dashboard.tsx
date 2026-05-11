@@ -109,7 +109,7 @@ export default function Dashboard() {
       {/* Stats row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <StatCard label="Active Facts" value={active} />
-        <StatCard label="Total Stored" value={total} sub={`${superseded} superseded`} />
+        <StatCard label="Total Stored" value={total} sub={superseded > 0 ? `${superseded} superseded` : undefined} />
         <StatCard label="Categories" value={BROWSABLE_CATEGORY_OPTIONS.length} />
         <StatCard label="Subtypes" value={activeSubtypeCount} sub={`${subtypeTotal.toLocaleString()} typed memories`} />
       </div>
@@ -134,6 +134,7 @@ export default function Dashboard() {
           <h3 className="text-sm font-medium text-zinc-400 mb-4">Facts by Kind</h3>
           <div className="space-y-3">
             {Object.entries(byKind)
+              .filter(([, count]) => count > 0)
               .sort(([, a], [, b]) => b - a)
               .map(([kind, count]) => (
                 <div
