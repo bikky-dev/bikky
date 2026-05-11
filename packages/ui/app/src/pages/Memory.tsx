@@ -66,6 +66,11 @@ function presetSinceDate(days: number): string {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function setDateRangeParams(params: URLSearchParams, since: string, until: string): void {
+  if (since) params.set("since", new Date(since).toISOString());
+  if (until) params.set("until", new Date(until + "T23:59:59").toISOString());
+}
+
 interface BrowseResponse {
   results: Fact[];
   count: number;
@@ -146,6 +151,7 @@ export default function Memory() {
           if (entity) params.set("entity", entity);
           if (sort) params.set("sort", sort);
           if (usefulness) params.set("usefulness", usefulness);
+          setDateRangeParams(params, since, until);
           params.set("limit", String(append ? results.length + PAGE_SIZE : PAGE_SIZE));
 
           const data = await apiFetch<SearchResponse>(`/api/memory/search?${params}`);
@@ -162,8 +168,7 @@ export default function Memory() {
           if (entity) params.set("entity", entity);
           if (sort) params.set("sort", sort);
           if (usefulness) params.set("usefulness", usefulness);
-          if (since) params.set("since", new Date(since).toISOString());
-          if (until) params.set("until", new Date(until + "T23:59:59").toISOString());
+          setDateRangeParams(params, since, until);
           params.set("limit", String(PAGE_SIZE));
           if (append && offset) params.set("offset", String(offset));
 
@@ -277,6 +282,7 @@ export default function Memory() {
         <div className="relative flex-1">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
           <input
+            aria-label="Search memory"
             type="text"
             placeholder="Search memory…"
             value={query}
@@ -343,6 +349,7 @@ export default function Memory() {
                   type="button"
                   onClick={() => applyCategory(cat.value)}
                   className={pillCls(categories.includes(cat.value))}
+                  aria-label={`${categories.includes(cat.value) ? "Remove" : "Add"} category ${cat.label}`}
                   title={`${categoryCount(cat.value).toLocaleString()} facts`}
                 >
                   {categories.includes(cat.value) ? "Selected" : "Add"}
@@ -358,6 +365,7 @@ export default function Memory() {
                       type="button"
                       onClick={() => applySubtype(subtype.value)}
                       className={pillCls(memorySubtypes.includes(subtype.value))}
+                      aria-label={`${memorySubtypes.includes(subtype.value) ? "Remove" : "Add"} subtype ${subtype.label}`}
                       title={subtype.description}
                     >
                       {subtype.label}
@@ -375,20 +383,39 @@ export default function Memory() {
       <div className="flex flex-wrap items-center gap-2 mb-6">
         <div className="flex items-center gap-1.5">
           <ArrowUpDown size={14} className="text-zinc-500" />
-          <select value={sort} onChange={(e) => setSort(e.target.value)} className={selectCls}>
+          <select
+            aria-label="Sort memories"
+            value={sort}
+            onChange={(e) => setSort(e.target.value)}
+            className={selectCls}
+          >
             {SORT_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
         </div>
-        <select value={usefulness} onChange={(e) => setUsefulness(e.target.value)} className={selectCls}>
+        <select
+          aria-label="Usefulness filter"
+          value={usefulness}
+          onChange={(e) => setUsefulness(e.target.value)}
+          className={selectCls}
+        >
           {USEFULNESS_FILTER_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
+        <input
+          aria-label="Entity filter"
+          type="text"
+          placeholder="Entity"
+          value={entity}
+          onChange={(e) => setEntity(e.target.value)}
+          className="bg-zinc-900 border border-zinc-700 rounded-md px-2 py-1.5 text-sm text-zinc-300 placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
+        />
         <div className="flex items-center gap-1.5 text-sm text-zinc-400">
           <span>From</span>
           <input
+            aria-label="From date"
             type="date"
             value={since}
             onChange={(e) => setSince(e.target.value)}
@@ -396,6 +423,7 @@ export default function Memory() {
           />
           <span>to</span>
           <input
+            aria-label="Until date"
             type="date"
             value={until}
             onChange={(e) => setUntil(e.target.value)}
