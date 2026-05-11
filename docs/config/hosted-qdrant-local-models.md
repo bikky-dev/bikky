@@ -8,6 +8,7 @@ Use this path when you want memory shared across machines, but you still want em
 - A Qdrant API key.
 - Ollama installed locally.
 - The default embedding model pulled with `ollama pull qwen3-embedding:0.6b`.
+- The default LLM model pulled with `ollama pull qwen2.5:7b`.
 
 ## Config
 
