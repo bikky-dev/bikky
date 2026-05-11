@@ -11,7 +11,7 @@ cat > ~/.bikky/config.json <<'JSON'
   "embedding": {
     "provider": "openai",
     "model": "text-embedding-3-small",
-    "dimensions": 1536,
+    "dimensions": 1024,
     "api_key": "sk-..."
   },
   "llm": {
@@ -24,7 +24,7 @@ JSON
 bikky status
 ```
 
-Config lives at `~/.bikky/config.json`, or at `BIKKY_HOME/config.json` when `BIKKY_HOME` is set. Environment variables override the config file.
+Config lives at `~/.bikky/config.json`, or at `BIKKY_HOME/config.json` when `BIKKY_HOME` is set. Environment variables can supply or override most scalar settings. Provider API key env vars such as `OPENAI_API_KEY` and `PORTKEY_API_KEY` are fallback values when the matching `api_key` field is omitted from config; remove the config value when you want key rotation through the environment.
 
 ## Origin identity
 
@@ -64,7 +64,7 @@ Best for performance and teams. Qdrant Cloud stores vectors, and hosted embeddin
   "embedding": {
     "provider": "openai",
     "model": "text-embedding-3-small",
-    "dimensions": 1536,
+    "dimensions": 1024,
     "api_key": "sk-..."
   },
   "llm": {
@@ -88,7 +88,7 @@ Best for local vector storage with hosted extraction and embedding quality.
   "embedding": {
     "provider": "openai",
     "model": "text-embedding-3-small",
-    "dimensions": 1536,
+    "dimensions": 1024,
     "api_key": "sk-..."
   },
   "llm": {
@@ -99,7 +99,7 @@ Best for local vector storage with hosted extraction and embedding quality.
 }
 ```
 
-`qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant. Prefer env vars for hosted model auth? Omit `api_key` above and set `OPENAI_API_KEY` instead.
+`qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant. Prefer env vars for hosted model auth? Omit `api_key` above and set `OPENAI_API_KEY` or `PORTKEY_API_KEY` for the selected provider instead.
 
 ### Local and free
 
@@ -148,15 +148,17 @@ export QDRANT_API_KEY="..."  # only needed for Qdrant Cloud or authenticated sel
 
 Useful basics:
 
-| Env var          | Config field     | Notes                                                                       |
-| ---------------- | ---------------- | --------------------------------------------------------------------------- |
-| `QDRANT_URL`     | `qdrant_url`     | Required unless set in config                                               |
-| `QDRANT_API_KEY` | `qdrant_api_key` | Optional for local/unauthenticated Qdrant; usually needed for Qdrant Cloud  |
-| `BIKKY_HOME`     | —                | Moves the config/log/state directory from `~/.bikky`                        |
-| `BIKKY_USER_ID`  | `identity.user_id` | Explicit human user id for origin provisioning                            |
-| `BIKKY_USER_NAME` | `identity.user_name` | Human-readable human user name for origin provisioning                  |
-| `BIKKY_AGENT_ID` | —                | Optional local automated-agent id stored in `origin.agent`                  |
-| `BIKKY_AGENT_NAME` | —              | Optional local automated-agent label stored in `origin.agent`               |
+| Env var            | Config field          | Notes                                                                                   |
+| ------------------ | --------------------- | --------------------------------------------------------------------------------------- |
+| `QDRANT_URL`       | `qdrant_url`          | Required unless set in config                                                           |
+| `QDRANT_API_KEY`   | `qdrant_api_key`      | Optional for local/unauthenticated Qdrant; usually needed for Qdrant Cloud              |
+| `OPENAI_API_KEY`   | `embedding.api_key` / `llm.api_key` | Fallback key for `openai` when `api_key` is omitted from config              |
+| `PORTKEY_API_KEY`  | `embedding.api_key` / `llm.api_key` | Fallback key for `portkey` when `api_key` is omitted from config             |
+| `BIKKY_HOME`       | —                     | Moves the config/log/state directory from `~/.bikky`                                    |
+| `BIKKY_USER_ID`    | `identity.user_id`    | Explicit human user id for origin provisioning                                          |
+| `BIKKY_USER_NAME`  | `identity.user_name`  | Human-readable human user name for origin provisioning                                  |
+| `BIKKY_AGENT_ID`   | —                     | Optional local automated-agent id stored in `origin.agent`                              |
+| `BIKKY_AGENT_NAME` | —                     | Optional local automated-agent label stored in `origin.agent`                           |
 
 ## Provider options
 
@@ -167,7 +169,7 @@ Use these exact values in `embedding.provider` and `llm.provider`. Both fields a
 | `ollama`       | Yes                  | Yes           | Local and free defaults              | None                              |
 | `openai`       | Yes                  | Yes           | Simple hosted models                 | `OPENAI_API_KEY` or `api_key`     |
 | `bedrock`      | Yes                  | Yes           | AWS-managed models                   | AWS credentials or IAM role       |
-| `portkey`      | Yes                  | Yes           | Gateway/routing over other providers | Portkey API key                   |
+| `portkey`      | Yes                  | Yes           | Gateway/routing over other providers | `PORTKEY_API_KEY` or `api_key`    |
 
 ## Advanced configuration
 
@@ -193,7 +195,7 @@ These sections are optional references for custom providers, tuning, scoping, an
 | `embedding.model`      | `EMBEDDING_MODEL`      | `qwen3-embedding:0.6b`   | Embedding model name                            |
 | `embedding.dimensions` | `EMBEDDING_DIMENSIONS` | `1024`                   | Must match the selected model output            |
 | `embedding.base_url`   | `EMBEDDING_BASE_URL`   | `http://localhost:11434` | Used by local or OpenAI-compatible providers    |
-| `embedding.api_key`    | `OPENAI_API_KEY`       | —                        | Provider API key; can also be set in config     |
+| `embedding.api_key`    | `OPENAI_API_KEY` / `PORTKEY_API_KEY` | —             | Provider API key; env vars are fallback when omitted from config |
 
 Common model dimensions:
 
@@ -205,7 +207,7 @@ Common model dimensions:
 | `openai`  | `text-embedding-3-large`         | `3072`     |
 | `bedrock` | `amazon.titan-embed-text-v2:0`   | `1024`     |
 
-If you change the embedding model, make sure `embedding.dimensions` matches the model output.
+bikky's examples use `1024` because that is the portable default across supported providers. OpenAI 3-series embedding models can return their larger native dimensions above, but they also support shorter outputs; if you change `embedding.dimensions`, make sure the selected model and every Qdrant collection use the same dimension.
 
 #### LLM
 
@@ -216,7 +218,7 @@ The LLM is used by background maintenance features. Ollama is the default.
 | `llm.provider`     | `LLM_PROVIDER`                       | `ollama`                 | One of `ollama`, `openai`, `bedrock`, `portkey` |
 | `llm.model`        | `LLM_MODEL`                          | `qwen2.5:7b`             | LLM model name                               |
 | `llm.base_url`     | `LLM_BASE_URL`                       | `http://localhost:11434` | Used by local or OpenAI-compatible providers |
-| `llm.api_key`      | `OPENAI_API_KEY`                     | —                        | Provider API key; can also be set in config  |
+| `llm.api_key`      | `OPENAI_API_KEY` / `PORTKEY_API_KEY` | —                        | Provider API key; env vars are fallback when omitted from config |
 | `llm.extra.region` | `AWS_BEDROCK_REGION` / `AWS_REGION`  | `us-east-1`              | AWS Bedrock region                           |
 
 #### Timeouts and retries
@@ -243,7 +245,7 @@ Retries use jittered exponential backoff for transient errors, rate limits, and 
   "embedding": {
     "provider": "portkey",
     "model": "@openai/text-embedding-3-small",
-    "dimensions": 1536,
+    "dimensions": 1024,
     "api_key": "pk-..."
   },
   "llm": {
@@ -298,7 +300,7 @@ MCP clients can override this per call with `search_scope`. The value accepts `"
   "embedding": {
     "provider": "openai",
     "model": "text-embedding-3-small",
-    "dimensions": 1536
+    "dimensions": 1024
   },
   "llm": {
     "provider": "openai",

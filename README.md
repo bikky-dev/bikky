@@ -60,7 +60,7 @@ cat > ~/.bikky/config.json <<'JSON'
   "embedding": {
     "provider": "openai",
     "model": "text-embedding-3-small",
-    "dimensions": 1536,
+    "dimensions": 1024,
     "api_key": "sk-..."
   },
   "llm": {
@@ -105,7 +105,7 @@ bikky supports four common setup shapes. Pick based on where you want Qdrant to 
 | **LLM**                 | One provider                   | Portkey · OpenAI · Ollama · Bedrock                                                     |
 | **Docker** *(optional)* | Only if you run Qdrant locally | Docker Desktop, OrbStack, colima, etc.                                                   |
 
-Both `embedding.provider` and `llm.provider` accept the same values: `ollama`, `openai`, `bedrock`, or `portkey`. **Portkey is the easiest cloud option** — one API key, any upstream provider, with built-in routing/fallbacks. Bikky's canonical embedding dimension is **1024**, portable across every modern provider.
+Both `embedding.provider` and `llm.provider` accept the same values: `ollama`, `openai`, `bedrock`, or `portkey`. **Portkey is the easiest cloud option** — one API key, any upstream provider, with built-in routing/fallbacks. Bikky's canonical embedding dimension is **1024**, portable across every modern provider. Some providers expose larger native dimensions (for example OpenAI `text-embedding-3-small` can return 1536), but the docs use 1024 so you can switch providers later without rebuilding every collection.
 
 > ⚠️ **Qdrant Cloud free tier does not include automatic backups.** Deleted collections cannot be recovered. If your memory data is valuable, use a paid Qdrant Cloud plan (which includes daily backups), run Qdrant locally with your own backup strategy, or periodically export snapshots via the [Qdrant snapshots API](https://qdrant.tech/documentation/concepts/snapshots/).
 
@@ -196,9 +196,9 @@ bikky-ui              # opens http://localhost:1422
 <p align="center"><i>Dashboard — memory stats, category breakdown, and recent facts at a glance</i></p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/screenshots/memory.png" alt="Memory browser — search, filter, and browse all stored facts" width="720" />
+  <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/screenshots/memory.png" alt="Memory browser — search, filter, and browse current user-facing memories" width="720" />
 </p>
-<p align="center"><i>Memory browser — search, filter by category/kind/origin, and browse all stored facts</i></p>
+<p align="center"><i>Memory browser — search, filter by category, subtype, entity, usefulness, date, and sort order</i></p>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/screenshots/graph.png" alt="Entity graph — interactive visualization of entity relationships" width="720" />
@@ -206,6 +206,10 @@ bikky-ui              # opens http://localhost:1422
 <p align="center"><i>Entity graph — interactive visualization of how concepts, people, and services relate</i></p>
 
 The UI reads from your existing `~/.bikky/config.json` (or `BIKKY_HOME/config.json`) — no extra configuration required.
+
+By default, the dashboard, memory list, and search results show current user-facing memories only. Internal telemetry, system lifecycle summaries (`session_index`, `episode`, `workstream`), entity sidecars, and superseded archive records are hidden from the main views so counts match what you normally mean by "memories." Diagnostic API queries can still request those records explicitly, including superseded records with `include_superseded=true`.
+
+Memory cards and detail pages also surface provenance from canonical `origin` metadata: the configured user, origin surface/operation, agent, last operation, repo, branch, workstream, task, session, and episode when present. Older records that only have legacy `source`, `actor_id`, or `metadata.actor_label` still display useful fallback labels.
 
 ## CLI
 

@@ -9,6 +9,7 @@ This setup is best for private/free testing rather than long-term team use. Extr
 - Qdrant running locally, usually with Docker.
 - Ollama installed locally.
 - The default embedding model pulled with `ollama pull qwen3-embedding:0.6b`.
+- The default LLM model pulled with `ollama pull qwen2.5:7b`.
 
 ## Config
 
