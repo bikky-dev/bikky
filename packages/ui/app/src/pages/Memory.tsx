@@ -527,7 +527,7 @@ function ActiveFilterChip({ filter }: { filter: ActiveFilter }) {
         type="button"
         onClick={filter.onClear}
         className="text-zinc-500 hover:text-zinc-200"
-        aria-label={`Clear ${filter.label} filter`}
+        aria-label={`Clear ${filter.label} filter ${filter.value}`}
       >
         ×
       </button>
