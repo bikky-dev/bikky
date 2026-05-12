@@ -27,3 +27,4 @@
 - 2026-05-12 19:47 AEST — Verification passed: `npm test`, `cd packages/ui && npm test`, `cd packages/ui && npm run test:e2e`, `cd packages/ui && npm run build`, `npm run check`.
 - 2026-05-12 19:48 AEST — Backfill dry-run reported 312 target points: 155 in `perso/bikky`, 157 in `work/bikky`; no data mutations performed.
 - 2026-05-12 19:54 AEST — User approved Qdrant backfill apply. Applied migration to 312 target points, then verified a follow-up dry-run found 0 remaining target points.
+- 2026-05-12 19:59 AEST — Legacy running MCP tooling created 2 additional `activity_event` points with `category=human` while recording the outcome. Re-ran the approved backfill guard, migrated those 2 points to Engineering, and verified the final dry-run found 0 remaining target points.
