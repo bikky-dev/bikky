@@ -44,7 +44,6 @@ describe("daemon/capture-policy", () => {
   it("maps categories to deterministic default fact subtypes", () => {
     assert.strictEqual(subtypeForCategory("engineering"), "codebase_map");
     assert.strictEqual(subtypeForCategory("product"), "domain_rule");
-    assert.strictEqual(subtypeForCategory("human"), "preference");
     assert.strictEqual(subtypeForCategory("system"), "codebase_map");
   });
 

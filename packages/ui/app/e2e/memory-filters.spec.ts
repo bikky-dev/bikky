@@ -27,9 +27,8 @@ interface MockMemoryApiOptions {
 }
 
 const categoryCounts = {
-  engineering: 4,
+  engineering: 6,
   product: 3,
-  human: 2,
 };
 
 const subtypeCounts = {
@@ -169,7 +168,7 @@ test("Memory restores URL filter state and clears individual active filters", as
   const expectedUntil = new Date("2026-01-09T23:59:59").toISOString();
 
   await page.goto(
-    "/memory?category=product,human&memory_subtype=product_decision&entity=bikky-ui&usefulness=positive&since=2026-01-02&until=2026-01-09&sort=oldest",
+    "/memory?category=product,engineering&memory_subtype=product_decision&entity=bikky-ui&usefulness=positive&since=2026-01-02&until=2026-01-09&sort=oldest",
   );
 
   await expect(page.getByRole("combobox", { name: "Sort memories" })).toHaveValue("oldest");
@@ -178,7 +177,7 @@ test("Memory restores URL filter state and clears individual active filters", as
   await expect(page.getByLabel("From date")).toHaveValue("2026-01-02");
   await expect(page.getByLabel("Until date")).toHaveValue("2026-01-09");
   await expectRequest(captured, "/api/memory/browse", {
-    category: "product,human",
+    category: "product,engineering",
     memory_subtype: "product_decision",
     entity: "bikky-ui",
     usefulness: "positive",
@@ -190,7 +189,7 @@ test("Memory restores URL filter state and clears individual active filters", as
 
   await page.getByRole("button", { name: "Clear Category filter Product (3)" }).click();
   await expectRequest(captured, "/api/memory/browse", {
-    category: "human",
+    category: "engineering",
     memory_subtype: "product_decision",
     entity: "bikky-ui",
     usefulness: "positive",
@@ -202,7 +201,7 @@ test("Memory restores URL filter state and clears individual active filters", as
 
   await page.getByRole("button", { name: "Clear Subtype filter Product decision (2)" }).click();
   await expectRequest(captured, "/api/memory/browse", {
-    category: "human",
+    category: "engineering",
     memory_subtype: null,
     entity: "bikky-ui",
     usefulness: "positive",
@@ -214,7 +213,7 @@ test("Memory restores URL filter state and clears individual active filters", as
 
   await page.getByRole("button", { name: "Clear Entity filter bikky-ui" }).click();
   await expectRequest(captured, "/api/memory/browse", {
-    category: "human",
+    category: "engineering",
     memory_subtype: null,
     entity: null,
     usefulness: "positive",
@@ -226,7 +225,7 @@ test("Memory restores URL filter state and clears individual active filters", as
 
   await page.getByRole("button", { name: "Clear From filter 2026-01-02" }).click();
   await expectRequest(captured, "/api/memory/browse", {
-    category: "human",
+    category: "engineering",
     memory_subtype: null,
     entity: null,
     usefulness: "positive",
@@ -299,11 +298,11 @@ test("Memory shows empty and error states", async ({ page }) => {
   });
 
   failBrowse = true;
-  await page.goto("/memory?category=human");
+  await page.goto("/memory?category=engineering");
 
   await expect(page.getByText("Qdrant is unavailable")).toBeVisible();
   await expectRequest(captured, "/api/memory/browse", {
-    category: "human",
+    category: "engineering",
     destination: "all",
   });
 });

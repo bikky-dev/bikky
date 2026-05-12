@@ -171,7 +171,8 @@ describe("daemon/extraction prompt", () => {
     assert.ok(!DEFAULT_EXTRACTION_PROMPT.includes("work or personal"));
     assert.ok(!DEFAULT_EXTRACTION_PROMPT.includes("Telegram"));
     assert.ok(!DEFAULT_EXTRACTION_PROMPT.includes("WhatsApp"));
-    assert.ok(DEFAULT_EXTRACTION_PROMPT.includes("engineering | product | human | system"));
+    assert.ok(DEFAULT_EXTRACTION_PROMPT.includes("engineering | product | system"));
+    assert.ok(!DEFAULT_EXTRACTION_PROMPT.includes("engineering | product | human | system"));
     assert.ok(DEFAULT_EXTRACTION_PROMPT.includes("product_decision"));
     assert.ok(DEFAULT_EXTRACTION_PROMPT.includes("activity_event"));
   });
@@ -189,8 +190,8 @@ describe("normalizeExtractedFact", () => {
     });
 
     assert.ok(fact);
-    assert.strictEqual(fact.category, "human");
-    assert.strictEqual(fact.memory_subtype, "preference");
+    assert.strictEqual(fact.category, "engineering");
+    assert.strictEqual(fact.memory_subtype, "person_profile");
     assert.deepStrictEqual(fact.entities, ["node", "npm-test"]);
   });
 
@@ -253,7 +254,7 @@ describe("normalizeExtractedFact", () => {
     });
 
     assert.ok(fact);
-    assert.strictEqual(fact.category, "human");
+    assert.strictEqual(fact.category, "engineering");
     assert.strictEqual(fact.memory_subtype, "activity_event");
     assert.strictEqual(fact.action_actor, "Saber");
     assert.strictEqual(fact.action_type, "merged");

@@ -15,7 +15,6 @@ export const BRIEF_PROMPT_DESCRIPTOR: PromptDescriptor = {
 const ALLOWED_HEADINGS = [
   "Engineering",
   "Product",
-  "Human",
   "System",
 ] as const;
 

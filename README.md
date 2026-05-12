@@ -26,7 +26,7 @@ The most valuable things you and your agents learn — why a config value exists
 bikky gives your agent memory tools and runs a small background service after `bikky setup`. You keep working normally; bikky captures useful facts, organizes them, recalls them in future sessions, and keeps the store tidy over time.
 
 - **Capture** — Facts are extracted automatically from session transcripts; no manual docs to write.
-- **Classify** — Memories are grouped as **engineering**, **product**, **human**, or **system** so they stay easy to browse and filter.
+- **Classify** — Memories are grouped as **engineering**, **product**, or **system** so they stay easy to browse and filter.
 - **Recall** — Every new session, yours or a teammate's, recalls from the same store via semantic search.
 - **Curate** — bikky merges duplicates, fades stale facts, resolves contradictions, distills recurring patterns, and builds an entity graph over time.
 - **Compound** — Session 50 is dramatically better than session 1 because memory accumulates.
@@ -34,9 +34,8 @@ bikky gives your agent memory tools and runs a small background service after `b
 
 Subtypes keep recall precise without making setup harder:
 
-- **Engineering** — codebase maps, architecture decisions, infra topology, access patterns, operational procedures, troubleshooting gotchas, and conventions.
+- **Engineering** — codebase maps, architecture decisions, infra topology, access patterns, operational procedures, troubleshooting gotchas, conventions, preferences, person/ownership context, working agreements, and durable activity events.
 - **Product** — domain rules, product decisions, requirements, user workflows, roadmap items, success metrics, and market insights.
-- **Human** — preferences, person profiles, ownership notes, working agreements, and activity events.
 - **System** — session indexes, episodes, workstreams, and feedback signals.
 
 ---

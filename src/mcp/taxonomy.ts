@@ -26,14 +26,6 @@ export const CATEGORIES = {
       "Activation should be measured by whether agents successfully reuse recalled memory.",
     ],
   },
-  human: {
-    description:
-      "Human context: explicit preferences, people and roles, ownership, working agreements, and durable actor-action activity events.",
-    examples: [
-      "Saber prefers concise implementation plans before code changes.",
-      "Alex approved PR #85 for merge.",
-    ],
-  },
   system: {
     description:
       "System context: Bikky-owned lifecycle memory, session indexes, episodes, workstreams, recall/feedback/outcome telemetry, and aggregate rollups.",
@@ -59,7 +51,6 @@ export const DOMAINS = {
     defaultCategories: [
       "engineering",
       "product",
-      "human",
       "system",
     ] as const,
   },
@@ -68,7 +59,7 @@ export const DOMAINS = {
       "Product direction, positioning, roadmap tradeoffs, customer problems, metrics, and market learning.",
     defaultCategories: [
       "product",
-      "human",
+      "engineering",
       "system",
     ] as const,
   },
@@ -77,7 +68,7 @@ export const DOMAINS = {
       "Business process, vendors, finance, legal/admin operations, recurring procedures, and ownership.",
     defaultCategories: [
       "product",
-      "human",
+      "engineering",
       "system",
     ] as const,
   },
@@ -94,7 +85,7 @@ export const DOMAINS = {
     description:
       "Individual productivity, habits, planning preferences, reminders, and personal operating context.",
     defaultCategories: [
-      "human",
+      "engineering",
       "product",
       "system",
     ] as const,
@@ -230,11 +221,11 @@ export const MEMORY_SUBTYPE_DEFAULT_CATEGORY = {
   success_metric: "product",
   market_insight: "product",
   troubleshooting_gotcha: "engineering",
-  preference: "human",
-  person_profile: "human",
-  ownership_note: "human",
-  working_agreement: "human",
-  activity_event: "human",
+  preference: "engineering",
+  person_profile: "engineering",
+  ownership_note: "engineering",
+  working_agreement: "engineering",
+  activity_event: "engineering",
   session_index: "system",
   episode: "system",
   workstream: "system",
@@ -311,20 +302,19 @@ export const DECAY_HALF_LIFE: Record<string, number> = {
   // Software-engineering defaults.
   "engineering.software_engineering": 120,
   "product.software_engineering": 120,
-  "human.software_engineering": 180,
   "system.software_engineering": 45,
 
   // Other domain profiles.
+  "engineering.product_strategy": 180,
   "product.product_strategy": 180,
-  "human.product_strategy": 180,
   "system.product_strategy": 60,
+  "engineering.business_operations": 180,
   "product.business_operations": 120,
-  "human.business_operations": 180,
   "system.business_operations": 90,
   "product.research": 120,
   "engineering.research": 120,
   "system.research": 90,
-  "human.personal_productivity": 180,
+  "engineering.personal_productivity": 180,
   "product.personal_productivity": 90,
   "system.personal_productivity": 45,
 
@@ -433,17 +423,6 @@ export function normalizeCategory(category: string | null | undefined): Category
     normalized === "projects"
   ) return "product";
   if (
-    normalized.includes("human") ||
-    normalized.includes("people") ||
-    normalized.includes("person") ||
-    normalized.includes("owner") ||
-    normalized.includes("team") ||
-    normalized.includes("preference") ||
-    normalized.includes("agreement") ||
-    normalized.includes("activity") ||
-    normalized.includes("actor")
-  ) return "human";
-  if (
     normalized.includes("system") ||
     normalized.includes("session") ||
     normalized.includes("episode") ||
@@ -462,7 +441,16 @@ export function normalizeCategory(category: string | null | undefined): Category
     normalized.includes("code") ||
     normalized.includes("architecture") ||
     normalized.includes("troubleshoot") ||
-    normalized.includes("observation")
+    normalized.includes("observation") ||
+    normalized.includes("human") ||
+    normalized.includes("people") ||
+    normalized.includes("person") ||
+    normalized.includes("owner") ||
+    normalized.includes("team") ||
+    normalized.includes("preference") ||
+    normalized.includes("agreement") ||
+    normalized.includes("activity") ||
+    normalized.includes("actor")
   ) return "engineering";
   return DEFAULT_CATEGORY;
 }
@@ -615,15 +603,6 @@ export function getDecayHalfLife(input: {
     rawCategory.includes("market") ||
     rawCategory.includes("customer") ||
     rawCategory === "projects" ||
-    rawCategory.includes("human") ||
-    rawCategory.includes("people") ||
-    rawCategory.includes("person") ||
-    rawCategory.includes("owner") ||
-    rawCategory.includes("team") ||
-    rawCategory.includes("preference") ||
-    rawCategory.includes("agreement") ||
-    rawCategory.includes("activity") ||
-    rawCategory.includes("actor") ||
     rawCategory.includes("system") ||
     rawCategory.includes("session") ||
     rawCategory.includes("episode") ||
@@ -640,7 +619,16 @@ export function getDecayHalfLife(input: {
     rawCategory.includes("code") ||
     rawCategory.includes("architecture") ||
     rawCategory.includes("troubleshoot") ||
-    rawCategory.includes("observation");
+    rawCategory.includes("observation") ||
+    rawCategory.includes("human") ||
+    rawCategory.includes("people") ||
+    rawCategory.includes("person") ||
+    rawCategory.includes("owner") ||
+    rawCategory.includes("team") ||
+    rawCategory.includes("preference") ||
+    rawCategory.includes("agreement") ||
+    rawCategory.includes("activity") ||
+    rawCategory.includes("actor");
   if (categoryWasProvided && !categoryIsKnown) {
     return DECAY_DEFAULT_HALF_LIFE;
   }

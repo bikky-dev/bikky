@@ -11,9 +11,8 @@ export interface MemorySubtypeOption extends OntologyOption {
 }
 
 export const CATEGORY_OPTIONS: OntologyOption[] = [
-  { value: "engineering", label: "Engineering", description: "Codebase maps, architecture decisions, infrastructure topology, access, operations, troubleshooting, and conventions." },
+  { value: "engineering", label: "Engineering", description: "Codebase maps, architecture decisions, infrastructure topology, access, operations, troubleshooting, conventions, preferences, ownership, working agreements, and durable activity events." },
   { value: "product", label: "Product", description: "Domain rules, product decisions, requirements, user workflows, roadmap, success metrics, and market insight." },
-  { value: "human", label: "Human", description: "Preferences, people, ownership, working agreements, and durable actor-action activity events." },
   { value: "system", label: "System", description: "Bikky lifecycle memory: sessions, episodes, workstreams, recall/feedback/outcome telemetry, and rollups." },
 ];
 
@@ -145,7 +144,7 @@ export const MEMORY_SUBTYPE_OPTIONS: MemorySubtypeOption[] = [
     value: "person_profile",
     label: "Person profile",
     kind: "fact",
-    category: "human",
+    category: "engineering",
     description: "Durable role, expertise, team, or person context.",
     example: "Use for explicit people context that helps future collaboration.",
   },
@@ -153,7 +152,7 @@ export const MEMORY_SUBTYPE_OPTIONS: MemorySubtypeOption[] = [
     value: "ownership_note",
     label: "Ownership note",
     kind: "fact",
-    category: "human",
+    category: "engineering",
     description: "Owner, approver, escalation path, or accountability.",
     example: "Use for who owns or approves a project, component, or decision.",
   },
@@ -161,7 +160,7 @@ export const MEMORY_SUBTYPE_OPTIONS: MemorySubtypeOption[] = [
     value: "working_agreement",
     label: "Working agreement",
     kind: "fact",
-    category: "human",
+    category: "engineering",
     description: "Collaboration norm, operating rule, or approval expectation.",
     example: "Use for durable ways of working.",
   },
@@ -169,7 +168,7 @@ export const MEMORY_SUBTYPE_OPTIONS: MemorySubtypeOption[] = [
     value: "activity_event",
     label: "Activity event",
     kind: "fact",
-    category: "human",
+    category: "engineering",
     description: "Explicit actor-action-object event with durable project value.",
     example: "Use for state-changing actions like approvals, merges, releases, assignments, or decisions.",
   },
@@ -185,7 +184,7 @@ export const MEMORY_SUBTYPE_OPTIONS: MemorySubtypeOption[] = [
     value: "preference",
     label: "Preference",
     kind: "fact",
-    category: "human",
+    category: "engineering",
     description: "A user, team, or workspace preference about style, tooling, defaults, or workflow.",
     example: "Use for durable preferences that should shape future agent behavior.",
   },

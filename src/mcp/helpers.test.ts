@@ -240,7 +240,7 @@ describe("computeEffectiveConfidence", () => {
     assert.ok(effective >= 0.45 && effective <= 0.55, `Expected ~0.5, got ${effective}`);
   });
 
-  it("different categories have different decay rates", () => {
+  it("different category and domain profiles have different decay rates", () => {
     const dayOffset = 86400000 * 90; // 90 days
     const pastDate = new Date(Date.now() - dayOffset).toISOString();
 
@@ -251,20 +251,21 @@ describe("computeEffectiveConfidence", () => {
       last_verified_at: undefined,
     });
 
-    const humanPayload = makePayload({
-      category: "human",
+    const engineeringPersonalPayload = makePayload({
+      category: "engineering",
+      domain: "personal_productivity",
       confidence: 0.9,
       last_reinforced_at: pastDate,
       last_verified_at: undefined,
     });
 
     const systemEffective = computeEffectiveConfidence(systemPayload);
-    const humanEffective = computeEffectiveConfidence(humanPayload);
+    const engineeringPersonalEffective = computeEffectiveConfidence(engineeringPersonalPayload);
 
-    // human context decays slower than system lifecycle context.
+    // Personal productivity preferences now live under Engineering and decay slower than system lifecycle context.
     assert.ok(
-      humanEffective > systemEffective,
-      `human (${humanEffective}) should decay slower than system (${systemEffective})`,
+      engineeringPersonalEffective > systemEffective,
+      `engineering personal productivity (${engineeringPersonalEffective}) should decay slower than system (${systemEffective})`,
     );
   });
 });

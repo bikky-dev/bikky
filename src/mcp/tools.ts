@@ -424,9 +424,8 @@ function buildMemoryNudge(): string | null {
   // session typically produces. The agent picks the best fit.
   return `🧠 Memory nudge: No memory_store calls in ${mins} minutes. ` +
     "Reflect on what's worth persisting:\n" +
-    "  • engineering — codebase maps, architecture, infra, ops, troubleshooting?\n" +
+    "  • engineering — codebase maps, architecture, infra, ops, troubleshooting, preferences, ownership, working agreements, activity events?\n" +
     "  • product — requirements, decisions, workflows, roadmap, metrics, market insight?\n" +
-    "  • human — preferences, owners, working agreements, durable activity events?\n" +
     "  • system — session, episode, workstream, or quality-rollup memory?\n" +
     "If yes, call memory_store now so future sessions inherit the knowledge.";
 }
@@ -2392,7 +2391,7 @@ export function registerTools(mcp: McpServer): void {
         try {
           const staleThreshold = new Date(Date.now() - STALENESS_DAYS * 86400000).toISOString();
           const staleFilter: QdrantFilter = { must: [] };
-          staleFilter.must.push({ key: "category", match: { any: ["engineering", "product", "human", "system"] } });
+          staleFilter.must.push({ key: "category", match: { any: ["engineering", "product", "system"] } });
           staleFilter.should = [
             { key: "last_reinforced_at", range: { lte: staleThreshold } },
             { is_null: { key: "last_reinforced_at" } },
@@ -2431,10 +2430,9 @@ export function registerTools(mcp: McpServer): void {
 
       sections.push(
         "🔍 Reflect: think about the LAST 10 minutes of work and answer in your head:\n" +
-        "  1. Did you touch engineering context: code, infra, ops, access, troubleshooting, or conventions?\n" +
+        "  1. Did you touch engineering context: code, infra, ops, access, troubleshooting, conventions, preferences, ownership, working agreements, or durable activity events?\n" +
         "  2. Did you capture product context: a requirement, decision, workflow, roadmap item, metric, or market insight?\n" +
-        "  3. Did you learn human context: a preference, owner, working agreement, person profile, or durable activity event?\n" +
-        "  4. Did the work produce system context: session, episode, workstream, recall, feedback, outcome, or rollup state?\n" +
+        "  3. Did the work produce system context: session, episode, workstream, recall, feedback, outcome, or rollup state?\n" +
         "If any answer is yes, call memory_store now — one atomic fact per item, with category/domain/entities.",
       );
 

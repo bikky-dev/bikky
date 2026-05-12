@@ -118,8 +118,8 @@ test("renderPrompt: distill renders with summaries", () => {
 
 test("renderPrompt: contradiction renders", () => {
   const out = renderPrompt("contradiction", {
-    newFact: { content: "user lives in Berlin", category: "human" },
-    candidates: [{ id: "f1", content: "user lives in Paris", category: "human", score: 0.91 }],
+    newFact: { content: "user lives in Berlin", category: "engineering" },
+    candidates: [{ id: "f1", content: "user lives in Paris", category: "engineering", score: 0.91 }],
   });
   assert.match(out.promptName, /^contradiction@/);
   assert.ok(out.messages[1].content.includes("Berlin"));

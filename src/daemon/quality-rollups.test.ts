@@ -108,7 +108,8 @@ describe("daemon/quality-rollups", () => {
         fact("fact-2", {
           repo: "bikky-dev/bikky",
           entities: ["bikky"],
-          last_reinforced_at: "2026-03-01T00:00:00.000Z",
+          confidence: 1,
+          last_reinforced_at: "2026-04-01T00:00:00.000Z",
         }),
       ],
       events: [

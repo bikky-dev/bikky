@@ -47,7 +47,6 @@ describe("ontology values", () => {
     assert.deepStrictEqual(values, [
       "engineering",
       "product",
-      "human",
       "system",
     ]);
   });
@@ -157,7 +156,11 @@ describe("memory subtypes", () => {
     assert.strictEqual(defaultMemorySubtypeForKind("relation"), null);
     assert.strictEqual(categoryForMemorySubtype("architecture_decision"), "engineering");
     assert.strictEqual(categoryForMemorySubtype("product_decision"), "product");
-    assert.strictEqual(categoryForMemorySubtype("preference"), "human");
+    assert.strictEqual(categoryForMemorySubtype("preference"), "engineering");
+    assert.strictEqual(categoryForMemorySubtype("person_profile"), "engineering");
+    assert.strictEqual(categoryForMemorySubtype("ownership_note"), "engineering");
+    assert.strictEqual(categoryForMemorySubtype("working_agreement"), "engineering");
+    assert.strictEqual(categoryForMemorySubtype("activity_event"), "engineering");
     assert.strictEqual(categoryForMemorySubtype("session_index"), "system");
     assert.strictEqual(layerForMemorySubtype("workstream"), "workstream");
     assert.strictEqual(layerForMemorySubtype("episode"), "episode");
@@ -173,8 +176,9 @@ describe("normalization", () => {
     assert.strictEqual(normalizeCategory("Infrastructure"), "engineering");
     assert.strictEqual(normalizeCategory("infra-stuff"), "engineering");
     assert.strictEqual(normalizeCategory("product decision"), "product");
-    assert.strictEqual(normalizeCategory("owner"), "human");
-    assert.strictEqual(normalizeCategory("preferences"), "human");
+    assert.strictEqual(normalizeCategory("owner"), "engineering");
+    assert.strictEqual(normalizeCategory("preferences"), "engineering");
+    assert.strictEqual(normalizeCategory("human"), "engineering");
     assert.strictEqual(normalizeCategory("workstream"), "system");
     assert.strictEqual(normalizeCategory("something_random"), "engineering");
   });
@@ -214,10 +218,10 @@ describe("decay policy", () => {
   it("maps legacy category aliases into the four-category ontology", () => {
     assert.strictEqual(normalizeCategory("codebase"), "engineering");
     assert.strictEqual(normalizeCategory("product_domain"), "product");
-    assert.strictEqual(normalizeCategory("people"), "human");
+    assert.strictEqual(normalizeCategory("people"), "engineering");
     assert.strictEqual(normalizeCategory("observations"), "engineering");
     assert.strictEqual(getDecayHalfLife({ category: "observation", domain: "work" }), 120);
-    assert.strictEqual(getDecayHalfLife({ category: "team", domain: "personal" }), 180);
+    assert.strictEqual(getDecayHalfLife({ category: "team", domain: "personal" }), 120);
   });
 
   it("does not decay relation or telemetry objects", () => {

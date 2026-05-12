@@ -248,7 +248,7 @@ describe("ui/routes/memory", () => {
       assert.deepEqual(search!.body.filter.should, [
         {
           key: "category",
-          match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] },
+          match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations", "human", "people", "preferences", "team"] },
         },
         {
           key: "memory_subtype",
@@ -517,7 +517,7 @@ describe("ui/routes/memory", () => {
       assert.deepEqual(scroll!.body.filter.must[0], { is_null: { key: "superseded_by" } });
       assert.deepEqual(scroll!.body.filter.must[1], {
         key: "category",
-        match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] },
+        match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations", "human", "people", "preferences", "team"] },
       });
     });
 
@@ -553,7 +553,7 @@ describe("ui/routes/memory", () => {
         { key: "entities", match: { value: "bikky" } },
       ]);
       assert.deepEqual(scroll!.body.filter.should, [
-        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations", "human", "people", "preferences", "team"] } },
         { key: "category", match: { any: ["product", "product_domain", "projects"] } },
         { key: "memory_subtype", match: { value: "codebase_map" } },
         { key: "memory_subtype", match: { value: "convention" } },
@@ -937,7 +937,7 @@ describe("ui/routes/memory", () => {
             points: [
               sampleFact({ entities: ["a", "b"], category: "engineering" }),
               sampleFact({ entities: ["a", "c"], category: "product" }),
-              sampleFact({ entities: ["a", "d"], category: "human" }),
+              sampleFact({ entities: ["a", "d"], category: "engineering" }),
             ],
             next_page_offset: null,
           },
@@ -1098,7 +1098,7 @@ describe("ui/routes/memory", () => {
       assert.ok(engineeringCount);
       assert.deepEqual(engineeringCount!.body.filter.must, [
         { is_null: { key: "superseded_by" } },
-        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations", "human", "people", "preferences", "team"] } },
         { key: "kind", match: { value: "fact" } },
         {
           should: [
