@@ -21,13 +21,18 @@ export const EXTRACTION_PROMPT_DESCRIPTOR: PromptDescriptor = {
 const SUBTYPE_REASONING = `## Subtype reasoning (think step-by-step BEFORE picking memory_subtype)
 For each candidate fact, walk these four top-level categories first, then pick the most concrete memory_subtype:
 
-  ENGINEERING — how the software is built and operated:
+  ENGINEERING — how the software is built and operated, including collaboration preferences:
     codebase_map      → file paths, symbols, modules, repo structure
     architecture_decision → engineering/system design choice with rationale
     infra_topology    → clusters, services, queues, datastores, regions
     access_pattern    → roles, permissions, auth flows, approval gates
     operational_procedure  → runbook / deploy / rollout / maintenance / incident steps
     troubleshooting_gotcha → stable failure mode, debugging quirk, surprising behaviour
+    preference             → explicit style, tooling, or interaction preference
+    person_profile         → durable role, expertise, person/team context
+    ownership_note         → owner, approver, escalation path, accountability
+    working_agreement      → collaboration norm or operating rule
+    activity_event         → explicit actor-action-object event with durable project value
     convention             → produced by distillation, not this extraction prompt
 
   PRODUCT — what the product should be and how it succeeds:
@@ -38,13 +43,6 @@ For each candidate fact, walk these four top-level categories first, then pick t
     roadmap_item           → planned/deferred work, priority, release theme
     success_metric         → KPI, adoption/retention/quality metric, evaluation target
     market_insight         → audience, customer/community feedback, competitor/GTM insight
-
-  HUMAN — durable people, preferences, and collaboration context:
-    preference             → explicit style, tooling, or interaction preference
-    person_profile         → durable role, expertise, person/team context
-    ownership_note         → owner, approver, escalation path, accountability
-    working_agreement      → collaboration norm or operating rule
-    activity_event         → explicit actor-action-object event with durable project value
 
 Disambiguation rules (apply in order; first match wins):
   R1. If the fact describes a *failure* or *workaround* → troubleshooting_gotcha (NOT operational_procedure).
@@ -72,7 +70,7 @@ Example 2 — codebase vs infra:
 Example 3 — domain_rule vs preference:
   TEXT: "I prefer kebab-case branch names; it's just my style."
   → memory_subtype: preference (R6: 'I prefer' + 'my style')
-  → subtype_reason: "Personal style → Human → R6 wins → preference."
+  → subtype_reason: "Personal style → Engineering → R6 wins → preference."
 
 Example 4 — product vs engineering decision:
   TEXT: "We decided the memory page should show categories and subtype chips directly because a sub-tab layer made the ontology feel confusing."
@@ -82,7 +80,7 @@ Example 4 — product vs engineering decision:
 Example 5 — durable activity event:
   TEXT: "Saber merged PR #85 after approving the subtype UX copy changes."
   → memory_subtype: activity_event (R7: actor + durable state-changing action + object)
-  → subtype_reason: "Actor-action-object event tied to a PR → Human → R7 wins → activity_event."`;
+  → subtype_reason: "Actor-action-object event tied to a PR → Engineering → R7 wins → activity_event."`;
 
 const SELF_JUDGMENT = `## Self-judgment (think step-by-step BEFORE emitting each fact)
 
@@ -237,7 +235,7 @@ If nothing passes the quality gate, return: {"facts": []}`;
 const buildSystem = (): string => {
   return [
     "<role>",
-    "You are Bikky's knowledge-extraction agent for open-source coding agents. You read session transcripts and emit durable Engineering, Product, Human, and System-aligned facts that help a future agent continue useful work.",
+    "You are Bikky's knowledge-extraction agent for open-source coding agents. You read session transcripts and emit durable Engineering, Product, and System-aligned facts that help a future agent continue useful work.",
     "</role>",
     "",
     "<task>",

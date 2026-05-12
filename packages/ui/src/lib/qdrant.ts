@@ -99,9 +99,8 @@ const SOURCE_FILTER_ALIASES: Record<string, string[]> = {
 };
 
 const CATEGORY_FILTER_ALIASES: Record<string, string[]> = {
-  engineering: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"],
+  engineering: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations", "human", "people", "preferences", "team"],
   product: ["product", "product_domain", "projects"],
-  human: ["human", "people", "preferences", "team"],
   system: ["system"],
 };
 

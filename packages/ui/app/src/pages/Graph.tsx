@@ -70,7 +70,6 @@ interface SharedResponse {
 const CATEGORY_HEX: Record<string, string> = {
   engineering: "#3b82f6",
   product: "#6366f1",
-  human: "#ec4899",
   system: "#f59e0b",
   // Legacy facts may still carry pre-ontology category values.
   codebase: "#3b82f6",
@@ -80,10 +79,11 @@ const CATEGORY_HEX: Record<string, string> = {
   product_domain: "#6366f1",
   observations: "#f59e0b",
   observation: "#f59e0b",
-  preferences: "#22c55e",
+  human: "#3b82f6",
+  preferences: "#3b82f6",
   projects: "#06b6d4",
-  people: "#ec4899",
-  team: "#ec4899",
+  people: "#3b82f6",
+  team: "#3b82f6",
 };
 
 const GRAPH_MAX_NODES = 75;
@@ -92,11 +92,10 @@ const GRAPH_SERVER_MIN_WEIGHT = 1;
 const MAX_SIMULATION_TICKS = 500;
 const SIMULATION_WARMUP_TICKS = 60;
 
-// Canonical four-category ontology shown in the legend.
+// Canonical category ontology shown in the legend.
 const LEGEND_CATEGORIES: Array<{ key: string; label: string }> = [
   { key: "engineering", label: "Engineering" },
   { key: "product", label: "Product" },
-  { key: "human", label: "Human" },
   { key: "system", label: "System" },
 ];
 

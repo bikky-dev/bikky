@@ -43,7 +43,6 @@ function clientFor(dest: { qdrant_url: string; qdrant_api_key: string | null; co
 const CATEGORY_VALUES = [
   "engineering",
   "product",
-  "human",
   "system",
 ] as const;
 

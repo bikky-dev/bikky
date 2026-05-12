@@ -72,7 +72,7 @@ describe("ui/lib/qdrant", () => {
     it("maps canonical category filters to legacy stored categories", () => {
       const f = buildFilter({ category: "engineering" });
       assert.deepEqual(f.must, [
-        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations", "human", "people", "preferences", "team"] } },
       ]);
     });
 
@@ -92,7 +92,7 @@ describe("ui/lib/qdrant", () => {
       });
       assert.deepEqual(f.must, []);
       assert.deepEqual(f.should, [
-        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations"] } },
+        { key: "category", match: { any: ["engineering", "codebase", "infrastructure", "operations", "decisions", "observations", "human", "people", "preferences", "team"] } },
         { key: "category", match: { any: ["product", "product_domain", "projects"] } },
         { key: "memory_subtype", match: { value: "codebase_map" } },
         { key: "memory_subtype", match: { value: "convention" } },

@@ -21,7 +21,6 @@ export function truncate(str: string, max: number): string {
 export const CATEGORY_COLORS: Record<string, string> = {
   engineering: "blue",
   product: "indigo",
-  human: "pink",
   system: "amber",
   // Legacy facts may still carry pre-ontology category values.
   codebase: "blue",
@@ -30,11 +29,12 @@ export const CATEGORY_COLORS: Record<string, string> = {
   decisions: "purple",
   product_domain: "indigo",
   observations: "amber",
-  preferences: "green",
+  human: "blue",
+  preferences: "blue",
   projects: "cyan",
-  people: "pink",
+  people: "blue",
   observation: "amber",
-  team: "pink",
+  team: "blue",
 };
 
 export const KIND_COLORS: Record<string, string> = {

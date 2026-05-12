@@ -483,7 +483,6 @@ const formatHealthReport = (report: HealthReport | null): string => {
 const CATEGORY_TO_HEADING: Record<string, (typeof ALLOWED_BRIEF_HEADINGS)[number]> = {
   engineering: "Engineering",
   product: "Product",
-  human: "Human",
   system: "System",
   // Legacy stored categories remain readable before any data migration.
   codebase: "Engineering",
@@ -494,9 +493,10 @@ const CATEGORY_TO_HEADING: Record<string, (typeof ALLOWED_BRIEF_HEADINGS)[number
   projects: "System",
   observation: "Engineering",
   observations: "Engineering",
-  preferences: "Human",
-  people: "Human",
-  team: "Human",
+  human: "Engineering",
+  preferences: "Engineering",
+  people: "Engineering",
+  team: "Engineering",
 };
 
 const generateMemoryBrief = async (_config: BikkyConfig): Promise<boolean> => {

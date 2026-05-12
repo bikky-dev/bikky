@@ -78,7 +78,7 @@ Every fact must pass at least one gate:
 
 ## Ontology
 - domain is the activity profile. For coding-agent captures use "software_engineering".
-- category is subject matter: engineering | product | human | system.
+- category is subject matter: engineering | product | system.
 - kind is object shape. For this prompt, emit only kind="fact".
 - memory_subtype must be one of:
   codebase_map | architecture_decision | infra_topology | access_pattern | operational_procedure | domain_rule | product_decision | product_requirement | user_workflow | roadmap_item | success_metric | market_insight | troubleshooting_gotcha | preference | person_profile | ownership_note | working_agreement | activity_event.
@@ -308,14 +308,14 @@ export const factQualitySignals = (fact: ExtractedFact): FactQualitySignals => {
   const isPreferenceLike = subtype === "preference" || subtype === "domain_rule" || subtype === "working_agreement";
   const isDecisionLike = subtype === "architecture_decision" || subtype === "product_decision" || subtype === "troubleshooting_gotcha";
   const isProductLike = subtype === "product_requirement" || subtype === "user_workflow" || subtype === "roadmap_item" || subtype === "success_metric" || subtype === "market_insight";
-  const isHumanLike = subtype === "person_profile" || subtype === "ownership_note" || subtype === "activity_event";
-  const shortUseful = wordCount >= 7 && wordCount <= 22 && (isPreferenceLike || isDecisionLike || isProductLike || isHumanLike) && (entities.length > 0 || durableAnchor);
+  const isCollaborationLike = subtype === "person_profile" || subtype === "ownership_note" || subtype === "activity_event";
+  const shortUseful = wordCount >= 7 && wordCount <= 22 && (isPreferenceLike || isDecisionLike || isProductLike || isCollaborationLike) && (entities.length > 0 || durableAnchor);
 
   let score = 0.25;
   if (wordCount >= 8) score += 0.1;
   if (wordCount >= 14) score += 0.1;
   if (durableAnchor) score += 0.25;
-  if (isPreferenceLike || isDecisionLike || isProductLike || isHumanLike) score += 0.15;
+  if (isPreferenceLike || isDecisionLike || isProductLike || isCollaborationLike) score += 0.15;
   if ((fact.confidence ?? 0) >= 0.75) score += 0.1;
   if ((fact.importance ?? 0) >= 0.7) score += 0.1;
   if (statusOnly) score -= 0.4;
@@ -343,7 +343,11 @@ const subtypeForRawCategoryHint = (rawCategory: string | null, category: string)
   if (hint.includes("infra")) return "infra_topology";
   if (hint.includes("operation") || hint.includes("runbook")) return "operational_procedure";
   if (hint.includes("decision")) return "architecture_decision";
-  if (hint.includes("people") || hint.includes("preference") || hint.includes("owner")) return "preference";
+  if (hint.includes("preference")) return "preference";
+  if (hint.includes("owner")) return "ownership_note";
+  if (hint.includes("agreement")) return "working_agreement";
+  if (hint.includes("activity") || hint.includes("actor")) return "activity_event";
+  if (hint.includes("people") || hint.includes("person") || hint.includes("team")) return "person_profile";
   if (hint.includes("product") || hint.includes("domain")) return "domain_rule";
   return subtypeForCategory(normalizeCategory(category));
 };

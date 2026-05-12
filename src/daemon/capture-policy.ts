@@ -114,7 +114,6 @@ export const CAPTURE_KIND_SUBTYPES = {
 export const FACT_CATEGORY_TO_SUBTYPE: Record<Category, MemorySubtype> = {
   engineering: "codebase_map",
   product: "domain_rule",
-  human: "preference",
   system: "codebase_map",
 };
 
