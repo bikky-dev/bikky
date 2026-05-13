@@ -2,13 +2,13 @@
 
 <p align="center"><b>Persistent memory for AI coding agents — built for teams and multi-agent engineering workflows.</b></p>
 
+bikky provides long-term memory for MCP-capable AI coding agents. It exposes memory tools over the Model Context Protocol (MCP), stores facts in Qdrant, and can run a local daemon that extracts durable facts from supported transcript sources. Teams can share memory across tools, repos, and engineers without treating chat history or closed PRs as the source of truth.
+
 <p align="center">
   <img src="https://raw.githubusercontent.com/bikky-dev/bikky/main/docs/diagrams/team-memory.svg" alt="Memory — facts flow from individual sessions into a self-curating knowledge store shared across your team" width="720" />
 </p>
 
 <p align="center"><i>Selected knowledge flows from supported sessions into a store that curates itself over time — deduplicating, distilling, and decaying stale facts — so future sessions can start with more context.</i></p>
-
-bikky provides long-term memory for MCP-capable AI coding agents. It exposes memory tools over the Model Context Protocol (MCP), stores facts in Qdrant, and can run a local daemon that extracts durable facts from supported transcript sources. Teams can share memory across tools, repos, and engineers without treating chat history or closed PRs as the source of truth.
 
 ### Who it's for
 

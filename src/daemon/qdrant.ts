@@ -292,7 +292,7 @@ const routingInputForFact = (
     content: normalizedContent,
     entities: normalizedEntities,
     metadata,
-    extraContent: [fact.origin, fact.last_operation_origin, fact.relation],
+    extraContent: [fact.relation],
   });
 };
 
