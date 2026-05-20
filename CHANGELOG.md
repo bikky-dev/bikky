@@ -9,6 +9,28 @@ This project uses npm package versions for release tracking:
 
 ## Unreleased
 
+## 0.4.5
+
+- Fixed destination routing so daemon provenance and agent metadata no longer influence where unrelated facts are stored.
+- Added regression coverage for non-Bikky facts with Bikky daemon origin metadata.
+- Moved the README top diagram closer to the audience/context section.
+
+## 0.4.4
+
+- Refreshed README positioning and configuration guidance for supported MCP clients, transcript capture, Qdrant storage, and built-in model providers.
+- Added memory quality/usefulness signals and surfaced usefulness data in the UI.
+- Fixed MCP and daemon write routing to use the full memory context consistently.
+- Removed the old Human memory category and filtered internal dashboard memory rows.
+- Added Playwright coverage for memory filters and edge cases.
+
+## 0.4.3
+
+- Fixed daemon destination routing and dynamic config-path handling.
+- Added canonical origin provenance metadata to memory writes.
+- Recommended Portkey as the default cloud inference provider and canonicalized 1024-dimension embedding guidance.
+- Fixed `bikky-ui` browser launches when the server binds to `localhost:0`.
+- Added higher-priority test coverage across core routing, config, and UI behavior.
+
 ## 0.4.2
 
 - Republished the core package from current `main` so the npm package README uses GitHub documentation links instead of stale jsDelivr links.
