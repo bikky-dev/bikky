@@ -15,7 +15,7 @@ import { embed, initEmbedding, getEmbeddingConfig } from "../llm/index.js";
 import type { InitEmbeddingInput } from "../llm/index.js";
 import { type QdrantLogLevel } from "../lib/qdrant-client.js";
 import { QdrantPool } from "../lib/qdrant-pool.js";
-import { buildResolver, type RoutingInput } from "../routing.js";
+import { buildResolver, findMatchingIgnoreRule, type RoutingInput } from "../routing.js";
 import {
   DEFAULT_DOMAIN,
   QDRANT_INDEXES,
@@ -187,11 +187,12 @@ export interface QdrantScrollFilters {
   orderBy?: { key: "created_at" | "updated_at" | "last_reinforced_at"; direction: "asc" | "desc" };
 }
 
-export type DedupAction = "insert" | "skip" | "supersede";
+export type DedupAction = "insert" | "skip" | "supersede" | "ignore";
 
 export interface DedupResult {
   action: DedupAction;
   destination?: string;
+  ignoreRule?: string;
   existingId?: string;
   existingCount?: number;
   score?: number;
@@ -557,7 +558,7 @@ const scrollFactsAcrossDestinations = async (
 // Write methods
 // ---------------------------------------------------------------------------
 
-const storeFact = async (fact: StoreFact, routeInput?: RoutingInput): Promise<string> => {
+const storeFact = async (fact: StoreFact, routeInput?: RoutingInput): Promise<string | null> => {
   const normalizedKind = normalizeKind(fact.kind);
   const normalizedSubtype = validateMemorySubtype(normalizedKind, fact.memory_subtype);
   const normalizedCategory = normalizedSubtype
@@ -642,7 +643,7 @@ const storeFact = async (fact: StoreFact, routeInput?: RoutingInput): Promise<st
     payload.redaction = redaction;
   }
 
-  const destination = resolveDestination(mergeRoutingInputs(routingInputForFact(
+  const writeInput = mergeRoutingInputs(routingInputForFact(
     fact,
     redactedContent.text,
     payload.entities,
@@ -650,9 +651,15 @@ const storeFact = async (fact: StoreFact, routeInput?: RoutingInput): Promise<st
       category: normalizedCategory,
       domain: normalizedDomain,
       kind: normalizedKind,
-      ...(normalizedSubtype ? { memory_subtype: normalizedSubtype } : {}),
-    },
-  ), routeInput));
+        ...(normalizedSubtype ? { memory_subtype: normalizedSubtype } : {}),
+      },
+  ), routeInput);
+  const ignored = findMatchingIgnoreRule(writeInput, loadConfig().ignore);
+  if (ignored) {
+    logFn("INFO", `Qdrant: ignored fact write due to ignore rule '${ignored.name}' [${normalizedCategory}] ${redactedContent.text.slice(0, 60)}`);
+    return null;
+  }
+  const destination = resolveDestination(writeInput);
   const vector = await embed(redactedContent.text);
 
   await qdrantRequest("PUT", `/collections/${destination.collection}/points`, {
@@ -709,7 +716,13 @@ const dedupCheck = async (
   workspaceId?: string,
   routeInput?: RoutingInput,
 ): Promise<DedupResult> => {
-  const destination = resolveDestination(routeInput ?? { content });
+  const input = mergeRoutingInputs({ content }, routeInput);
+  const ignored = findMatchingIgnoreRule(input, loadConfig().ignore);
+  if (ignored) {
+    logFn("INFO", `Qdrant: ignored dedup/write candidate due to ignore rule '${ignored.name}'`);
+    return { action: "ignore", ignoreRule: ignored.name };
+  }
+  const destination = resolveDestination(input);
   // First: hash-based exact check (fast, no embedding)
   try {
     const must: Record<string, unknown>[] = [

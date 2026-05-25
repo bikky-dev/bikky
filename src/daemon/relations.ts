@@ -341,7 +341,7 @@ const storeRelation = async (
   candidate: RelationCandidate,
   destination?: string,
   extras: { evidence?: string; confidence?: number; inVocabulary?: boolean; judgment?: { evidence_strength?: number; durability?: string; directionality_clarity?: string } } = {},
-): Promise<string> => {
+): Promise<string | null> => {
   const hash = createHash("sha256")
     .update(`daemon-relation:${pairKey(fromEntity, toEntity)}:${relationType}`)
     .digest("hex");
@@ -391,6 +391,10 @@ const storeRelation = async (
     },
   }, destination ? { destination } : undefined);
 
+  if (!id) {
+    logFn("INFO", `Relations: ignored ${fromEntity} —[${relationType}]→ ${toEntity} due to ignore rules`);
+    return null;
+  }
   logFn("INFO", `Relations: inferred ${fromEntity} —[${relationType}]→ ${toEntity} (id: ${id})`);
   return id;
 };
@@ -474,12 +478,16 @@ const tick = async (config: BikkyConfig): Promise<void> => {
           .update(`daemon-relation:${pairKey(result.from, result.to)}:${result.type}`)
           .digest("hex");
         const dedup = await qdrant.dedupCheck(result.content, hash, undefined, undefined, { destination });
+        if (dedup.action === "ignore") {
+          logFn("DEBUG", `Relations: ignoring ${candidate.entityA}↔${candidate.entityB} due to config rule '${dedup.ignoreRule ?? "unknown"}'`);
+          continue;
+        }
         if (dedup.action === "skip") {
           logFn("DEBUG", `Relations: skipping duplicate ${candidate.entityA}↔${candidate.entityB}`);
           continue;
         }
 
-        await storeRelation(
+        const storedId = await storeRelation(
           result.from,
           result.to,
           result.type,
@@ -488,7 +496,7 @@ const tick = async (config: BikkyConfig): Promise<void> => {
           destination,
           { evidence: result.evidence, confidence: result.confidence, inVocabulary: result.inVocabulary, judgment: result.judgment },
         );
-        inferred++;
+        if (storedId) inferred++;
       } catch (e: unknown) {
         failures++;
         logFn("WARN", `Relations: failed to infer ${candidate.entityA}↔${candidate.entityB}: ${(e as Error).message}`);

@@ -9,6 +9,12 @@ This project uses npm package versions for release tracking:
 
 ## Unreleased
 
+## 0.4.6
+
+- Added configurable `ignore` rules for memory writes using the same `cwd`, `entity`, `content`, and `metadata` filters as destination routing.
+- Applied ignore checks before MCP writes, daemon writes, relation sidecars, superseding, telemetry upserts, embedding, deduplication, and Qdrant persistence.
+- Documented ignore configuration and added regression coverage for config validation, routing precedence, MCP write paths, daemon writes, telemetry, and local MCP E2E behavior.
+
 ## 0.4.5
 
 - Fixed destination routing so daemon provenance and agent metadata no longer influence where unrelated facts are stored.

@@ -679,6 +679,32 @@ describe("config", () => {
       assert.strictEqual(cfg.search_scopes[0]?.name, "broad");
     });
 
+    it("loads ignore rules with destination-match filters", () => {
+      fs.mkdirSync(BIKKY_DIR, { recursive: true });
+      fs.writeFileSync(
+        CONFIG_PATH,
+        JSON.stringify({
+          ignore: [
+            {
+              name: "private-topics",
+              description: "Do not store private topic memories.",
+              match: {
+                entity: ["^[Rr]esume$"],
+                content: ["\\b[Rr]esume\\b"],
+                metadata: { repo: ["^private/"] },
+              },
+            },
+          ],
+        }),
+      );
+
+      const cfg = loadConfig();
+
+      assert.strictEqual(cfg.ignore.length, 1);
+      assert.strictEqual(cfg.ignore[0]?.name, "private-topics");
+      assert.deepStrictEqual(cfg.ignore[0]?.match.metadata?.repo, ["^private/"]);
+    });
+
     it("env vars override file config", () => {
       fs.mkdirSync(BIKKY_DIR, { recursive: true });
       fs.writeFileSync(
@@ -749,6 +775,21 @@ describe("config", () => {
       assert.ok(issues.some((issue) => issue.path === "daemon.entity_typing_enabled"));
       assert.ok(issues.some((issue) => issue.path === "daemon.memory_quality_rollups_low_confidence_threshold"));
       assert.ok(issues.some((issue) => issue.path === "daemon.memory_quality_rollups_max_scopes_per_run"));
+    });
+
+    it("validates ignore rule regex patterns", () => {
+      const issues = validateConfigObject({
+        ignore: [{
+          name: "broken",
+          match: {
+            content: ["["],
+            metadata: { repo: ["("] },
+          },
+        }],
+      });
+
+      assert.ok(issues.some((issue) => issue.path === "ignore[0].match.content[0]"));
+      assert.ok(issues.some((issue) => issue.path === "ignore[0].match.metadata.repo[0]"));
     });
 
     it("accepts named search scopes as default_search_scope targets", () => {

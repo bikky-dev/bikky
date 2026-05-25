@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   resolveDestination,
   buildResolver,
+  findMatchingIgnoreRule,
+  routingInputMatches,
   DestinationNotFoundError,
   NoDestinationsConfiguredError,
 } from "./routing.js";
@@ -109,5 +111,49 @@ describe("routing.buildResolver", () => {
   it("closure throws on empty destinations", () => {
     const resolve = buildResolver([]);
     assert.throws(() => resolve({}), NoDestinationsConfiguredError);
+  });
+});
+
+describe("routing ignore rules", () => {
+  it("uses destination match semantics for ignore rules", () => {
+    assert.equal(
+      routingInputMatches(
+        {
+          cwd: ["/private"],
+          entity: ["^secret-"],
+          content: ["password"],
+          metadata: { repo: ["^private/"] },
+        },
+        {
+          cwd: "/work",
+          entities: ["project"],
+          content: "safe note",
+          metadata: { repo: "private/notes" },
+        },
+      ),
+      true,
+    );
+  });
+
+  it("returns the first matching ignore rule in array order", () => {
+    const match = findMatchingIgnoreRule(
+      { content: "resume update", entities: ["resume"] },
+      [
+        { name: "first", match: { content: ["resume"] } },
+        { name: "second", match: { entity: ["resume"] } },
+      ],
+    );
+
+    assert.equal(match?.name, "first");
+    assert.equal(match?.index, 0);
+  });
+
+  it("does not let destination overrides affect ignore matching", () => {
+    const match = findMatchingIgnoreRule(
+      { destination: "work", content: "garden notes" },
+      [{ name: "private-topics", match: { content: ["garden"] } }],
+    );
+
+    assert.equal(match?.name, "private-topics");
   });
 });

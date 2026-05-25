@@ -184,10 +184,11 @@ const autoDistill = async (
     const promptStamp = `${DISTILL_PROMPT_DESCRIPTOR.id}@${DISTILL_PROMPT_DESCRIPTOR.version}`;
 
     // Store distilled patterns
+    let storedPatterns = 0;
     for (const pattern of patterns) {
       if (!pattern.content) continue;
       const hash = createHash("sha256").update(`distilled:${pattern.content}`).digest("hex");
-      await qdrant.storeFact({
+      const storedId = await qdrant.storeFact({
         content: pattern.content,
         category: normalizeCategory(pattern.category ?? "engineering"),
         domain: normalizeDomain(pattern.domain ?? "software_engineering"),
@@ -211,6 +212,12 @@ const autoDistill = async (
           },
         }),
       }, { destination });
+      if (storedId) storedPatterns++;
+    }
+
+    if (storedPatterns === 0) {
+      logFn("INFO", `Auto-distill: all ${patterns.length} patterns were ignored by config rules`);
+      return { distilled: false };
     }
 
     // Supersede the source summaries
@@ -223,8 +230,8 @@ const autoDistill = async (
       }));
     }
 
-    logFn("INFO", `Auto-distill: consolidated ${batch.length} summaries into ${patterns.length} patterns`);
-    return { distilled: true, count: patterns.length };
+    logFn("INFO", `Auto-distill: consolidated ${batch.length} summaries into ${storedPatterns} patterns`);
+    return { distilled: true, count: storedPatterns };
   } catch (e) {
     logFn("ERROR", `Auto-distill failed: ${(e as Error).message}`);
     return { distilled: false };

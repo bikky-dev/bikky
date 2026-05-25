@@ -15,7 +15,7 @@
  *
  * Pure: no I/O, no globals. Easy to unit test.
  */
-import type { Destination, DestinationMatch } from "./config.js";
+import type { Destination, DestinationMatch, IgnoreRule } from "./config.js";
 
 export interface RoutingInput {
   /** Explicit destination name override. Throws if it doesn't match a destination. */
@@ -44,6 +44,12 @@ export class NoDestinationsConfiguredError extends Error {
     super("No destinations configured. Set top-level qdrant_url or destinations[] in ~/.bikky/config.json.");
     this.name = "NoDestinationsConfiguredError";
   }
+}
+
+export interface IgnoreMatch {
+  rule: IgnoreRule;
+  index: number;
+  name: string;
 }
 
 /** Pre-compile all regexes in a destination's match block. */
@@ -114,6 +120,26 @@ function destinationMatches(compiled: CompiledMatch, input: RoutingInput): boole
   }
 
   return false;
+}
+
+export function routingInputMatches(match: DestinationMatch | undefined, input: RoutingInput): boolean {
+  return destinationMatches(compileMatch(match), input);
+}
+
+export function findMatchingIgnoreRule(
+  input: RoutingInput,
+  ignoreRules: ReadonlyArray<IgnoreRule>,
+): IgnoreMatch | null {
+  for (const [index, rule] of ignoreRules.entries()) {
+    if (routingInputMatches(rule.match, input)) {
+      return {
+        rule,
+        index,
+        name: rule.name?.trim() || `ignore[${index}]`,
+      };
+    }
+  }
+  return null;
 }
 
 function pickFallback(destinations: ReadonlyArray<Destination>): Destination {

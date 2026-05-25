@@ -362,6 +362,39 @@ Matching details:
 - Read/search tools also accept `search_scope`; call `memory_search_scopes` or `get_setup_status` to see available scopes and descriptions.
 - All destinations share one embedding provider, so every destination collection must use the same vector dimensions.
 
+### Ignore rules
+
+Use top-level `ignore` rules when certain memories should not be stored at all. Ignore rules use the same `match` block shape as destination routing (`cwd`, `entity`, `content`, and `metadata` regex arrays), and memory-write `content` matching sees the same flattened memory context used by destination routing.
+
+Ignore rules run before destination resolution, embedding, deduplication, superseding, relation sidecars, telemetry upserts, and Qdrant writes. They also take precedence over explicit `destination` overrides, so an ignored topic cannot be stored by selecting a destination manually.
+
+```jsonc
+{
+  "ignore": [
+    {
+      "name": "personal-topics",
+      "description": "Do not persist personal-topic memories.",
+      "match": {
+        "entity": ["^[Rr]esume$"],
+        "content": ["\\b[Rr]esume\\b"],
+        "metadata": { "repo": ["^private/"] }
+      }
+    }
+  ]
+}
+```
+
+When an MCP write tool is ignored, it returns a structured non-error response such as:
+
+```json
+{
+  "action": "ignored",
+  "status": "ignored",
+  "ignored": true,
+  "rule": "personal-topics"
+}
+```
+
 Migrating from `workspace_id` pre-v0.4:
 
 - Existing top-level `qdrant_url`, `qdrant_api_key`, and `collection` configs still work as a single synthesized destination.

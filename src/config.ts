@@ -162,6 +162,15 @@ export interface Destination {
   match?: DestinationMatch;
 }
 
+export interface IgnoreRule {
+  /** Stable identifier returned in ignored-write responses and logs. */
+  name?: string;
+  /** Human-readable reason/guidance for why the rule exists. */
+  description?: string;
+  /** Match rules using the same semantics as destination routing. */
+  match: DestinationMatch;
+}
+
 export type SearchScopeTarget = "routed" | "all" | string | string[];
 
 export interface SearchScopeDefinition {
@@ -188,6 +197,8 @@ export interface BikkyConfig {
    * default flag → first entry.
    */
   destinations: Destination[];
+  /** Memory write exclusion rules. First matching rule skips persistence. */
+  ignore: IgnoreRule[];
   /**
    * Default read/search scope. "routed" preserves historical behavior
    * (one destination via routing rules); "all" fans out to every destination;
@@ -229,6 +240,7 @@ const DEFAULTS: BikkyConfig = {
   qdrant_api_key: null,
   collection: "bikky",
   destinations: [],
+  ignore: [],
   default_search_scope: "routed",
   search_scopes: [],
   aws_profile: null,
@@ -428,6 +440,12 @@ const destinationFileSchema = z.object({
   match: destinationMatchSchema.optional(),
 }).passthrough();
 
+const ignoreRuleFileSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  match: destinationMatchSchema,
+}).passthrough();
+
 const searchScopeTargetSchema = z.union([
   z.string().min(1),
   z.array(z.string().min(1)).min(1),
@@ -444,6 +462,7 @@ const configFileSchema = z.object({
   qdrant_api_key: z.string().nullable().optional(),
   collection: z.string().optional(),
   destinations: z.array(destinationFileSchema).optional(),
+  ignore: z.array(ignoreRuleFileSchema).optional(),
   default_search_scope: searchScopeTargetSchema.optional(),
   search_scopes: z.array(searchScopeDefinitionFileSchema).optional(),
   aws_profile: z.string().nullable().optional(),
@@ -506,6 +525,55 @@ function validateUrlLike(value: unknown, pathName: string, issues: ConfigIssue[]
   }
 }
 
+function validateMatchBlock(match: Record<string, unknown>, base: string, issues: ConfigIssue[]): void {
+  for (const field of ["cwd", "entity", "content"] as const) {
+    const value = match[field];
+    if (value === undefined) continue;
+    if (!Array.isArray(value)) {
+      issues.push({ severity: "error", path: `${base}.${field}`, message: "must be an array of regex strings" });
+      continue;
+    }
+    value.forEach((pattern, pIdx) => {
+      if (typeof pattern !== "string") {
+        issues.push({ severity: "error", path: `${base}.${field}[${pIdx}]`, message: "must be a string" });
+        return;
+      }
+      try { new RegExp(pattern); }
+      catch (e) {
+        issues.push({
+          severity: "error",
+          path: `${base}.${field}[${pIdx}]`,
+          message: `invalid regex: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      }
+    });
+  }
+
+  const metadata = childObject(match, "metadata");
+  if (metadata) {
+    for (const [key, value] of Object.entries(metadata)) {
+      if (!Array.isArray(value)) {
+        issues.push({ severity: "error", path: `${base}.metadata.${key}`, message: "must be an array of regex strings" });
+        continue;
+      }
+      value.forEach((pattern, pIdx) => {
+        if (typeof pattern !== "string") {
+          issues.push({ severity: "error", path: `${base}.metadata.${key}[${pIdx}]`, message: "must be a string" });
+          return;
+        }
+        try { new RegExp(pattern); }
+        catch (e) {
+          issues.push({
+            severity: "error",
+            path: `${base}.metadata.${key}[${pIdx}]`,
+            message: `invalid regex: ${e instanceof Error ? e.message : String(e)}`,
+          });
+        }
+      });
+    }
+  }
+}
+
 export function validateConfigObject(raw: unknown): ConfigIssue[] {
   const parsed = configFileSchema.safeParse(raw);
   const issues: ConfigIssue[] = [];
@@ -565,56 +633,28 @@ export function validateConfigObject(raw: unknown): ConfigIssue[] {
 
       const match = childObject(entry, "match");
       if (match) {
-        for (const field of ["cwd", "entity", "content"] as const) {
-          const value = match[field];
-          if (value === undefined) continue;
-          if (!Array.isArray(value)) {
-            issues.push({ severity: "error", path: `${base}.match.${field}`, message: "must be an array of regex strings" });
-            continue;
-          }
-          value.forEach((pattern, pIdx) => {
-            if (typeof pattern !== "string") {
-              issues.push({ severity: "error", path: `${base}.match.${field}[${pIdx}]`, message: "must be a string" });
-              return;
-            }
-            try { new RegExp(pattern); }
-            catch (e) {
-              issues.push({
-                severity: "error",
-                path: `${base}.match.${field}[${pIdx}]`,
-                message: `invalid regex: ${e instanceof Error ? e.message : String(e)}`,
-              });
-            }
-          });
-        }
-        const metadata = childObject(match, "metadata");
-        if (metadata) {
-          for (const [key, value] of Object.entries(metadata)) {
-            if (!Array.isArray(value)) {
-              issues.push({ severity: "error", path: `${base}.match.metadata.${key}`, message: "must be an array of regex strings" });
-              continue;
-            }
-            value.forEach((pattern, pIdx) => {
-              if (typeof pattern !== "string") {
-                issues.push({ severity: "error", path: `${base}.match.metadata.${key}[${pIdx}]`, message: "must be a string" });
-                return;
-              }
-              try { new RegExp(pattern); }
-              catch (e) {
-                issues.push({
-                  severity: "error",
-                  path: `${base}.match.metadata.${key}[${pIdx}]`,
-                  message: `invalid regex: ${e instanceof Error ? e.message : String(e)}`,
-                });
-              }
-            });
-          }
-        }
+        validateMatchBlock(match, `${base}.match`, issues);
       }
     });
     if (defaultCount > 1) {
       issues.push({ severity: "error", path: "destinations", message: `at most one destination may set 'default: true' (found ${defaultCount})` });
     }
+  }
+
+  if (Array.isArray(raw.ignore)) {
+    raw.ignore.forEach((entry, idx) => {
+      const base = `ignore[${idx}]`;
+      if (!isObject(entry)) {
+        issues.push({ severity: "error", path: base, message: "must be an object" });
+        return;
+      }
+      const match = entry.match;
+      if (!isObject(match)) {
+        issues.push({ severity: "error", path: `${base}.match`, message: "must be an object" });
+        return;
+      }
+      validateMatchBlock(match, `${base}.match`, issues);
+    });
   }
 
   const destinationNames = new Set<string>();
