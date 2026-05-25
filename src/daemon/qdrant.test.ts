@@ -274,6 +274,80 @@ describe("daemon/qdrant", () => {
   });
 
   describe("storeFact", () => {
+    it("ignores matching stored facts before embedding or Qdrant upsert", async () => {
+      const calls: string[] = [];
+
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        calls.push(url);
+        return new Response(JSON.stringify({ result: {} }), { status: 200 });
+      }) as typeof fetch;
+
+      saveConfig({
+        ...CONFIG_DEFAULTS,
+        qdrant_url: "https://qdrant.example.com:6333",
+        qdrant_api_key: null,
+        collection: "test-ignore",
+        ignore: [
+          { name: "private-topics", match: { content: ["\\b[Rr]esume\\b"], entity: ["^[Rr]esume$"] } },
+        ],
+        embedding: {
+          ...CONFIG_DEFAULTS.embedding,
+          provider: "ollama",
+          model: "test-model",
+          base_url: "http://embed.test:11434",
+          dimensions: 3,
+        },
+      });
+      resetConfig();
+      init();
+
+      const id = await storeFact({
+        content: "Resume notes should be excluded.",
+        category: "engineering",
+        entities: ["resume"],
+        content_hash: "ignore-hash",
+      });
+
+      assert.equal(id, null);
+      assert.deepEqual(calls, []);
+    });
+
+    it("ignores dedup candidates before embedding or Qdrant lookup", async () => {
+      const calls: string[] = [];
+
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        calls.push(url);
+        return new Response(JSON.stringify({ result: {} }), { status: 200 });
+      }) as typeof fetch;
+
+      saveConfig({
+        ...CONFIG_DEFAULTS,
+        qdrant_url: "https://qdrant.example.com:6333",
+        qdrant_api_key: null,
+        collection: "test-ignore",
+        ignore: [
+          { name: "private-topics", match: { content: ["\\b[Gg]arden\\b"] } },
+        ],
+        embedding: {
+          ...CONFIG_DEFAULTS.embedding,
+          provider: "ollama",
+          model: "test-model",
+          base_url: "http://embed.test:11434",
+          dimensions: 3,
+        },
+      });
+      resetConfig();
+      init();
+
+      const result = await dedupCheck("Garden notes should be excluded.", "garden-hash");
+
+      assert.equal(result.action, "ignore");
+      assert.equal(result.ignoreRule, "private-topics");
+      assert.deepEqual(calls, []);
+    });
+
     it("redacts secret content before embedding and Qdrant upsert", async () => {
       const embedInputs: string[] = [];
       const upsertBodies: Record<string, unknown>[] = [];

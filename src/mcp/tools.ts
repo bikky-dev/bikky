@@ -59,7 +59,7 @@ import {
   resolveDest,
   findPointById,
 } from "./api.js";
-import { DestinationNotFoundError, type RoutingInput } from "../routing.js";
+import { DestinationNotFoundError, findMatchingIgnoreRule, type IgnoreMatch, type RoutingInput } from "../routing.js";
 import type { Destination } from "../config.js";
 import { saveConfig, loadConfig, EXTRACTION_HEALTH_PATH } from "../config.js";
 import {
@@ -200,6 +200,53 @@ function resolveDestOrError(input: RoutingInput): { dest: Destination; error?: n
   }
 }
 
+function ignoredWriteResult(tool: string, match: IgnoreMatch): McpToolResult {
+  return {
+    content: [{ type: "text", text: JSON.stringify({
+      action: "ignored",
+      status: "ignored",
+      ignored: true,
+      tool,
+      rule: match.name,
+      rule_index: match.index,
+      description: match.rule.description ?? null,
+      message: `Memory write ignored by config rule '${match.name}'.`,
+    }) }],
+  };
+}
+
+function ignoreWriteOrError(input: RoutingInput, tool: string): { match?: IgnoreMatch; error?: never } | { match?: never; error: McpToolResult } {
+  try {
+    const match = findMatchingIgnoreRule(input, loadConfig().ignore);
+    return match ? { match } : {};
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return {
+      error: {
+        content: [{ type: "text", text: JSON.stringify({
+          status: "error",
+          message: `Failed to evaluate ignore rules for ${tool}: ${msg}`,
+        }, null, 2) }],
+        isError: true,
+      },
+    };
+  }
+}
+
+function telemetryIgnored(input: RoutingInput, subtype: string): boolean {
+  try {
+    const match = findMatchingIgnoreRule(input, loadConfig().ignore);
+    if (!match) return false;
+    log("INFO", `Skipped ${subtype} write due to ignore rule '${match.name}'`);
+    return true;
+  } catch (e) {
+    log("WARN", `Failed to evaluate ignore rules for ${subtype}: ${e instanceof Error ? e.message : String(e)}`);
+    // Telemetry can include recall queries or feedback notes, so fail closed
+    // rather than risk persisting content that an ignore rule was meant to block.
+    return true;
+  }
+}
+
 type ScopedPoint = QdrantPoint & {
   _destination: Destination;
   _combinedScore?: number;
@@ -268,6 +315,21 @@ async function recordRecallTelemetry(args: {
     const entities = [...new Set(points.flatMap((point) => point.payload.entities ?? []))].slice(0, 25);
     const eventContent = `Recall returned ${points.length} fact(s) from ${dest.name}: ${args.redactedQuery.text}`;
     const redactedEvent = redactStorageText(eventContent);
+    const eventRoutingInput = buildMemoryRoutingInput({
+      cwd: process.cwd(),
+      content: redactedEvent.text,
+      entities,
+      context: {
+        category: categoryForMemorySubtype("recall_event") ?? "system",
+        domain: "software_engineering",
+        kind: "telemetry",
+        memory_subtype: "recall_event",
+        layer: "memory_object",
+        search_scope: args.searchScope.name,
+        destination: dest.name,
+      },
+    });
+    if (telemetryIgnored(eventRoutingInput, "recall_event")) continue;
     const eventPayload: Record<string, unknown> = {
       content: redactedEvent.text,
       category: categoryForMemorySubtype("recall_event") ?? "system",
@@ -910,7 +972,7 @@ export function registerTools(mcp: McpServer): void {
         type: redactedRelation.type.text,
         to: redactedRelation.to.text,
       } : null;
-      const resolved = resolveDestOrError(memoryWriteRoutingInput({
+      const writeInput = memoryWriteRoutingInput({
         tool: "memory_store",
         destination,
         content: redactedContent.text,
@@ -931,7 +993,11 @@ export function registerTools(mcp: McpServer): void {
           review_status,
           supersedes,
         },
-      }));
+      });
+      const ignored = ignoreWriteOrError(writeInput, "memory_store");
+      if (ignored.error) return ignored.error;
+      if (ignored.match) return ignoredWriteResult("memory_store", ignored.match);
+      const resolved = resolveDestOrError(writeInput);
       if (resolved.error) return resolved.error;
       const dest = resolved.dest;
       const createOrigin = mcpOrigin({
@@ -1841,34 +1907,51 @@ export function registerTools(mcp: McpServer): void {
 
         // Write a telemetry feedback_event row so the signal is also visible
         // to aggregations and review tooling.
-        const eventId = newId();
         const eventContent = note
           ? `Fact ${fact_id} marked useful: ${note}`
           : `Fact ${fact_id} marked useful.`;
         const redactedEvent = redactStorageText(eventContent);
-        const eventPayload: Record<string, unknown> = {
+        let eventId: string | null = null;
+        const eventInput = buildMemoryRoutingInput({
+          cwd: process.cwd(),
           content: redactedEvent.text,
-          category: categoryForMemorySubtype("feedback_event") ?? "system",
-          domain: "software_engineering",
-          kind: "telemetry",
-          memory_subtype: "feedback_event",
-          layer: "memory_object",
           entities: [],
-          origin: feedbackOrigin,
-          confidence: 1.0,
-          importance: 0.3,
-          content_hash: contentHash("feedback_event", `${fact_id}:useful:${now}`),
-          target_fact_id: fact_id,
-          feedback_kind: "useful",
-          created_at: now,
-          updated_at: now,
-        };
-        addRedactionPayload(eventPayload, redactedEvent);
-        try {
-          const eventVector = await embed(redactedEvent.text);
-          await qdrantUpsert(dest, eventId, eventVector, eventPayload);
-        } catch (e) {
-          log("WARN", `Failed to record feedback_event: ${e instanceof Error ? e.message : String(e)}`);
+          context: {
+            category: categoryForMemorySubtype("feedback_event") ?? "system",
+            domain: "software_engineering",
+            kind: "telemetry",
+            memory_subtype: "feedback_event",
+            layer: "memory_object",
+            target_fact_id: fact_id,
+            feedback_kind: "useful",
+          },
+        });
+        if (!telemetryIgnored(eventInput, "feedback_event")) {
+          eventId = newId();
+          const eventPayload: Record<string, unknown> = {
+            content: redactedEvent.text,
+            category: categoryForMemorySubtype("feedback_event") ?? "system",
+            domain: "software_engineering",
+            kind: "telemetry",
+            memory_subtype: "feedback_event",
+            layer: "memory_object",
+            entities: [],
+            origin: feedbackOrigin,
+            confidence: 1.0,
+            importance: 0.3,
+            content_hash: contentHash("feedback_event", `${fact_id}:useful:${now}`),
+            target_fact_id: fact_id,
+            feedback_kind: "useful",
+            created_at: now,
+            updated_at: now,
+          };
+          addRedactionPayload(eventPayload, redactedEvent);
+          try {
+            const eventVector = await embed(redactedEvent.text);
+            await qdrantUpsert(dest, eventId, eventVector, eventPayload);
+          } catch (e) {
+            log("WARN", `Failed to record feedback_event: ${e instanceof Error ? e.message : String(e)}`);
+          }
         }
 
         return {
@@ -1877,7 +1960,7 @@ export function registerTools(mcp: McpServer): void {
             fact_id,
             destination: dest.name,
             useful_count: newCount,
-            event_id: eventId,
+            ...(eventId ? { event_id: eventId } : { event_ignored: true }),
           }) }],
         };
       } catch (e) {
@@ -1927,31 +2010,48 @@ export function registerTools(mcp: McpServer): void {
           last_operation_origin: feedbackOrigin,
         });
 
-        const eventId = newId();
         const eventContent = notes
           ? `Fact ${fact_id} outcome=${outcome}: ${notes}`
           : `Fact ${fact_id} outcome=${outcome}.`;
         const redactedEvent = redactStorageText(eventContent);
-        const eventPayload: Record<string, unknown> = {
+        let eventId: string | null = null;
+        const eventInput = buildMemoryRoutingInput({
+          cwd: process.cwd(),
           content: redactedEvent.text,
-          category: categoryForMemorySubtype("outcome_event") ?? "system",
-          domain: "software_engineering",
-          kind: "telemetry",
-          memory_subtype: "outcome_event",
-          layer: "memory_object",
           entities: [],
-          origin: feedbackOrigin,
-          confidence: 1.0,
-          importance: outcome === "wrong" || outcome === "misleading" ? 0.6 : 0.3,
-          content_hash: contentHash("outcome_event", `${fact_id}:${outcome}:${now}`),
-          target_fact_id: fact_id,
-          outcome,
-          created_at: now,
-          updated_at: now,
-        };
-        addRedactionPayload(eventPayload, redactedEvent);
-        const eventVector = await embed(redactedEvent.text);
-        await qdrantUpsert(dest, eventId, eventVector, eventPayload);
+          context: {
+            category: categoryForMemorySubtype("outcome_event") ?? "system",
+            domain: "software_engineering",
+            kind: "telemetry",
+            memory_subtype: "outcome_event",
+            layer: "memory_object",
+            target_fact_id: fact_id,
+            outcome,
+          },
+        });
+        if (!telemetryIgnored(eventInput, "outcome_event")) {
+          eventId = newId();
+          const eventPayload: Record<string, unknown> = {
+            content: redactedEvent.text,
+            category: categoryForMemorySubtype("outcome_event") ?? "system",
+            domain: "software_engineering",
+            kind: "telemetry",
+            memory_subtype: "outcome_event",
+            layer: "memory_object",
+            entities: [],
+            origin: feedbackOrigin,
+            confidence: 1.0,
+            importance: outcome === "wrong" || outcome === "misleading" ? 0.6 : 0.3,
+            content_hash: contentHash("outcome_event", `${fact_id}:${outcome}:${now}`),
+            target_fact_id: fact_id,
+            outcome,
+            created_at: now,
+            updated_at: now,
+          };
+          addRedactionPayload(eventPayload, redactedEvent);
+          const eventVector = await embed(redactedEvent.text);
+          await qdrantUpsert(dest, eventId, eventVector, eventPayload);
+        }
 
         return {
           content: [{ type: "text", text: JSON.stringify({
@@ -1960,7 +2060,7 @@ export function registerTools(mcp: McpServer): void {
             destination: dest.name,
             outcome,
             [counterField]: counterValue,
-            event_id: eventId,
+            ...(eventId ? { event_id: eventId } : { event_ignored: true }),
           }) }],
         };
       } catch (e) {
@@ -2000,7 +2100,7 @@ export function registerTools(mcp: McpServer): void {
       try {
         const normalizedEntities = (entities ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean);
         const redactedContent = redactStorageText(content);
-        const resolved = resolveDestOrError(memoryWriteRoutingInput({
+        const writeInput = memoryWriteRoutingInput({
           tool: "memory_session_summary",
           destination,
           content: redactedContent.text,
@@ -2016,7 +2116,11 @@ export function registerTools(mcp: McpServer): void {
             task_key,
             repo,
           },
-        }));
+        });
+        const ignored = ignoreWriteOrError(writeInput, "memory_session_summary");
+        if (ignored.error) return ignored.error;
+        if (ignored.match) return ignoredWriteResult("memory_session_summary", ignored.match);
+        const resolved = resolveDestOrError(writeInput);
         if (resolved.error) return resolved.error;
         const dest = resolved.dest;
         const summaryId = newId();
@@ -2104,7 +2208,7 @@ export function registerTools(mcp: McpServer): void {
       try {
         const normalizedEntities = entities.map((e) => e.trim().toLowerCase()).filter(Boolean);
         const redactedContent = redactStorageText(content);
-        const resolved = resolveDestOrError(memoryWriteRoutingInput({
+        const writeInput = memoryWriteRoutingInput({
           tool: "memory_distill",
           destination,
           content: redactedContent.text,
@@ -2119,7 +2223,11 @@ export function registerTools(mcp: McpServer): void {
             repo,
             supersedes,
           },
-        }));
+        });
+        const ignored = ignoreWriteOrError(writeInput, "memory_distill");
+        if (ignored.error) return ignored.error;
+        if (ignored.match) return ignoredWriteResult("memory_distill", ignored.match);
+        const resolved = resolveDestOrError(writeInput);
         if (resolved.error) return resolved.error;
         const dest = resolved.dest;
         const distilledId = newId();
@@ -2315,9 +2423,36 @@ export function registerTools(mcp: McpServer): void {
         const origPayload = point.payload;
         const redactedCorrected = redactStorageText(corrected_content);
 
+        const origCategory = normalizeCategory(origPayload?.category ?? DEFAULT_CATEGORY);
+        const origDomain = normalizeDomain(origPayload?.domain ?? DEFAULT_DOMAIN);
+        const origKind = normalizeKind(origPayload?.kind ?? "fact");
+        const correctedEntities = origPayload?.entities ?? [];
+        const writeInput = memoryWriteRoutingInput({
+          tool: "memory_review",
+          destination: dest.name,
+          content: redactedCorrected.text,
+          entities: correctedEntities,
+          metadata: origPayload?.metadata,
+          context: {
+            category: origCategory,
+            domain: origDomain,
+            kind: origKind,
+            memory_subtype: origPayload?.memory_subtype,
+            layer: origPayload?.layer,
+            episode_id: origPayload?.episode_id,
+            workstream_key: origPayload?.workstream_key,
+            task_key: origPayload?.task_key,
+            repo: origPayload?.repo,
+            branch: origPayload?.branch,
+            corrected_from: fact_id,
+          },
+        });
+        const ignored = ignoreWriteOrError(writeInput, "memory_review");
+        if (ignored.error) return ignored.error;
+        if (ignored.match) return ignoredWriteResult("memory_review", ignored.match);
+
         const vector = await embed(redactedCorrected.text);
         const correctedId = crypto.randomUUID();
-        const origCategory = normalizeCategory(origPayload?.category ?? DEFAULT_CATEGORY);
         const hash = contentHash(origCategory, redactedCorrected.text);
         const correctOrigin = mcpOrigin({
           action: "correct",
@@ -2327,8 +2462,8 @@ export function registerTools(mcp: McpServer): void {
         const correctedPayload: Record<string, unknown> = {
           content: redactedCorrected.text,
           category: origCategory,
-          domain: normalizeDomain(origPayload?.domain ?? DEFAULT_DOMAIN),
-          kind: normalizeKind(origPayload?.kind ?? "fact"),
+          domain: origDomain,
+          kind: origKind,
           ...(origPayload?.memory_subtype ? { memory_subtype: origPayload.memory_subtype } : {}),
           ...(origPayload?.layer ? { layer: origPayload.layer } : {}),
           ...(origPayload?.episode_id ? { episode_id: origPayload.episode_id } : {}),
@@ -2336,7 +2471,7 @@ export function registerTools(mcp: McpServer): void {
           ...(origPayload?.task_key ? { task_key: origPayload.task_key } : {}),
           ...(origPayload?.repo ? { repo: origPayload.repo } : {}),
           ...(origPayload?.branch ? { branch: origPayload.branch } : {}),
-          entities: origPayload?.entities ?? [],
+          entities: correctedEntities,
           origin: correctOrigin,
           confidence: 0.95,
           importance: origPayload?.importance ?? 0.5,

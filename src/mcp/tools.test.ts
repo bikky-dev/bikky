@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { DestinationMatch } from "../config.js";
+import type { DestinationMatch, IgnoreRule } from "../config.js";
 
 const TEST_BIKKY_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "bikky-mcp-tools-"));
 process.env.BIKKY_HOME = TEST_BIKKY_HOME;
@@ -51,7 +51,7 @@ function destinationList(value: "routed" | "all" | string[]): string {
   return Array.isArray(value) ? value.join(",") : value;
 }
 
-function configureDestinations(): void {
+function configureDestinations(ignore: IgnoreRule[] = []): void {
   saveConfig({
     ...CONFIG_DEFAULTS,
     embedding: {
@@ -68,6 +68,7 @@ function configureDestinations(): void {
       timeout_ms: 100,
       retries: 0,
     },
+    ignore,
     destinations: [
       {
         name: "perso",
@@ -102,7 +103,7 @@ function configureDestinations(): void {
   rebuildPool();
 }
 
-function configureWorkDefaultDestinations(persoMatch: DestinationMatch): void {
+function configureWorkDefaultDestinations(persoMatch: DestinationMatch, ignore: IgnoreRule[] = []): void {
   saveConfig({
     ...CONFIG_DEFAULTS,
     embedding: {
@@ -119,6 +120,7 @@ function configureWorkDefaultDestinations(persoMatch: DestinationMatch): void {
       timeout_ms: 100,
       retries: 0,
     },
+    ignore,
     destinations: [
       {
         name: "perso",
@@ -413,6 +415,47 @@ describe("mcp/tools", () => {
     assert.equal(upsert.destination, "work");
   });
 
+  it("ignores memory_store before explicit destination overrides or storage calls", async () => {
+    configureDestinations([
+      { name: "private-topics", match: { content: ["\\b[Rr]esume\\b"], entity: ["^[Rr]esume$"] } },
+    ]);
+    const calls = installStorageMock();
+    const handlers = collectTools();
+
+    const result = await handlers.get("memory_store")!({
+      content: "Resume drafting notes should not be stored.",
+      category: "engineering",
+      entities: ["resume"],
+      destination: "work",
+    });
+
+    const body = parseToolJson(result);
+    assert.equal(body.action, "ignored");
+    assert.equal(body.rule, "private-topics");
+    assert.equal(calls.length, 0);
+  });
+
+  it("ignores summary and distilled writes before upsert", async () => {
+    configureDestinations([
+      { name: "private-topics", match: { content: ["garden|eggs"] } },
+    ]);
+    const calls = installStorageMock();
+    const handlers = collectTools();
+
+    const summary = await handlers.get("memory_session_summary")!({
+      content: "Garden planning notes should not be stored.",
+      entities: ["garden"],
+    });
+    const distilled = await handlers.get("memory_distill")!({
+      content: "Eggs inventory belongs outside memory.",
+      entities: ["eggs"],
+    });
+
+    assert.equal(parseToolJson(summary).action, "ignored");
+    assert.equal(parseToolJson(distilled).action, "ignored");
+    assert.equal(calls.length, 0);
+  });
+
   it("routes summary and distilled writes by repo from the full memory context", async () => {
     configureWorkDefaultDestinations({ metadata: { repo: ["^bikky-dev/bikky$"] } });
     const calls = installStorageMock();
@@ -583,6 +626,39 @@ describe("mcp/tools", () => {
     assert.equal((payloadUpdate.body?.payload as Record<string, unknown>).verification_count, 5);
   });
 
+  it("ignores memory_review corrections before embedding, upsert, or supersede", async () => {
+    configureDestinations([
+      { name: "private-corrections", match: { content: ["private correction"] } },
+    ]);
+    const calls = installStorageMock({
+      pointsByDestination: {
+        work: {
+          "work-fact": point("work-fact", {
+            content: "Old work fact",
+            category: "engineering",
+            entities: ["work"],
+            metadata: { repo: "work/repo" },
+          }),
+        },
+      },
+    });
+    const handlers = collectTools();
+
+    const result = await handlers.get("memory_review")!({
+      action: "correct",
+      fact_id: "work-fact",
+      corrected_content: "private correction should not persist",
+    });
+
+    const body = parseToolJson(result);
+    assert.equal(body.action, "ignored");
+    assert.equal(body.rule, "private-corrections");
+    assert.ok(calls.some((call) => call.method === "POST" && call.url.endsWith("/points")));
+    assert.ok(!calls.some((call) => call.url === "http://embed.test/v1/embeddings"));
+    assert.ok(!calls.some((call) => call.method === "PUT" && call.url.endsWith("/points")));
+    assert.ok(!calls.some((call) => call.method === "POST" && call.url.endsWith("/points/payload")));
+  });
+
   it("writes recall telemetry and updates recall counters in the result destination", async () => {
     const calls = installStorageMock({
       searchResults: [
@@ -619,6 +695,31 @@ describe("mcp/tools", () => {
     assert.deepEqual(payload?.returned_fact_ids, ["work-fact"]);
     assert.equal(payload?.result_count, 1);
     assert.equal(payload?.search_scope, "work");
+  });
+
+  it("ignores recall telemetry writes that match ignore rules", async () => {
+    configureDestinations([
+      { name: "private-query", match: { content: ["secret-query"] } },
+    ]);
+    const calls = installStorageMock({
+      searchResultsByDestination: {
+        work: [
+          point("work-fact", {
+            content: "Work fact",
+            entities: ["work"],
+          }),
+        ],
+      },
+    });
+    const handlers = collectTools();
+
+    await handlers.get("memory_recall")!({
+      query: "secret-query",
+      search_scope: "work",
+    });
+
+    assert.ok(calls.some((call) => call.method === "POST" && call.url.endsWith("/points/search")));
+    assert.ok(!calls.some((call) => call.method === "PUT" && call.url.endsWith("/points")));
   });
 
   it("writes recall telemetry and counters separately for each result destination", async () => {
@@ -711,6 +812,34 @@ describe("mcp/tools", () => {
     assert.equal(payload.target_fact_id, "work-fact");
   });
 
+  it("ignores feedback telemetry while still updating the source fact", async () => {
+    configureDestinations([
+      { name: "private-feedback", match: { content: ["private-note"] } },
+    ]);
+    const calls = installStorageMock({
+      pointsByDestination: {
+        work: {
+          "work-fact": point("work-fact", { useful_count: 1 }),
+        },
+      },
+    });
+    const handlers = collectTools();
+
+    const result = await handlers.get("memory_mark_useful")!({
+      fact_id: "work-fact",
+      note: "private-note",
+    });
+
+    const body = parseToolJson(result);
+    assert.equal(body.status, "marked_useful");
+    assert.equal(body.event_ignored, true);
+
+    const payloadUpdate = calls.find((call) => call.method === "POST" && call.url.endsWith("/points/payload"));
+    assert.ok(payloadUpdate);
+    assert.equal((payloadUpdate.body?.payload as Record<string, unknown>).useful_count, 2);
+    assert.ok(!calls.some((call) => call.method === "PUT" && call.url.endsWith("/points")));
+  });
+
   it("writes outcome telemetry in the same destination as the source fact", async () => {
     const calls = installStorageMock({
       pointsByDestination: {
@@ -745,6 +874,36 @@ describe("mcp/tools", () => {
     assert.equal(payload.memory_subtype, "outcome_event");
     assert.equal(payload.target_fact_id, "work-fact");
     assert.equal(payload.outcome, "misleading");
+  });
+
+  it("ignores outcome telemetry while still updating the source fact", async () => {
+    configureDestinations([
+      { name: "private-outcome", match: { content: ["sensitive outcome"] } },
+    ]);
+    const calls = installStorageMock({
+      pointsByDestination: {
+        work: {
+          "work-fact": point("work-fact", { misleading_count: 1 }),
+        },
+      },
+    });
+    const handlers = collectTools();
+
+    const result = await handlers.get("memory_report_outcome")!({
+      fact_id: "work-fact",
+      outcome: "misleading",
+      notes: "sensitive outcome",
+    });
+
+    const body = parseToolJson(result);
+    assert.equal(body.status, "outcome_recorded");
+    assert.equal(body.event_ignored, true);
+    assert.equal(body.misleading_count, 2);
+
+    const payloadUpdate = calls.find((call) => call.method === "POST" && call.url.endsWith("/points/payload"));
+    assert.ok(payloadUpdate);
+    assert.equal((payloadUpdate.body?.payload as Record<string, unknown>).misleading_count, 2);
+    assert.ok(!calls.some((call) => call.method === "PUT" && call.url.endsWith("/points")));
   });
 
   for (const { outcome, field } of [

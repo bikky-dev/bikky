@@ -551,6 +551,11 @@ const storeFacts = async (
     try {
       const dedup = await qdrant.dedupCheck(sanitizedFact.content, hash, undefined, undefined, routeInput);
 
+      if (dedup.action === "ignore") {
+        logFn("DEBUG", `Extraction: ignoring fact due to config rule '${dedup.ignoreRule ?? "unknown"}': "${sanitizedFact.content.slice(0, 80)}…"`);
+        continue;
+      }
+
       if (dedup.action === "skip") {
         // Reinforce existing fact
         if (dedup.existingId) {
@@ -722,6 +727,7 @@ const storeFacts = async (
 
       if (dedup.action === "supersede" && dedup.existingId) {
         const newId = await qdrant.storeFact(storePayload, routeInput);
+        if (!newId) continue;
         await qdrant.supersedeFact(dedup.existingId, newId, dedup.destination, buildOperationOrigin({
           interface: "daemon",
           action: "supersede",
@@ -735,8 +741,8 @@ const storeFacts = async (
         }));
         stored++;
       } else {
-        await qdrant.storeFact(storePayload, routeInput);
-        stored++;
+        const newId = await qdrant.storeFact(storePayload, routeInput);
+        if (newId) stored++;
       }
     } catch (e) {
       logFn("WARN", `Extraction: failed to store fact: ${(e as Error).message}`);

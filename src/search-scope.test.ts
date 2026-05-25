@@ -16,6 +16,7 @@ const cfg = (extra: Partial<BikkyConfig> = {}): BikkyConfig => ({
   qdrant_api_key: null,
   collection: "bikky",
   destinations: [],
+  ignore: [],
   default_search_scope: "routed",
   search_scopes: [],
   aws_profile: null,
