@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   build-test-core:
@@ -32,8 +33,9 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
 
       - run: npm ci
 
@@ -101,8 +103,6 @@ jobs:
           echo "Publishing bikky@${PKG_VERSION}"
 
       - run: npm publish --access public --ignore-scripts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-ui:
     needs: build-test-ui
@@ -115,8 +115,9 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
 
       - uses: actions/download-artifact@v8
         with:
@@ -136,5 +137,3 @@ jobs:
       - name: Publish bikky-ui
         working-directory: packages/ui
         run: npm publish --access public --ignore-scripts
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
