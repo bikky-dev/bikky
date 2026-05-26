@@ -190,11 +190,11 @@ Most installs use one Qdrant destination. If you need clean separation later, re
   "default_search_scope": "routed",
   "ignore": [
     {
-      "name": "personal-topics",
-      "description": "Never persist personal-topic memories.",
+      "name": "do-not-store",
+      "description": "Never persist memories explicitly marked do-not-store.",
       "match": {
-        "entity": ["^[Rr]esume$"],
-        "content": ["\\b[Rr]esume\\b"]
+        "entity": ["^do-not-store$"],
+        "content": ["\\bdo-not-store\\b"]
       }
     }
   ]
