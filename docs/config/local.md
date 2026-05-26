@@ -26,6 +26,49 @@ That's the whole config. bikky uses local Ollama defaults for embeddings and bac
 
 `qdrant_api_key` is optional. Leave it empty or omit it for local or unauthenticated self-hosted Qdrant.
 
+## Optional: add destinations and ignore rules
+
+If you need separate stores for teams, clients, or environments, replace the top-level `qdrant_url` / `qdrant_api_key` fields with `destinations[]`. If some topics should never be persisted, add top-level `ignore[]` rules:
+
+```jsonc
+{
+  "destinations": [
+    {
+      "name": "local-default",
+      "description": "Default local memory.",
+      "qdrant_url": "http://localhost:6333",
+      "qdrant_api_key": "",
+      "collection": "bikky-default",
+      "default": true
+    },
+    {
+      "name": "client-a",
+      "description": "Client A memory.",
+      "qdrant_url": "http://localhost:6333",
+      "qdrant_api_key": "",
+      "collection": "bikky-client-a",
+      "match": {
+        "cwd": ["^/Users/me/code/client-a"],
+        "content": ["CLIENTA-\\d+"]
+      }
+    }
+  ],
+  "default_search_scope": "routed",
+  "ignore": [
+    {
+      "name": "personal-topics",
+      "description": "Never persist personal-topic memories.",
+      "match": {
+        "entity": ["^[Rr]esume$"],
+        "content": ["\\b[Rr]esume\\b"]
+      }
+    }
+  ]
+}
+```
+
+See [multi-destination routing](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md#multi-destination-routing) and [ignore rules](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md#ignore-rules) for matching details.
+
 ## Check it
 
 ```bash

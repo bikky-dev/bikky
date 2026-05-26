@@ -26,7 +26,8 @@ bikky gives your agent memory tools and runs a small background service after `b
 - **Recall** — New sessions can recall from the same store via semantic search.
 - **Curate** — bikky merges duplicates, fades stale facts, resolves contradictions, distills recurring patterns, and builds an entity graph over time.
 - **Compound** — Later sessions can start with more context because memory accumulates.
-- **Route** — Optionally keep team, client, or environment-specific memory in separate Qdrant destinations from one install. See [separate memory stores](#optional-separate-memory-stores).
+- **Route** — Optionally keep team, client, or environment-specific memory in separate Qdrant destinations from one install. See [routing and ignore rules](#optional-routing-and-ignore-rules).
+- **Protect** — Configurable `ignore` rules prevent matching topics from being stored at all, using the same filters as destination routing.
 
 Subtypes keep recall precise without making setup harder:
 
@@ -151,7 +152,7 @@ Config lives at `~/.bikky/config.json`, or at `BIKKY_HOME/config.json` when `BIK
 
 `bikky setup` also provisions `identity.user_id` / `identity.user_name` when they are missing. New memory writes store canonical `origin` metadata with the configured human user, the acting agent or daemon/UI surface, the interface, and the operation. MCP clients cannot supply or spoof `origin.user`; if config, env, Git, and shell identity detection all fail, bikky falls back to the local hostname.
 
-For hosted models, custom providers, multiple profiles, or advanced tuning, use the full configuration guide.
+For hosted models, custom providers, multiple destinations, ignore rules, or advanced tuning, use the full configuration guide.
 
 > 📖 **Full configuration guide:** [docs/configuration.md][configuration-guide]
 >
@@ -159,9 +160,9 @@ For hosted models, custom providers, multiple profiles, or advanced tuning, use 
 >
 > 🛠 Want to add a new embedding or LLM provider (Vertex, OpenRouter, etc.)? See **[CONTRIBUTING.md][contributing]** — it's a single-file change.
 
-#### Optional: separate memory stores
+#### Optional: routing and ignore rules
 
-Most installs use one Qdrant destination. If you need clean separation later, replace the single `qdrant_url` / `collection` fields with named `destinations[]`:
+Most installs use one Qdrant destination. If you need clean separation later, replace the single `qdrant_url` / `collection` fields with named `destinations[]`. Add top-level `ignore[]` rules for topics that should not be stored anywhere:
 
 ```jsonc
 {
@@ -179,16 +180,30 @@ Most installs use one Qdrant destination. If you need clean separation later, re
       "description": "Client A project memory.",
       "qdrant_url": "https://client-a.cloud.qdrant.io:6333",
       "qdrant_api_key": "...",
-      "collection": "bikky-client-a"
+      "collection": "bikky-client-a",
+      "match": {
+        "cwd": ["^/Users/me/code/client-a"],
+        "content": ["CLIENTA-\\d+"]
+      }
     }
   ],
-  "default_search_scope": "routed"
+  "default_search_scope": "routed",
+  "ignore": [
+    {
+      "name": "personal-topics",
+      "description": "Never persist personal-topic memories.",
+      "match": {
+        "entity": ["^[Rr]esume$"],
+        "content": ["\\b[Rr]esume\\b"]
+      }
+    }
+  ]
 }
 ```
 
-That is enough for explicit selection in the UI and tools. Add routing rules only when you want automatic placement by cwd, entity, content, or metadata. Search tools can also use `search_scope: "all"` or a named/listed scope when context may span stores. Existing single-Qdrant configs continue to work.
+That is enough for explicit selection in the UI and tools. Add routing rules only when you want automatic placement by cwd, entity, content, or metadata. Search tools can also use `search_scope: "all"` or a named/listed scope when context may span stores. Ignore rules run before destination selection and cannot be bypassed by explicit destination overrides. Existing single-Qdrant configs continue to work.
 
-> 📖 **Details:** [multi-destination configuration](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md#multi-destination-routing)
+> 📖 **Details:** [multi-destination configuration](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md#multi-destination-routing) and [ignore rules](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md#ignore-rules)
 
 [fully-hosted-config]: https://github.com/bikky-dev/bikky/blob/main/docs/config/fully-hosted.md
 [hosted-models-config]: https://github.com/bikky-dev/bikky/blob/main/docs/config/hosted-models.md

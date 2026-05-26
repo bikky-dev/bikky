@@ -40,6 +40,49 @@ bikky uses **1024-dimensional embeddings** as the canonical default. This is por
 
 `qdrant_api_key` is optional only for unauthenticated self-hosted Qdrant. Qdrant Cloud usually requires it.
 
+## Optional: add destinations and ignore rules
+
+If you need separate stores for teams, clients, or environments, replace the top-level `qdrant_url` / `qdrant_api_key` fields with `destinations[]`. If some topics should never be persisted, add top-level `ignore[]` rules. You can merge this shape into either config above:
+
+```jsonc
+{
+  "destinations": [
+    {
+      "name": "team",
+      "description": "Default team memory.",
+      "qdrant_url": "https://team.cloud.qdrant.io:6333",
+      "qdrant_api_key": "...",
+      "collection": "bikky-team",
+      "default": true
+    },
+    {
+      "name": "client-a",
+      "description": "Client A memory.",
+      "qdrant_url": "https://client-a.cloud.qdrant.io:6333",
+      "qdrant_api_key": "...",
+      "collection": "bikky-client-a",
+      "match": {
+        "cwd": ["^/Users/me/code/client-a"],
+        "content": ["CLIENTA-\\d+"]
+      }
+    }
+  ],
+  "default_search_scope": "routed",
+  "ignore": [
+    {
+      "name": "personal-topics",
+      "description": "Never persist personal-topic memories.",
+      "match": {
+        "entity": ["^[Rr]esume$"],
+        "content": ["\\b[Rr]esume\\b"]
+      }
+    }
+  ]
+}
+```
+
+See [multi-destination routing](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md#multi-destination-routing) and [ignore rules](https://github.com/bikky-dev/bikky/blob/main/docs/configuration.md#ignore-rules) for matching details.
+
 ## Alternative: OpenAI directly
 
 ```json
