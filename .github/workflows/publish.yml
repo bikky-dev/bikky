@@ -85,8 +85,15 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Use npm with OIDC support
+        run: |
+          npm install -g npm@latest
+          node --version
+          npm --version
 
       - uses: actions/download-artifact@v8
         with:
@@ -118,6 +125,12 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
+
+      - name: Use npm with OIDC support
+        run: |
+          npm install -g npm@latest
+          node --version
+          npm --version
 
       - uses: actions/download-artifact@v8
         with:
