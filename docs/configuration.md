@@ -372,12 +372,12 @@ Ignore rules run before destination resolution, embedding, deduplication, supers
 {
   "ignore": [
     {
-      "name": "personal-topics",
-      "description": "Do not persist personal-topic memories.",
+      "name": "do-not-store",
+      "description": "Do not persist memories explicitly marked do-not-store.",
       "match": {
-        "entity": ["^[Rr]esume$"],
-        "content": ["\\b[Rr]esume\\b"],
-        "metadata": { "repo": ["^private/"] }
+        "entity": ["^do-not-store$"],
+        "content": ["\\bdo-not-store\\b"],
+        "metadata": { "classification": ["^ephemeral$"] }
       }
     }
   ]
@@ -391,7 +391,7 @@ When an MCP write tool is ignored, it returns a structured non-error response su
   "action": "ignored",
   "status": "ignored",
   "ignored": true,
-  "rule": "personal-topics"
+  "rule": "do-not-store"
 }
 ```
 

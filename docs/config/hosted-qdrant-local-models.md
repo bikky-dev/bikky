@@ -55,11 +55,11 @@ If you need separate stores for teams, clients, or environments, replace the top
   "default_search_scope": "routed",
   "ignore": [
     {
-      "name": "personal-topics",
-      "description": "Never persist personal-topic memories.",
+      "name": "do-not-store",
+      "description": "Never persist memories explicitly marked do-not-store.",
       "match": {
-        "entity": ["^[Rr]esume$"],
-        "content": ["\\b[Rr]esume\\b"]
+        "entity": ["^do-not-store$"],
+        "content": ["\\bdo-not-store\\b"]
       }
     }
   ]
