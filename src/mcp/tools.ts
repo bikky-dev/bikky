@@ -78,6 +78,7 @@ import {
   redactStorageText,
 } from "../privacy/redaction.js";
 import { buildMemoryRoutingInput } from "../routing-context.js";
+import { pauseSession, resumeSession } from "../paused-sessions.js";
 
 // ---------------------------------------------------------------------------
 // Runtime state
@@ -89,6 +90,8 @@ const MEMORY_RECALL_MAX_LIMIT = 50;
 const searchScopeSchema = z.union([z.string(), z.array(z.string())]).optional();
 let lastStoreTime = Date.now();
 let heartbeatCount = 0;
+let sessionPaused = false;
+let sessionPauseReason: string | null = null;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -471,6 +474,22 @@ function requireReady(): McpToolResult | null {
             "2. Create a cluster → copy the REST URL and API key\n" +
             "3. Call configure_credentials with Qdrant values",
           next_step: "Call get_setup_status for detailed status, or configure_credentials to set up.",
+        }, null, 2),
+      }],
+    };
+  }
+  return null;
+}
+
+function requireNotPaused(): McpToolResult | null {
+  if (sessionPaused) {
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          status: "session_paused",
+          reason: sessionPauseReason ?? "User requested no memory writes for this session.",
+          hint: "Call memory_resume to re-enable memory writes.",
         }, null, 2),
       }],
     };
@@ -929,6 +948,8 @@ export function registerTools(mcp: McpServer): void {
     }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
+      const pauseGuard = requireNotPaused();
+      if (pauseGuard) return pauseGuard;
       lastStoreTime = Date.now();
       const now = nowISO();
       const normalizedKind = normalizeKind(kind);
@@ -1781,6 +1802,8 @@ export function registerTools(mcp: McpServer): void {
     async ({ fact_id, reason, workspace_id: _workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
+      const pauseGuard = requireNotPaused();
+      if (pauseGuard) return pauseGuard;
       const now = nowISO();
       try {
         const located = await locatePoint(fact_id);
@@ -1833,6 +1856,8 @@ export function registerTools(mcp: McpServer): void {
     async ({ fact_id, workspace_id: _workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
+      const pauseGuard = requireNotPaused();
+      if (pauseGuard) return pauseGuard;
       const now = nowISO();
       try {
         const located = await locatePoint(fact_id);
@@ -1885,6 +1910,8 @@ export function registerTools(mcp: McpServer): void {
     async ({ fact_id, note, workspace_id: _workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
+      const pauseGuard = requireNotPaused();
+      if (pauseGuard) return pauseGuard;
       const now = nowISO();
       try {
         const located = await locatePoint(fact_id);
@@ -1991,6 +2018,8 @@ export function registerTools(mcp: McpServer): void {
     async ({ fact_id, outcome, notes, workspace_id: _workspace_id }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
+      const pauseGuard = requireNotPaused();
+      if (pauseGuard) return pauseGuard;
       const now = nowISO();
       try {
         const located = await locatePoint(fact_id);
@@ -2095,6 +2124,8 @@ export function registerTools(mcp: McpServer): void {
     async ({ content, entities, episode_id, workstream_key, task_key, repo, workspace_id: _workspace_id, destination }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
+      const pauseGuard = requireNotPaused();
+      if (pauseGuard) return pauseGuard;
       lastStoreTime = Date.now();
       const now = nowISO();
       try {
@@ -2203,6 +2234,8 @@ export function registerTools(mcp: McpServer): void {
     async ({ content, entities, supersedes, task_key, repo, workspace_id: _workspace_id, destination }): Promise<McpToolResult> => {
       const guard = requireReady();
       if (guard) return guard;
+      const pauseGuard = requireNotPaused();
+      if (pauseGuard) return pauseGuard;
       lastStoreTime = Date.now();
       const now = nowISO();
       try {
@@ -2364,6 +2397,10 @@ export function registerTools(mcp: McpServer): void {
         return { content: [{ type: "text", text: "Error: fact_id is required for approve/reject/correct actions." }] };
       }
 
+      // Write actions require session not paused
+      const pauseGuard = requireNotPaused();
+      if (pauseGuard) return pauseGuard;
+
       const now = nowISO();
 
       if (action === "approve") {
@@ -2506,6 +2543,97 @@ export function registerTools(mcp: McpServer): void {
     },
   );
 
+  // ── memory_pause ─────────────────────────────────────────────────────────
+
+  mcp.tool(
+    "memory_pause",
+    [
+      "Pause all memory writes for the current session. While paused, memory_store, memory_session_summary, memory_distill, memory_verify, memory_forget, memory_mark_useful, memory_report_outcome, and memory_review (write actions) will return a session_paused status instead of executing.",
+      "Read operations (memory_recall, memory_entity, memory_relations, memory_heartbeat) remain fully functional.",
+      "Use when the user says something like 'do not remember anything from this session' or 'pause memory'. Call memory_resume to re-enable writes.",
+    ].join(" "),
+    {
+      reason: z.string().optional().describe(
+        "Optional reason for pausing (e.g. 'user requested private session'). Included in the paused status response.",
+      ),
+      session_id: z.string().optional().describe(
+        "The session UUID (e.g. from the session folder path). When provided, also signals the daemon to skip extraction for this session. " +
+        "For Copilot sessions, pass the UUID from ~/.copilot/session-state/<UUID>/. Format: just the UUID, the 'uuid:' prefix is added automatically.",
+      ),
+    },
+    async ({ reason, session_id }): Promise<McpToolResult> => {
+      sessionPaused = true;
+      sessionPauseReason = reason ?? "User requested no memory writes for this session.";
+      log("INFO", `Memory writes paused: ${sessionPauseReason}`);
+
+      let daemonPaused = false;
+      if (session_id) {
+        const key = session_id.includes(":") ? session_id : `uuid:${session_id}`;
+        pauseSession(key, sessionPauseReason);
+        daemonPaused = true;
+        log("INFO", `Daemon extraction paused for session: ${key}`);
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            status: "paused",
+            reason: sessionPauseReason,
+            daemon_paused: daemonPaused,
+            hint: daemonPaused
+              ? "All memory writes blocked (MCP + daemon extraction). Reads still work. Call memory_resume to re-enable."
+              : "MCP memory writes blocked. Daemon extraction NOT paused (no session_id provided). Reads still work. Call memory_resume to re-enable.",
+          }, null, 2),
+        }],
+      };
+    },
+  );
+
+  // ── memory_resume ────────────────────────────────────────────────────────
+
+  mcp.tool(
+    "memory_resume",
+    [
+      "Resume memory writes after a previous memory_pause. All write operations will function normally again.",
+      "No-op if memory is not currently paused.",
+    ].join(" "),
+    {
+      session_id: z.string().optional().describe(
+        "The session UUID passed to memory_pause. Required to also resume daemon extraction. Same format as memory_pause.",
+      ),
+    },
+    async ({ session_id }): Promise<McpToolResult> => {
+      const wasPaused = sessionPaused;
+      sessionPaused = false;
+      sessionPauseReason = null;
+      log("INFO", "Memory writes resumed");
+
+      let daemonResumed = false;
+      if (session_id) {
+        const key = session_id.includes(":") ? session_id : `uuid:${session_id}`;
+        daemonResumed = resumeSession(key);
+        if (daemonResumed) {
+          log("INFO", `Daemon extraction resumed for session: ${key}`);
+        }
+      }
+
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            status: "resumed",
+            was_paused: wasPaused,
+            daemon_resumed: daemonResumed,
+            hint: wasPaused
+              ? "Memory writes are now re-enabled. All store/verify/forget operations will work normally."
+              : "Memory was not paused — no change needed.",
+          }, null, 2),
+        }],
+      };
+    },
+  );
+
   // ── memory_heartbeat ────────────────────────────────────────────────────
 
   mcp.tool(
@@ -2519,8 +2647,12 @@ export function registerTools(mcp: McpServer): void {
       heartbeatCount++;
       const sections: string[] = [];
 
+      if (sessionPaused) {
+        sections.push(`⏸️ Memory writes are **paused** for this session (reason: ${sessionPauseReason ?? "user request"}). Call memory_resume to re-enable.`);
+      }
+
       const nudge = buildMemoryNudge();
-      if (nudge) sections.push(nudge);
+      if (nudge && !sessionPaused) sections.push(nudge);
 
       if (heartbeatCount % 3 === 0 && ready) {
         try {
@@ -2563,13 +2695,15 @@ export function registerTools(mcp: McpServer): void {
         }
       }
 
-      sections.push(
-        "🔍 Reflect: think about the LAST 10 minutes of work and answer in your head:\n" +
-        "  1. Did you touch engineering context: code, infra, ops, access, troubleshooting, conventions, preferences, ownership, working agreements, or durable activity events?\n" +
-        "  2. Did you capture product context: a requirement, decision, workflow, roadmap item, metric, or market insight?\n" +
-        "  3. Did the work produce system context: session, episode, workstream, recall, feedback, outcome, or rollup state?\n" +
-        "If any answer is yes, call memory_store now — one atomic fact per item, with category/domain/entities.",
-      );
+      if (!sessionPaused) {
+        sections.push(
+          "🔍 Reflect: think about the LAST 10 minutes of work and answer in your head:\n" +
+          "  1. Did you touch engineering context: code, infra, ops, access, troubleshooting, conventions, preferences, ownership, working agreements, or durable activity events?\n" +
+          "  2. Did you capture product context: a requirement, decision, workflow, roadmap item, metric, or market insight?\n" +
+          "  3. Did the work produce system context: session, episode, workstream, recall, feedback, outcome, or rollup state?\n" +
+          "If any answer is yes, call memory_store now — one atomic fact per item, with category/domain/entities.",
+        );
+      }
 
       return { content: [{ type: "text", text: sections.join("\n\n") }] };
     },

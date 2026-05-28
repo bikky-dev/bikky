@@ -135,7 +135,9 @@ After changing Qdrant or provider settings, restart long-running processes:
 bikky stop && bikky start
 ```
 
-Then restart your editor so its MCP server process reloads the config.
+Then reload the MCP server from your client: in GitHub Copilot CLI, run `/restart`; in Claude Code, restart Claude Code and run `claude --continue` or `claude -c` to resume. For other stdio MCP clients, use their MCP reload/restart action if available; otherwise restart the client session.
+
+When you run `bikky setup`, bikky detects running `bikky mcp` server processes and prints this guidance. It does not terminate client-owned MCP processes because stdio MCP clients must relaunch their own server subprocesses.
 
 ## Environment variables
 

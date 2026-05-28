@@ -8,7 +8,7 @@
 async function postinstall(): Promise<void> {
   try {
     const { startAll } = await import("./lifecycle.js");
-    await startAll();
+    await startAll({ reportMcpServers: false });
   } catch {
     // Silent — don't break npm install
   }

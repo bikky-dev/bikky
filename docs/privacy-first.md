@@ -105,7 +105,7 @@ If you change providers, watcher settings, or `daemon.extract_every_sec`, restar
 bikky stop && bikky start
 ```
 
-Restart your editor after setup so its MCP server process reloads the config.
+Reload the MCP server from your client: in GitHub Copilot CLI, run `/restart`; in Claude Code, restart Claude Code and run `claude --continue` or `claude -c` to resume. For other stdio MCP clients, use their MCP reload/restart action if available; otherwise restart the client session.
 
 ## What can leave your machine
 
@@ -138,3 +138,15 @@ Then restart bikky:
 ```bash
 bikky stop && bikky start
 ```
+
+## Per-session opt-out
+
+For temporary privacy without changing config, use the `memory_pause` MCP tool during a session:
+
+```
+memory_pause({ reason: "sensitive discussion", session_id: "<UUID>" })
+```
+
+This blocks all memory writes (MCP and daemon extraction) for that session only. Other sessions continue normally. Call `memory_resume` when you're ready to re-enable writes.
+
+See the [README § Per-session pause](../README.md#per-session-pause) for details on the `session_id` parameter.

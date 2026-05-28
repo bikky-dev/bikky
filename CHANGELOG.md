@@ -11,6 +11,7 @@ This project uses npm package versions for release tracking:
 
 ## 0.4.6
 
+- Added `memory_pause` and `memory_resume` MCP tools for per-session memory opt-out. When paused, all write operations return a `session_paused` status; reads remain functional. Pass `session_id` to also pause daemon transcript extraction for that session via `~/.bikky/state/paused-sessions.json`.
 - Added configurable `ignore` rules for memory writes using the same `cwd`, `entity`, `content`, and `metadata` filters as destination routing.
 - Applied ignore checks before MCP writes, daemon writes, relation sidecars, superseding, telemetry upserts, embedding, deduplication, and Qdrant persistence.
 - Documented ignore configuration and added regression coverage for config validation, routing precedence, MCP write paths, daemon writes, telemetry, and local MCP E2E behavior.

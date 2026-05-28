@@ -166,5 +166,5 @@ export async function writeInstallConfig(options: InstallOptions = {}): Promise<
     provisionUserIdentityConfig(options);
   }
 
-  console.log("\n🧠 bikky is now registered. Restart your editor to activate.");
+  console.log("\n🧠 bikky is now registered.");
 }

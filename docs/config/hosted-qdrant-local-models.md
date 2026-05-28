@@ -80,4 +80,4 @@ After changing Qdrant settings, restart long-running processes:
 bikky stop && bikky start
 ```
 
-Then restart your editor so its MCP process reloads.
+Then reload the MCP server from your client: in GitHub Copilot CLI, run `/restart`; in Claude Code, restart Claude Code and run `claude --continue` or `claude -c` to resume. For other stdio MCP clients, use their MCP reload/restart action if available; otherwise restart the client session.
