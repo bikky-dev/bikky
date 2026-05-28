@@ -101,7 +101,13 @@ bikky setup            # writes MCP config for GitHub Copilot + Claude Code, the
 
 `npm install -g bikky` runs a best-effort postinstall setup hook for convenience. It never fails the install, and you should still run `bikky setup` after writing your config to make setup explicit and repeatable.
 
-Restart your editor. The memory tools appear automatically in GitHub Copilot and Claude Code; configure other stdio MCP clients manually with `npx -y bikky mcp`.
+If setup finds running `bikky mcp` servers from older agent/editor sessions, it prints reload guidance but does not terminate them:
+
+- **GitHub Copilot CLI:** run `/restart` in the Copilot CLI session.
+- **Claude Code:** restart Claude Code, then run `claude --continue` or `claude -c` to resume.
+- **Other stdio MCP clients:** use their MCP reload/restart action if available; otherwise restart the client session.
+
+The memory tools appear automatically in GitHub Copilot and Claude Code; configure other stdio MCP clients manually with `npx -y bikky mcp`.
 
 ```bash
 bikky status           # confirms Qdrant, embeddings, daemon, and UI health
@@ -281,6 +287,23 @@ Only the configured daemon process reads these files. Extracted facts are redact
 ```
 
 You can also set `daemon.extract_every_sec` to `0` to disable background extraction while keeping MCP recall tools available.
+
+### Per-session pause
+
+If you want to prevent memory writes for a single session without changing global config, use the `memory_pause` MCP tool:
+
+```
+memory_pause({ reason: "private session", session_id: "<your-session-UUID>" })
+```
+
+While paused:
+- All MCP write tools (`memory_store`, `memory_session_summary`, `memory_distill`, `memory_verify`, `memory_forget`, etc.) return a `session_paused` status instead of executing.
+- Read tools (`memory_recall`, `memory_entity`, `memory_relations`, `memory_heartbeat`) continue to work normally.
+- When `session_id` is provided, the daemon also skips transcript extraction for that session.
+
+Call `memory_resume({ session_id: "<your-session-UUID>" })` to re-enable writes.
+
+The `session_id` is the UUID from your session folder (e.g. the directory name under `~/.copilot/session-state/`). If omitted, only the in-process MCP layer is paused — the daemon will continue extracting from transcripts.
 
 For a local-storage, local-model setup that minimizes what leaves your machine, see the [privacy-first quickstart][privacy-quickstart].
 

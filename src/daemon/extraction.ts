@@ -13,6 +13,7 @@ import { join } from "node:path";
 
 import { STATE_DIR, EXTRACTION_HEALTH_PATH } from "../config.js";
 import type { BikkyConfig } from "../config.js";
+import { isSessionPaused } from "../paused-sessions.js";
 import * as qdrant from "./qdrant.js";
 import { chatCompletion } from "../llm/index.js";
 import { detectContradiction } from "./consolidation.js";
@@ -908,6 +909,11 @@ const extractForMapping = async (
   const { uuid, eventsPath, source } = mapping;
   const stateKey = extractionStateKey(mapping);
   const label = transcriptLabel(mapping);
+
+  // Skip extraction if this session has been paused via memory_pause
+  if (isSessionPaused(stateKey)) {
+    return 0;
+  }
 
   let state = getExtractionState(stateKey);
   if (!state) {

@@ -57,6 +57,10 @@ export interface DaemonStatus {
   pid: number | null;
 }
 
+export interface StartAllOptions {
+  reportMcpServers?: boolean;
+}
+
 export function getDaemonStatus(): DaemonStatus {
   const pid = readPid();
   if (pid && isProcessAlive(pid)) {
@@ -119,12 +123,18 @@ export function killDaemon(): boolean {
 /**
  * Full startup sequence: install MCP configs + launch daemon.
  */
-export async function startAll(): Promise<void> {
+export async function startAll(options: StartAllOptions = {}): Promise<void> {
   // 1. Write MCP configs
   const { writeInstallConfig } = await import("./install.js");
   await writeInstallConfig();
 
-  // 2. Launch daemon
+  // 2. Warn about already-running client-owned MCP server processes.
+  if (options.reportMcpServers !== false) {
+    const { reportRunningBikkyMcpServers } = await import("./mcp-processes.js");
+    reportRunningBikkyMcpServers();
+  }
+
+  // 3. Launch daemon
   const status = getDaemonStatus();
   if (status.running) {
     console.log(`\n🟢 Daemon already running (PID ${status.pid})`);
@@ -138,5 +148,5 @@ export async function startAll(): Promise<void> {
   }
 
   console.log("\n✨ bikky is ready — daemon running, MCP configs installed.");
-  console.log("   Restart your editor to activate the MCP server.");
+  console.log("   GitHub Copilot CLI: run /restart. Claude Code: restart, then resume with claude --continue or claude -c.");
 }

@@ -75,4 +75,4 @@ See [multi-destination routing](https://github.com/bikky-dev/bikky/blob/main/doc
 bikky status
 ```
 
-If you started from a fresh install, run `bikky setup` after writing the config, then restart your editor so its MCP process reloads.
+If you started from a fresh install, run `bikky setup` after writing the config. Then reload the MCP server from your client: in GitHub Copilot CLI, run `/restart`; in Claude Code, restart Claude Code and run `claude --continue` or `claude -c` to resume. For other stdio MCP clients, use their MCP reload/restart action if available; otherwise restart the client session.
